@@ -87,7 +87,7 @@ def _bolt_summary(case: CcxCase, disp):
 
 def _stable(hist, nchg, nact) -> bool:
     """El conjunto activo sigue cambiando poco a poco pero las fuerzas de los pernos ya no varian (< 0.5 % dos iteraciones seguidas)."""
-    if len(hist) < 4 or nchg > 0.05 * nact:
+    if len(hist) < 4 or nchg > 0.10 * nact:
         return False
     (v1, t1), (v2, t2), (v3, t3) = hist[-3][2], hist[-2][2], hist[-1][2]
     def q(a, b, ab=0.03):
