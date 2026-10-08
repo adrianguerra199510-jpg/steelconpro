@@ -1298,8 +1298,8 @@ for _ct, _mod in _connpkg.modules():
         _case = _cg.CcxCase(_m, _mesh, {"plastic": True, "contacts": True})
         _inp = _case.write(str(_fold / "m.inp"))
         _txt = open(_inp, encoding="utf-8").read()
-        if "*RIGID BODY" not in _txt or "*CLOAD" not in _txt or "*BOUNDARY" not in _txt:
-            FAIL.append(f"FEM {_mod.PREFIX}: el .inp no tiene cuerpos rigidos, cargas o apoyos")
+        if "*EQUATION" not in _txt or "*CLOAD" not in _txt or "*BOUNDARY" not in _txt:
+            FAIL.append(f"FEM {_mod.PREFIX}: el .inp no tiene ecuaciones de cuerpo rigido, cargas o apoyos")
         if len(_case.meta["bolts"]) != len(_m.bolts) or len(_case.meta["welds"]) != len(_m.welds):
             FAIL.append(f"FEM {_mod.PREFIX}: pernos o cordones perdidos al armar el .inp")
         _mesh_info.append(f"{_mod.PREFIX} {len(_mesh.node_ids) // 1000}k")
