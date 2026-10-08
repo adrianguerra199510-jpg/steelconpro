@@ -33,7 +33,9 @@ CT_BASEPLATE = "Placa base de columna"
 CT_SHEAR_TAB = "Conexion de corte — placa simple (viga a viga / viga a columna)"
 CT_DOUBLE_ANGLE = "Conexion de corte — doble angulo (viga a viga / viga a columna)"
 CT_SEATED = "Conexion de asiento (seated) — angulo o rigidizado"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED]
+CT_BEAM_SPLICE = "Empalme de viga — placas de alas y alma atornilladas"
+CT_COL_SPLICE = "Empalme de columna — placas atornilladas (con o sin contacto)"
+CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE]
 
 # ---- placa simple de corte (shear tab)
 SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
@@ -171,4 +173,65 @@ class Seated:
 
     def loads(self) -> list:
         return loads_of(self.combos, 1, ("Comb 1", (25.0,)))
+
+
+# ---- empalmes atornillados de perfiles I (viga y columna)
+SPLICE_SHARE = ["Las alas toman todo el momento", "Momento repartido segun la inercia (alas / alma)"]
+
+
+@dataclass
+class _SpliceBase:
+    shape: str = "W16X50"
+    steel: str = "ASTM A992"
+    plate_steel: str = "ASTM A36"
+    gap: float = 0.5                 # separacion entre los extremos de los perfiles, in
+    # --- alas: placa exterior (una por ala) e interiores (dos por ala; 0 = sin ellas)
+    fo_b: float = 7.0
+    fo_t: float = 0.625
+    fi_b: float = 0.0
+    fi_t: float = 0.0
+    bolt_size: str = "7/8"
+    bolt_grade: str = "A325-N"
+    f_rows: int = 3                  # filas de pernos a lo largo del perfil, a cada lado del empalme
+    f_cols: int = 2                  # pernos a lo ancho del ala (2 o 4)
+    f_s: float = 3.0
+    f_g: float = 3.5                 # separacion entre columnas de pernos a lo ancho
+    f_end: float = 1.5               # del extremo del perfil a la primera fila
+    f_pend: float = 1.5              # de la ultima fila al extremo de la placa
+    # --- alma: dos placas, una a cada lado
+    w_t: float = 0.375
+    w_h: float = 9.0
+    w_nv: int = 3
+    w_nh: int = 1
+    w_sv: float = 3.0
+    w_sh: float = 3.0
+    w_end: float = 2.0
+    w_pend: float = 1.5
+    wbolt_size: str = "3/4"
+    # --- reparto del momento
+    share: str = "Las alas toman todo el momento"
+    combos: list = field(default_factory=list)
+    combo_idx: int = 0
+
+
+@dataclass
+class BeamSplice(_SpliceBase):
+    combos: list = field(default_factory=lambda: [["Comb 1", 1200.0, 30.0, 0.0]])    # [nombre, Mu, Vu, Nu(+ traccion)]
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 3, ("Comb 1", (1200.0, 30.0, 0.0)))
+
+
+@dataclass
+class ColSplice(_SpliceBase):
+    shape: str = "W14X90"
+    fo_b: float = 8.0
+    fo_t: float = 0.75
+    f_g: float = 4.0
+    w_h: float = 10.0
+    contact: bool = True             # extremos aserrados o fresados en contacto (J1.4)
+    combos: list = field(default_factory=lambda: [["Comb 1", 400.0, 300.0, 20.0]])   # [nombre, Pu(+ compresion), Mu, Vu]
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 3, ("Comb 1", (400.0, 300.0, 20.0)))
 

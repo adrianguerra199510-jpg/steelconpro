@@ -678,6 +678,36 @@ except Exception as _e:
     FAIL.append(f"conn UI/reportes: {type(_e).__name__}: {_e}")
     traceback.print_exc()
 
+# UI + reportes para TODAS las tipologias registradas
+try:
+    from PySide6.QtWidgets import QApplication as _QA3
+    from placabase import ui as _ui3, report as _rep3, conn as _cn3
+    _app3 = _QA3.instance() or _QA3([])
+    _w3 = _ui3.MainWindow()
+    for _ct3, _m3 in _cn3.modules():
+        _w3.add_connection(_ct3)
+        _w3.recalc()
+        _q3, _R3 = _w3.export_target()
+        _tabs = [_w3.tabs_in.tabText(i) for i in range(_w3.tabs_in.count()) if _w3.tabs_in.isTabVisible(i)]
+        if _tabs != ["Proyecto", _m3.TAB]:
+            FAIL.append(f"UI {_m3.PREFIX}: pestañas visibles incorrectas {_tabs}")
+        if _w3.tbl.rowCount() != len(_w3.res.checks) or not any(k in _w3.lbl_verdict.text() for k in ("CUMPLE", "NO CUMPLE")):
+            FAIL.append(f"UI {_m3.PREFIX}: tabla o veredicto incorrectos")
+        if _w3.tbl_ld[_m3.ATTR].rowCount() != len(getattr(_w3.prj, _m3.ATTR).loads()):
+            FAIL.append(f"UI {_m3.PREFIX}: la tabla de cargas no refleja las combinaciones")
+        _ff = _rep3.save_figures(_q3, _R3, _od)
+        _p3 = _rep3.export_pdf(_q3, _R3, _os.path.join(_od, f"{_m3.PREFIX}.pdf"), _ff)
+        _d3 = _rep3.export_docx(_q3, _R3, _os.path.join(_od, f"{_m3.PREFIX}.docx"), _ff)
+        if any(_os.path.getsize(f) < 4000 for f in (_p3, _d3, *_ff)):
+            FAIL.append(f"UI {_m3.PREFIX}: PDF/Word/figura vacios")
+        _w3._goto_calc(0)
+    print(f"{'UI y reportes de todas':34} {len(_cn3.modules())} tipologias: pestañas, tabla, dibujo, PDF y Word OK")
+except ImportError:
+    print(f"{'UI de todas las tipologias':34} omitida (sin PySide6)")
+except Exception as _e:
+    FAIL.append(f"UI todas las tipologias: {type(_e).__name__}: {_e}")
+    traceback.print_exc()
+
 # modo por lotes (run.py): lee el LIBRO (antes usaba Project.load y calculaba un proyecto por defecto) y procesa cada conexion
 import importlib, io, contextlib
 _run = importlib.import_module("run")
@@ -813,6 +843,81 @@ for _nm, _mut, _txt in (("N no cabe", dict(N=8.0), "no cabe"), ("perfil inexiste
     if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
         FAIL.append(f"asiento alcance ({_nm}): debe dar aviso critico y no cumplir")
 print(f"{'  asiento soldado / rigidizado':34} soldadura C {_ksw['weld'].ratio:.3f}; rigidizado D/C = {_rst.max_ratio:.3f}; avisos de alcance OK")
+
+# ====================================================================================================
+# EMPALMES: viga W16X50 (Mu = 1200 kip·in, Vu = 30) y columna W14X90 con contacto
+# ====================================================================================================
+from placabase.conn.specs import CT_BEAM_SPLICE, CT_COL_SPLICE, SPLICE_SHARE
+
+
+def _bs(**mut):
+    q = Project(); q.ctype = CT_BEAM_SPLICE
+    for k, v in mut.items():
+        setattr(q.bsp, k, v)
+    return q
+
+
+def _cs(**mut):
+    q = Project(); q.ctype = CT_COL_SPLICE
+    for k, v in mut.items():
+        setattr(q.csp, k, v)
+    return q
+
+
+_sh = CATALOG.get("W16X50")
+_hf = _sh.d - _sh.tf
+_Ff = 1200.0 / _hf
+_rb = solve(_bs())
+_kb = {c.key: c for c in _rb.checks}
+print(f"{'empalme de viga':34} D/C max = {_rb.max_ratio:.3f}  gobierna: {_rb.governing.title[:48]}")
+_near("empalme viga: fuerza de ala (demanda de fluencia)", _kb["fl_pl_y"].demand, _Ff, 1e-9)
+_near("empalme viga: fluencia de placas", _kb["fl_pl_y"].capacity, 0.9 * 36 * 7.0 * 0.625, 1e-9)                # 141.75 kip
+_near("empalme viga: rotura de placas", _kb["fl_pl_r"].capacity, 0.75 * 58 * min(0.625 * (7.0 - 2 * 1.0), 0.85 * 7.0 * 0.625), 1e-9)
+_rnb = 54.0 * math.pi * 0.875 ** 2 / 4
+_near("empalme viga: pernos de ala", _kb["fl_bolt"].capacity, 0.75 * _rnb, 1e-9)
+_near("empalme viga: fuerza por perno", _kb["fl_bolt"].demand, _Ff / 6, 1e-9)
+_Fe = math.pi ** 2 * 29000 / (3.5 / (0.625 / math.sqrt(12))) ** 2
+_near("empalme viga: pandeo de placas (E3)", _kb["fl_pl_b"].capacity, 0.9 * 0.658 ** (36 / _Fe) * 36 * 4.375, 1e-9)
+_near("empalme viga: perno del alma (elastico)", _kb["w_bolt"].demand, math.hypot(30 / 3, 30 * 2.25 * 3 / 18), 1e-9)
+_near("empalme viga: perno del alma, capacidad", _kb["w_bolt"].capacity, 0.75 * 2 * 54 * math.pi * 0.75 ** 2 / 4, 1e-9)
+if not _rb.ok:
+    FAIL.append(f"empalme viga: el caso base debe cumplir (D/C = {_rb.max_ratio:.3f}: {_rb.governing.title})")
+# placas interiores: doble corte y mas area
+_rbi = solve(_bs(fi_b=2.5, fi_t=0.5))
+_kbi = {c.key: c for c in _rbi.checks}
+if not _kbi["fl_bolt"].capacity > _kb["fl_bolt"].capacity * 1.99 or not _kbi["fl_pl_y"].ratio < _kb["fl_pl_y"].ratio:
+    FAIL.append("empalme viga: las placas interiores deben duplicar la capacidad de los pernos (doble corte) y bajar la fluencia")
+# reparto del momento segun la inercia: alma toma Mw
+_rbm = solve(_bs(share=SPLICE_SHARE[1]))
+_kbm = {c.key: c for c in _rbm.checks}
+_Mw = 1200.0 * (_sh.tw * (_sh.d - 2 * _sh.tf) ** 3 / 12) / _sh.Ix
+_near("empalme viga: fuerza de ala con reparto por inercia", _kbm["fl_pl_y"].demand, (1200.0 - _Mw) / _hf, 1e-9)
+if "w_pl_m" not in _kbm or _kbm["w_pl_m"].demand <= 0:
+    FAIL.append("empalme viga: con reparto por inercia debe verificar la flexion de las placas de alma")
+# axial de traccion aumenta T; columna: contacto reduce la compresion de diseno
+_rbn = solve(_bs(combos=[["c", 1200.0, 30.0, 50.0]]))
+if not {c.key: c for c in _rbn.checks}["fl_pl_y"].demand > _Ff:
+    FAIL.append("empalme viga: la traccion axial debe aumentar la fuerza del ala traccionada")
+_rc = solve(_cs())
+_kc2 = {c.key: c for c in _rc.checks}
+_rcn = solve(_cs(contact=False))
+_kcn = {c.key: c for c in _rcn.checks}
+_sc = CATALOG.get("W14X90")
+_Cc = 300.0 / (_sc.d - _sc.tf) + 400.0 * (_sc.bf * _sc.tf) / _sc.A
+_near("empalme columna sin contacto: compresion del ala", _kcn["fl_pl_y"].demand, _Cc, 1e-9)
+_near("empalme columna con contacto: 50 % de la compresion", _kc2["fl_pl_y"].demand, 0.5 * _Cc, 1e-9)
+if "fl_pl_b" in _kc2 or "fl_pl_b" not in _kcn:
+    FAIL.append("empalme columna: el pandeo de placas solo aplica sin contacto")
+_Nw_c = 0.5 * 400.0 * (_sc.A - 2 * _sc.bf * _sc.tf) / _sc.A
+_near("empalme columna: axial del alma con contacto (50 %)", _kc2["w_pl_n"].demand, _Nw_c, 1e-9)
+if not _rc.ok:
+    FAIL.append(f"empalme columna: el caso base debe cumplir (D/C = {_rc.max_ratio:.3f}: {_rc.governing.title})")
+for _nm, _mut, _txt in (("placa mas ancha que el ala", dict(fo_b=12.0), "mas ancha"), ("columnas no validas", dict(f_cols=3), "2 o 4"),
+                        ("perfil inexistente", dict(shape="W99X999"), "perfil I")):
+    _rr = solve(_bs(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"empalme alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'  empalme de columna':34} con contacto D/C = {_rc.max_ratio:.3f}; sin contacto {_rcn.max_ratio:.3f}; interiores / reparto / axial OK")
 
 # ====================================================================================================
 # FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
