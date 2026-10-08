@@ -689,7 +689,7 @@ def export_pdf(prj: Project, res: Results, path: str,
         from . import brand
         from reportlab.platypus import Image as RLImage
         _lw = 2.4 * inch
-        story.append(RLImage(brand.LOGO(), width=_lw, height=_lw * 246.0 / 1100.0, hAlign="LEFT"))
+        story.append(RLImage(brand.LOGO(), width=_lw, height=_lw * brand.logo_ratio(), hAlign="LEFT"))
         story.append(Spacer(1, 4))
     except Exception:
         pass

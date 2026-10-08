@@ -32,6 +32,33 @@ def _checks_rows(us, res):
     return out
 
 
+def _fem_tables(prj, res, us):
+    """[(titulo, encabezado, filas)] de las tablas del analisis 3D (pernos y cordones) de la combinacion con mayor D/C del FEM."""
+    fm = getattr(res, "fem_map", None) or {}
+    if not fm:
+        return []
+    from .fem import post
+    k = max(fm, key=lambda i: max((c.ratio for c in post.fem_checks(fm[i].model, fm[i], prj) if not c.skip), default=0.0))
+    R = fm[k]
+    post.bolt_caps(R)
+    from .fem.session import combo_names
+    nm = combo_names(prj)[k] if k < len(combo_names(prj)) else ""
+    out = []
+    if R.bolts:
+        rows = [[b.tag, us.fmt("F", b.V), us.fmt("F", b.T), us.fmt("F", b.phiV), us.fmt("F", b.phiT), f"{b.V / b.phiV:.3f}", f"{(b.T / b.phiT if b.phiT > 0 else 0.0):.3f}"]
+                for b in sorted(R.bolts, key=lambda b: -max(b.V / b.phiV, (b.T / b.phiT) if b.phiT > 0 else 0.0))[:30]]
+        out.append((f"Pernos (combinacion {nm}); los 30 mas exigidos", ["Perno", f"V ({us.F})", f"T ({us.F})", f"φRnv ({us.F})", f"φRnt' ({us.F})", "D/C V", "D/C T"], rows))
+    if R.welds:
+        rows = [[w.name, us.fmt("S", w.stress_max), us.fmt("S", w.stress_avg), us.fmt("S", w.cap), f"{w.stress_max / w.cap:.3f}", f"{w.stress_avg / w.cap:.3f}"] for w in R.welds]
+        out.append((f"Cordones (combinacion {nm})", ["Cordon", f"Pico ({us.S})", f"Media ({us.S})", f"φ·0.60·FEXX ({us.S})", "D/C pico", "D/C media"], rows))
+    return out
+
+
+def _split_figs(figs):
+    figs = figs or []
+    return [f for f in figs if "fem_" not in f.replace("\\", "/").split("/")[-1]], [f for f in figs if "fem_" in f.replace("\\", "/").split("/")[-1]]
+
+
 def _verdict(res):
     if res.pending:
         return "PENDIENTE", "#9C5700"
@@ -74,7 +101,7 @@ def export_pdf(prj, res, path: str, figs: list | None = None, detail: bool = Tru
     try:
         from .. import brand
         lw = 2.4 * inch
-        story.append(RLImage(brand.LOGO(), width=lw, height=lw * 246.0 / 1100.0, hAlign="LEFT"))
+        story.append(RLImage(brand.LOGO(), width=lw, height=lw * brand.logo_ratio(), hAlign="LEFT"))
         story.append(Spacer(1, 4))
     except Exception:
         pass
@@ -138,14 +165,31 @@ def export_pdf(prj, res, path: str, figs: list | None = None, detail: bool = Tru
         for kind, txt in res.rec.to_lines():
             story.append(Paragraph(esc(txt), {"sec": SEC, "txt": NT, "chk": CH}.get(kind, EQ)))
 
-    if figs:
+    draw_figs, fem_figs = _split_figs(figs)
+    from PIL import Image as PILImage
+    if draw_figs:
         story.append(PageBreak())
         story.append(Paragraph("Anexo B — Dibujos", H1))
-        from PIL import Image as PILImage
-        for fp in figs:
+        for fp in draw_figs:
             try:
                 iw, ih = PILImage.open(fp).size
                 w = 6.1 * inch
+                story.append(RLImage(fp, width=w, height=w * ih / iw))
+                story.append(Spacer(1, 6))
+            except Exception:
+                pass
+    tabs = _fem_tables(prj, res, us)
+    if fem_figs or tabs:
+        story.append(PageBreak())
+        story.append(Paragraph("Anexo C — Analisis 3D por elementos finitos (Gmsh + CalculiX)", H1))
+        for ttl, hdr, rows in tabs:
+            story.append(Paragraph(f"<b>{esc(ttl)}</b>", BODY))
+            story.append(tbl([hdr] + rows, [6.7 * inch / len(hdr)] * len(hdr), [("ALIGN", (1, 1), (-1, -1), "RIGHT")]))
+            story.append(Spacer(1, 6))
+        for fp in fem_figs:
+            try:
+                iw, ih = PILImage.open(fp).size
+                w = 5.6 * inch
                 story.append(RLImage(fp, width=w, height=w * ih / iw))
                 story.append(Spacer(1, 6))
             except Exception:
@@ -249,11 +293,30 @@ def export_docx(prj, res, path: str, figs: list | None = None, detail: bool = Tr
                 elif kind == "txt":
                     for run in para.runs:
                         run.italic = True
-    if figs:
+    draw_figs, fem_figs = _split_figs(figs)
+    if draw_figs:
         doc.add_heading("Anexo B — Dibujos", level=1)
-        for fp in figs:
+        for fp in draw_figs:
             try:
                 doc.add_picture(fp, width=Inches(6.0))
+            except Exception:
+                pass
+    tabs = _fem_tables(prj, res, us)
+    if fem_figs or tabs:
+        doc.add_heading("Anexo C — Analisis 3D por elementos finitos (Gmsh + CalculiX)", level=1)
+        for ttl, hdr, rows in tabs:
+            doc.add_paragraph(ttl).runs[0].bold = True
+            t = doc.add_table(rows=1, cols=len(hdr))
+            t.style = "Light Grid Accent 1"
+            for c, h in zip(t.rows[0].cells, hdr):
+                c.text = h
+            for r in rows:
+                cells = t.add_row().cells
+                for c, v in zip(cells, r):
+                    c.text = str(v)
+        for fp in fem_figs:
+            try:
+                doc.add_picture(fp, width=Inches(5.8))
             except Exception:
                 pass
     doc.save(path)

@@ -20,6 +20,41 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
+## Novedades de la 4.0.0: SteelConPro, modelo 3D y análisis FEM de todas las conexiones
+
+- **Nuevo nombre y nuevo logo** (`tools/make_logo.py` los regenera). Los proyectos se guardan como `.scp`; los `.pbase` anteriores se siguen abriendo.
+- **Pestaña «Modelo 3D»** en las diez tipologías de conexión (placa de corte, doble ángulo, asiento, empalmes de viga y de columna, placa extrema, cartela,
+  HSS a HSS, RBS y puente): vigas, columnas, placas, ángulos, rigidizadores, pernos con cabeza y tuerca, cordones y las flechas de la combinación que gobierna.
+  Se gira con el ratón (OpenGL; sin OpenGL se usa matplotlib).
+- **Análisis de elementos finitos sólido (Gmsh + CalculiX) igual que el de la placa base**: `CALCULAR (F8)` corre cada combinación de carga y agrega sus
+  verificaciones a las del cálculo cerrado; la pestaña **«Análisis FEM»** muestra von Mises, desplazamiento, deformada amplificable y deformación plástica por
+  pieza o del conjunto, con las tablas de **pernos** (cortante y tracción, D/C) y de **cordones** (esfuerzo en la garganta, pico y media). Los PDF/Word llevan un
+  *Anexo C* con las imágenes y las tablas. `SteelConPro.exe archivo.scp --3d carpeta` hace lo mismo por lotes; *Exportar > Modelo sólido 3D* escribe un `.step`.
+
+**Cómo se modela** (`steelconpro/conn/fem/`; unidades in, kip, ksi):
+
+| Elemento | Modelo |
+|---|---|
+| Piezas | tetraedros cuadráticos (C3D10), un cuerpo por pieza; acero elasto-plástico perfecto con límite **φ·Fy** (0.9·Fy); RBS: viga con endurecimiento (Ry·Fy → Cpr·Ry·Fy) y columna con Fy |
+| Pernos | el borde de cada agujero (y la corona de cabeza y tuerca) es un cuerpo rígido; entre los de piezas consecutivas actúan resortes de cortante (en las dos direcciones del plano) y, entre cabeza y tuerca, un resorte axial **solo a tracción**. La fuerza del perno sale de los resortes: se compara con φ·Fnv·Ab por plano de corte y con φ·F'nt·Ab (J3.7) |
+| Cordones de filete | prismas triangulares unidos a las dos piezas; se lee el esfuerzo resultante en el plano de la garganta (nodos libres del cordón) y se compara con φ·0.60·FEXX: **D/C = máx(pico / 1.5, media)** (el cordón es elástico: el pico de los extremos es singular) |
+| Contacto | resortes solo-compresión entre nodos gemelos de las superficies que se tocan (penalización); se resuelve con un **conjunto activo** de problemas lineales (cada iteración es una corrida de CalculiX) |
+| Apoyos y cargas | extremos de columnas, vigas o perfiles empotrados; las fuerzas y momentos de la combinación actúan sobre una cara rígida en el punto de aplicación del cálculo cerrado (p. ej. la reacción en la cara del soporte) |
+| Plasticidad | se verifica la **deformación plástica equivalente** promediada (límite del proyecto, 5 %); si el análisis plástico no converge antes de la carga de diseño se informa «capacidad = x % de la carga» con D/C = 1/x |
+
+Tiempo típico por combinación: de 30 s a 4 min según la malla (*Automática* o *Fina*) y el número de contactos.
+
+**Lo que este análisis NO hace** (y por qué conviene leer sus resultados con criterio):
+- **Pernos**: sin plastificación, fractura ni pretensión. Los empalmes de puente con pernos pretensados se analizan como pernos de aplastamiento (el deslizamiento crítico sólo
+  está en el cálculo cerrado). La rigidez al cortante del perno (3500·d² kip/in) es un valor de modelo, no medido.
+- **Soldaduras**: los cordones de filete de la placa de corte, doble ángulo, asiento y cartela se modelan; en la placa extrema, los nudos HSS y la unión viga-columna de la cartela y de la RBS
+  la unión es continua (equivale a penetración completa) y no se verifica el cordón.
+- **Contacto sin fricción** y sin preapretado; las partes rígidas de los agujeros ocultan la concentración de esfuerzos en el borde (el aplastamiento se verifica en el cálculo cerrado).
+- **Pandeo** (local o global) y grandes desplazamientos: análisis de pequeños desplazamientos.
+- RBS: la plastificación de la viga en la zona reducida es lo buscado y no se verifica; se verifican la columna, las placas de continuidad y la zona del panel.
+- Los resultados del 3D no sustituyen las verificaciones de la norma: se agregan a ellas. Fueron contrastados con cálculos manuales (reparto elástico de la placa de corte,
+  tracción de la placa extrema, equilibrio), **no con ejemplos publicados ni con otro programa**; revíselos antes de usarlos en un proyecto.
+
 ## Novedades de la 3.3.0: tipologías de conexión
 
 Cada conexión del proyecto tiene ahora una **tipología** (Proyecto > Tipología, o el diálogo del botón *Nueva*). Un mismo archivo `.scp`

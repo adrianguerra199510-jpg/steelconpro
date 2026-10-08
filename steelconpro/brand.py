@@ -78,6 +78,16 @@ def apply_theme(app, dark=False):
     app.setStyleSheet(STYLE_DARK if dark else STYLE)
 
 
+def logo_ratio() -> float:
+    """Alto / ancho del logo horizontal (para colocarlo en los reportes)."""
+    try:
+        from PIL import Image
+        w, h = Image.open(LOGO()).size
+        return h / float(w)
+    except Exception:
+        return 0.274
+
+
 def logo_pixmap(dark=False, width=250):
     """Logo para el fondo actual (el del tema oscuro lleva el texto claro)."""
     from PySide6.QtGui import QImage, QPixmap

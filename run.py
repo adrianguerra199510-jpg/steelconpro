@@ -4,10 +4,12 @@
     SteelConPro.exe                       -> interfaz grafica
     SteelConPro.exe --selftest            -> autopruebas del motor (sin interfaz)
     SteelConPro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
+    SteelConPro.exe --meshm a.json b.npz  -> (interno) malla del modelo 3D de una conexion
     SteelConPro.exe proyecto.scp --pdf mem.pdf --docx s.docx
                                      --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
-                                              (--3d corre Gmsh + CalculiX y verifica con sus resultados)
+                                              (--3d corre Gmsh + CalculiX y verifica con sus resultados;
+                                               en las conexiones que no son placa base los agrega al calculo cerrado)
 """
 import os
 import sys
@@ -56,14 +58,26 @@ def batch_one(prj, argv, suf=""):
     from steelconpro.conn.specs import CT_BASEPLATE
 
     fem = None
-    if prj.ctype != CT_BASEPLATE and ("--3d" in argv or "--geo" in argv):
-        print(f"  aviso: --3d/--geo solo aplican a la placa base; '{prj.ctype}' se calcula en forma cerrada.")
+    fem_map = {}
+    if prj.ctype != CT_BASEPLATE and "--geo" in argv:
+        print(f"  aviso: --geo solo aplica a la placa base; '{prj.ctype}' se exporta con la interfaz (Exportar > Modelo solido 3D, .step).")
+    if prj.ctype != CT_BASEPLATE and "--3d" in argv:
+        from steelconpro.conn import module_for
+        from steelconpro.conn.fem import driver
+        for i, (nm, vals) in enumerate(getattr(prj, module_for(prj.ctype).ATTR).loads()):
+            R, msg = driver.run_fem(prj, vals, os.path.join(_out(argv, "--3d", suf), f"comb{i + 1}"), "modelo3d")
+            print(f"  3D [{nm}]:", msg)
+            if R is not None:
+                fem_map[i] = R
     if "--3d" in argv and prj.ctype == CT_BASEPLATE:
         from steelconpro.rep3d import make_fem
         r3, msg = mesh3d.full_3d(prj, _out(argv, "--3d", suf))
         print("  3D:", msg)
         fem = make_fem(prj, r3) if r3 is not None else None
     res = solve(prj, fem=fem)
+    if fem_map:
+        from steelconpro.conn.fem import session
+        res = session.augment(res, prj, fem_map)
     gov = res.governing
     print(f"{prj.element}: {'CUMPLE' if res.ok else 'NO CUMPLE'}   "
           f"D/C max = {res.max_ratio:.3f}" + (f"   gobierna: {gov.title}" if gov else ""))
@@ -104,6 +118,9 @@ def main():
     args = sys.argv[1:]
     if args and args[0] == "--mesh":
         return mesh_child(args[1], args[2])
+    if args and args[0] == "--meshm":
+        from steelconpro.conn.fem.mesher import child
+        return child(args[1], args[2])
     if args and args[0] == "--selftest":
         import runpy
         st = os.path.join(BUNDLE, "selftest.py")

@@ -38,6 +38,7 @@ from .rep3d import make_fem
 from .ui_widgets import Form, scroll, PasteTable, ThemeSwitch
 from .conn.specs import CONN_TYPES, CT_BASEPLATE
 from . import conn as connpkg
+from .conn.fem import session as cfem_session, scene as cfem_scene
 from . import gl3d
 from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
                     DEFAULT_SETS, KIP_TO_KN, IN_TO_MM, KIPIN_TO_KNM)
@@ -183,6 +184,37 @@ class Worker3D(QThread):
         self.done.emit(out, "")
 
 
+class WorkerConn(QThread):
+    """Analisis 3D (Gmsh + CalculiX) de cada combinacion de una conexion que no es placa base, en segundo plano.
+    `jobs`: lista de (indice, nombre, proyecto (copia), valores de la combinacion, firma)."""
+    progress = Signal(str)
+    done = Signal(object, str)
+
+    def __init__(self, jobs, folder):
+        super().__init__()
+        self.jobs, self.folder = jobs, folder
+        self.token = mesh3d.CancelToken()
+
+    def cancel(self):
+        self.token.cancel()
+
+    def run(self):
+        from .conn.fem import driver
+        out = []
+        n = len(self.jobs)
+        for k, (idx, name, q, vals, sig) in enumerate(self.jobs):
+            pre = f"Combinacion {k + 1} de {n}: {name}\n" if n > 1 else ""
+            try:
+                R, msg = driver.run_fem(q, vals, str(Path(self.folder) / f"comb{idx + 1}"), "modelo3d",
+                                        progress=lambda m, p=pre: self.progress.emit(p + m), cancel=self.token)
+            except Exception as e:
+                R, msg = None, f"{type(e).__name__}: {e}"
+            out.append((idx, name, q, sig, R, msg))
+            if R is None:
+                break
+        self.done.emit(out, "")
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -192,6 +224,8 @@ class MainWindow(QMainWindow):
         self.cur = 0
         self.fem_cache = {}          # (id(conexion), combinacion) -> Fem3D (con la firma del proyecto que lo genero)
         self.raw_cache = {}          # (id(conexion), combinacion) -> (firma, resultado crudo del 3D para dibujar)
+        self.cfem = {}               # (id(conexion), combinacion) -> (firma, FemResult) de las conexiones que no son placa base
+        self.cfem_idx = 0            # combinacion cuyo FEM se muestra (otras tipologias)
         self.pairs = []              # [(proyecto de la combinacion, Results)] de la conexion actual
         self.res = None
         self.worker = None
@@ -295,7 +329,7 @@ class MainWindow(QMainWindow):
         act(m_exp, "Memoria de calculo Word (.docx)...", self.export_docx)
         act(m_exp, "Imagenes (.png)...", self.export_png)
         m_exp.addSeparator()
-        act(m_exp, "Modelo solido 3D para Gmsh (.geo)...", self.export_3d)
+        act(m_exp, "Modelo solido 3D (placa base: .geo para Gmsh; otras conexiones: .step)...", self.export_3d)
         act(m_help, "Acerca de", self.about)
         act(m_mat, "Biblioteca de materiales...", self.materials_dialog)
         m_exp.addSeparator()
@@ -344,7 +378,7 @@ class MainWindow(QMainWindow):
         f.text("Calculo", "author")
         f.text("Fecha", "date")
         f.group("Tipologia de la conexion")
-        f.combo("Tipologia", "ctype", CONN_TYPES, help="Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Conexion de corte con placa simple: viga secundaria a viga maestra (con cope) o viga a columna; calculo cerrado AISC 360 (sin analisis 3D). Cada conexion del proyecto tiene su propia tipologia: se elige al crearla (boton Nueva).")
+        f.combo("Tipologia", "ctype", CONN_TYPES, help="Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Las demas tipologias (placa de corte, doble angulo, asiento, empalmes, placa extrema, cartela, HSS, RBS, puente): calculo cerrado AISC/AASHTO y analisis 3D por elementos finitos (Gmsh + CalculiX). Cada conexion del proyecto tiene su propia tipologia: se elige al crearla (boton Nueva).")
         f.group("Unidades de trabajo")
         self.cb_preset = QComboBox()
         self.cb_preset.addItem("(personalizado)")
@@ -829,10 +863,12 @@ class MainWindow(QMainWindow):
             tb.setAlternatingRowColors(True)
             tb.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         bw = QWidget(); bl = QVBoxLayout(bw); bl.setContentsMargins(0, 0, 0, 0)
-        bl.addWidget(QLabel("<b>Soldadura perfil-placa (leida del solido)</b>"))
+        self.lbl_tw3 = QLabel("<b>Soldadura perfil-placa (leida del solido)</b>")
+        bl.addWidget(self.lbl_tw3)
         bl.addWidget(self.tbl_w3)
         bb = QWidget(); b2 = QVBoxLayout(bb); b2.setContentsMargins(0, 0, 0, 0)
-        b2.addWidget(QLabel("<b>Traccion por perno (3D)</b>"))
+        self.lbl_tb3 = QLabel("<b>Traccion por perno (3D)</b>")
+        b2.addWidget(self.lbl_tb3)
         b2.addWidget(self.tbl_b3)
         ll.addWidget(bw, 3); ll.addWidget(bb, 2)
         sp3.addWidget(low)
@@ -1370,14 +1406,23 @@ class MainWindow(QMainWindow):
             self.tabs_in.setTabVisible(self.tabs_in.indexOf(sw), vis)
         if not self.tabs_in.isTabVisible(self.tabs_in.currentIndex()):
             self.tabs_in.setCurrentWidget(self.tab_widgets["Proyecto"])
-        for wd, vis in ((self.tab_model, not conn), (self.tab_fem, not conn), (self.tab_scheme, conn)):
+        for wd, vis in ((self.tab_model, True), (self.tab_fem, True), (self.tab_scheme, conn)):
             self.tabs_out.setTabVisible(self.tabs_out.indexOf(wd), vis)
         if not self.tabs_out.isTabVisible(self.tabs_out.currentIndex()):
-            self.tabs_out.setCurrentWidget(self.tab_scheme if conn else self.tab_model)
-        self.btn3d.setText("RECALCULAR  (F8)" if conn else "CALCULAR  (F8)")
-        self.btn3d.setToolTip("Recalcula la conexion (calculo cerrado AISC; esta tipologia no usa analisis 3D)." if conn else
+            self.tabs_out.setCurrentWidget(self.tab_model)
+        self.btn3d.setText("CALCULAR  (F8)")
+        self.btn3d.setToolTip("Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga: agrega al calculo cerrado las "
+                              "verificaciones del modelo solido." if conn else
                               "Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
                               "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
+        names = ["Von Mises", "Desplazamiento |U|", "Desplazamiento Uz"] + (["Deformacion plastica (PEEQ)"] if conn else [])
+        if [self.cb_f3.itemText(i) for i in range(self.cb_f3.count())] != names:
+            self.cb_f3.blockSignals(True)
+            self.cb_f3.clear()
+            self.cb_f3.addItems(names)
+            self.cb_f3.blockSignals(False)
+        self.lbl_geom.setText("<b>Modelo 3D de la conexion</b>" if conn else "<b>Geometria de la conexion</b>")
+        self.tabs_out.setTabText(self.tabs_out.indexOf(self.tab_model), "Modelo 3D" if conn else "Modelo y vistas")
 
     @staticmethod
     def _con_label(p) -> str:
@@ -1585,10 +1630,16 @@ class MainWindow(QMainWindow):
             return e[1]
         return None
 
+    def _cfem_map(self, p=None):
+        """{combinacion: FemResult} vigentes (calculados con la conexion tal como esta) de una conexion que no es placa base."""
+        p = p or self.prj
+        sig = cfem_session.conn_sig(p)
+        return {i: R for (pid, i), (sg, R) in self.cfem.items() if pid == id(p) and sg == sig}
+
     def _solve_all(self, p):
         """Resultados de TODAS las combinaciones de la conexion p: lista de (proyecto_de_la_combinacion, Results)."""
-        if p.ctype != CT_BASEPLATE:                  # otras tipologias: el motor ya recorre sus combinaciones
-            return [(p, solve(p))]
+        if p.ctype != CT_BASEPLATE:                  # otras tipologias: el motor ya recorre sus combinaciones; el FEM vigente se agrega
+            return [(p, cfem_session.augment(solve(p), p, self._cfem_map(p)))]
         out = []
         for i in range(len(p.combo_list())):
             q = p.with_combo(i)
@@ -1612,7 +1663,7 @@ class MainWindow(QMainWindow):
         """(proyecto, Results) de la combinacion que gobierna, con la tabla resumen de combinaciones."""
         p = p or self.prj
         if p.ctype != CT_BASEPLATE:
-            return p, solve(p)
+            return p, cfem_session.augment(solve(p), p, self._cfem_map(p))
         pairs = self._solve_all(p)
         k = self._governing(pairs)
         q, R = pairs[k]
@@ -1641,7 +1692,9 @@ class MainWindow(QMainWindow):
             if QApplication.overrideCursor() is not None:
                 QApplication.restoreOverrideCursor()
         self._fill_combo_box()
-        if not self.calculated:
+        if self.is_conn:
+            self._update_lbl_3d_conn()
+        elif not self.calculated:
             self._lbl_3d_idle()
         for fn in (self.draw_all, self.fill_table, self.fill_3d_tables):
             try:
@@ -1679,6 +1732,8 @@ class MainWindow(QMainWindow):
     def draw_all(self):
         if self.is_conn:
             self._draw_conn()
+            self.draw_geom()
+            self.draw_3d()
             return
         if not self.use_gl:
             try:
@@ -1714,10 +1769,53 @@ class MainWindow(QMainWindow):
         except Exception:
             return ""
 
+    def _conn_vals(self, idx=None):
+        """Valores de la combinacion `idx` (por defecto la que gobierna) de la tabla de cargas de la tipologia actual."""
+        cs = getattr(self.prj, self._cur_mod().ATTR).loads()
+        if idx is None:
+            idx = self.res.combo_gov if (self.res is not None and getattr(self.res, "combo_rows", None)) else 0
+        return cs[max(0, min(idx, len(cs) - 1))][1]
+
+    def _scene_message(self, text, color):
+        sc = gl3d.Scene()
+        sc.message = (text, color)
+        return sc
+
+    def _show_scene(self, canvas, sc):
+        """Muestra una gl3d.Scene en el visor OpenGL o, sin OpenGL, en el lienzo de matplotlib."""
+        if self.use_gl:
+            canvas.view.set_scene(sc)
+            return
+        canvas.reset(cbar=bool(sc.cbar))
+        pc = cfem_scene.draw_scene_mpl(canvas.ax, sc)
+        if sc.cbar and pc is not None:
+            import matplotlib as mpl
+            cmap = mpl.colors.ListedColormap(sc.cbar["colors"])
+            sm = mpl.cm.ScalarMappable(norm=mpl.colors.Normalize(sc.cbar["vmin"], sc.cbar["vmax"]), cmap=cmap)
+            cax = canvas.fig.add_axes([0.90, 0.18, 0.018, 0.64])
+            canvas.fig.colorbar(sm, cax=cax)
+        canvas.cv.draw_idle()
+
+    def _draw_geom_conn(self):
+        from .conn.fem.builders import build_model
+        u = self.us
+        try:
+            mdl = build_model(self.prj, self._conn_vals())
+            lab = lambda k, v: ("F = " if k == "F" else "M = ") + u.q(k, v)
+            sc = cfem_scene.scene_model(mdl, loads=self.chk_loads_geom.isChecked(), scale=1.0 / u.fl, load_label=lab)
+            self.lbl_geom.setText(f"<b>Modelo 3D — {connpkg.module_for(self.prj.ctype).TAB}</b>"
+                                  + (f"   —   {len(mdl.bolts)} pernos, {len(mdl.welds)} cordones" if (mdl.bolts or mdl.welds) else ""))
+        except Exception as e:
+            log = self._log_error("draw_geom (conexion)", e)
+            sc = self._scene_message(f"No se pudo armar el modelo 3D:\n{type(e).__name__}: {str(e)[:160]}\n\nDetalle en: {log}", "#9c0006")
+        self._show_scene(self.cv_3d, sc)
+
     def draw_geom(self):
         """Pestaña 'Modelo y vistas': solo la geometria, nunca resultados.  Si falla con las flechas de carga se
         reintenta sin ellas (el fallo queda en error.log); si falla la geometria se muestra el motivo en el lienzo."""
         import math as _m
+        if self.is_conn:
+            return self._draw_geom_conn()
         if self.use_gl:
             try:
                 sc = gl3d.scene_geometry(self.prj, loads=self.chk_loads_geom.isChecked())
@@ -1777,8 +1875,40 @@ class MainWindow(QMainWindow):
         post = getattr(fem, "post", None) if fem is not None else None
         return list(getattr(post, "bolts", []) or [])
 
+    def _fill_part_combo(self, R):
+        """Piezas que se pueden mostrar aparte (conexiones que no son placa base)."""
+        choices = cfem_scene.part_choices(R) if R is not None else [("all", "Todo el conjunto")]
+        keys = [k for k, _t in choices]
+        if getattr(self, "_part_keys", None) == keys and self.cb_part.count() == len(keys):
+            return
+        cur = self.cb_part.currentText()
+        self._part_keys = keys
+        self.cb_part.blockSignals(True)
+        self.cb_part.clear()
+        self.cb_part.addItems([t for _k, t in choices])
+        i = self.cb_part.findText(cur)
+        self.cb_part.setCurrentIndex(max(i, 0))
+        self.cb_part.blockSignals(False)
+
+    def _draw_3d_conn(self):
+        R = self._cfem_map().get(self.cfem_idx)
+        self._fill_part_combo(R)
+        if R is None:
+            self._show_scene(self.cv_res3d, self._scene_message("Sin calcular.\nPresione CALCULAR (F8) para correr el analisis 3D y ver los resultados.", "#7f6000"))
+            return
+        try:
+            key = self._part_keys[max(0, self.cb_part.currentIndex())]
+            sc = cfem_scene.scene_fem(R, self.prj, ["vm", "u", "uz", "peeq"][max(0, min(self.cb_f3.currentIndex(), 3))], float(self.sp_sc.value()), key,
+                                      loads=self.chk_loads_fem.isChecked())
+        except Exception as e:
+            log = self._log_error("draw_3d (conexion)", e)
+            sc = self._scene_message(f"No se pudo dibujar el campo de resultados:\n{type(e).__name__}: {str(e)[:160]}\n\nDetalle en: {log}", "#9c0006")
+        self._show_scene(self.cv_res3d, sc)
+
     def draw_3d(self):
         """Pestaña 'Analisis FEM': campo de resultados; vacia hasta que el calculo termina."""
+        if self.is_conn:
+            return self._draw_3d_conn()
         if self.use_gl:
             raw = self._raw_now() if self.calculated else None
             if raw is None or not raw.ok:
@@ -1834,6 +1964,10 @@ class MainWindow(QMainWindow):
         self.cv_res3d.cv.draw_idle()
 
     def _lbl_3d_idle(self):
+        if self.is_conn:
+            self.lbl_3d.setText("Ningun resultado se muestra hasta presionar CALCULAR (F8), que corre el analisis solido 3D (Gmsh + CalculiX, incluidos) de todas las "
+                                "combinaciones de carga y agrega sus verificaciones (pernos, cordones, deformacion plastica) a las del calculo cerrado.")
+            return
         self.lbl_3d.setText("Ningun resultado se muestra hasta presionar CALCULAR (F8), que corre el analisis "
                             "solido 3D (Gmsh + CalculiX, incluidos) de todas las combinaciones de carga.")
 
@@ -1843,6 +1977,7 @@ class MainWindow(QMainWindow):
         if conn:
             names = [nm for nm, _ in getattr(self.prj, self._cur_mod().ATTR).loads()]
             idx = self.res.combo_gov if self.res is not None else 0
+            self.cfem_idx = max(0, min(self.cfem_idx, len(names) - 1))
         else:
             names = [c.name for c in self.prj.combo_list()]
             idx = self.prj.combo_idx
@@ -1850,12 +1985,20 @@ class MainWindow(QMainWindow):
             cb.blockSignals(True)
             cb.clear()
             cb.addItems(names)
-            cb.setCurrentIndex(max(0, min(idx, len(names) - 1)))
-            cb.setEnabled(not conn)             # en las otras tipologias siempre se detalla la que gobierna
+            cb.setCurrentIndex(max(0, min(self.cfem_idx if (conn and cb is self.cb_combo) else idx, len(names) - 1)))
+            cb.setEnabled((not conn) or cb is self.cb_combo)    # otras tipologias: la memoria detalla la que gobierna; el combo del FEM elige cual se muestra
             cb.blockSignals(False)
 
     def _on_combo_pick(self, i):
-        if self._loading or i < 0 or self.is_conn or i == self.prj.combo_idx:
+        if self._loading or i < 0:
+            return
+        if self.is_conn:
+            self.cfem_idx = i
+            self.draw_3d()
+            self.fill_3d_tables()
+            self._update_lbl_3d_conn()
+            return
+        if i == self.prj.combo_idx:
             return
         self.store_ui()
         self.prj.apply_combo(i)
@@ -1949,9 +2092,8 @@ class MainWindow(QMainWindow):
         if self.worker is not None and self.worker.isRunning():
             return
         self.recalc()
-        if self.is_conn:                         # sin analisis 3D: el calculo cerrado ya es el veredicto
-            self.statusBar().showMessage("Conexion recalculada (calculo cerrado; esta tipologia no usa analisis 3D)", 5000)
-            return
+        if self.is_conn:
+            return self._run_conn_fem()
         jobs = []
         for i in range(len(self.prj.combo_list())):
             if self._fem_now(self.prj, i) is None:                # solo las combinaciones sin 3D vigente
@@ -1979,6 +2121,106 @@ class MainWindow(QMainWindow):
         self.dlg3d.canceled.connect(self._cancel_3d)
         self.worker.done.connect(self._on_3d)
         self.worker.start()
+
+    def _run_conn_fem(self):
+        """Analisis 3D de las combinaciones que aun no tienen uno vigente (conexiones que no son placa base)."""
+        import copy
+        sig = cfem_session.conn_sig(self.prj)
+        have = self._cfem_map()
+        jobs = []
+        for i, (nm, vals) in enumerate(getattr(self.prj, self._cur_mod().ATTR).loads()):
+            if i not in have:
+                jobs.append((i, nm, copy.deepcopy(self.prj), tuple(vals), sig))
+        if not jobs:
+            self.statusBar().showMessage("Todas las combinaciones ya tienen su analisis 3D vigente", 4000)
+            return
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = Path(self.path).parent if self.path else appdata.temp_dir()
+        folder = str(base / f"{self.prj.element or 'conexion'}_3D_{stamp}")
+        self.dlg3d = QProgressDialog("Preparando el modelo 3D ...", "Cancelar", 0, 0, self)
+        self.dlg3d.setWindowTitle("Analisis 3D")
+        self.dlg3d.setWindowModality(Qt.WindowModal)
+        self.dlg3d.setMinimumWidth(460)
+        self.dlg3d.setCancelButtonText("Cancelar analisis")
+        self.dlg3d.setAutoClose(False)
+        self.dlg3d.setAutoReset(False)
+        self.dlg3d.show()
+        self.btn3d.setEnabled(False)
+        self._job_prj = self.prj
+        self.worker = WorkerConn(jobs, folder)
+        self.worker.progress.connect(self.dlg3d.setLabelText)
+        self.dlg3d.canceled.connect(self._cancel_3d)
+        self.worker.done.connect(self._on_cfem)
+        self.worker.start()
+
+    def _on_cfem(self, out, _msg=""):
+        try:
+            self._on_cfem_impl(out)
+        except Exception as e:
+            log = self._log_error("fin del analisis 3D (conexion)", e)
+            traceback.print_exc()
+            self.btn3d.setEnabled(True)
+            QMessageBox.critical(self, "Error al mostrar los resultados",
+                                 f"El calculo termino pero no se pudieron mostrar los resultados:\n\n{type(e).__name__}: {e}\n\nDetalle en: {log}")
+
+    def _on_cfem_impl(self, out):
+        try:
+            self.dlg3d.canceled.disconnect(self._cancel_3d)
+        except Exception:
+            pass
+        self.dlg3d.close()
+        self.btn3d.setEnabled(True)
+        p = self._job_prj
+        cancelled, failed = False, None
+        for idx, name, q, sig, R, msg in out:
+            if R is None:
+                if msg.startswith(mesh3d.CANCELADO):
+                    cancelled = True
+                else:
+                    failed = (name, msg)
+                continue
+            self.cfem[(id(p), idx)] = (sig, R)
+        if p is not self.prj:
+            self.recalc()
+            return
+        self.recalc()
+        if cancelled:
+            self.lbl_3d.setText("Analisis cancelado.")
+            self.statusBar().showMessage("Analisis 3D cancelado", 5000)
+        if failed:
+            self.lbl_3d.setText(f"<span style='color:{self.tc('#9c0006')}'>{failed[0]}: {failed[1][:600]}</span>")
+            QMessageBox.warning(self, "Analisis 3D", f"Combinacion {failed[0]}:\n\n{failed[1][-2500:]}")
+        m = self._cfem_map()
+        if m:
+            k = max(m, key=lambda i: max((c.ratio for c in cfem_session.post.fem_checks(m[i].model, m[i], self.prj) if not c.skip), default=0.0))
+            self.cfem_idx = k
+            self._fill_combo_box()
+            self.draw_3d()
+            self.fill_3d_tables()
+            self._update_lbl_3d_conn()
+            self.tabs_out.setCurrentWidget(self.tab_fem)
+
+    def _update_lbl_3d_conn(self):
+        R = self._cfem_map().get(self.cfem_idx)
+        if R is None:
+            self._lbl_3d_idle()
+            return
+        u = self.us
+        names = cfem_session.combo_names(self.prj)
+        nm = names[self.cfem_idx] if self.cfem_idx < len(names) else ""
+        pk = max((d["avg"][0] for key, d in R.peeq_parts.items() if not (R.model.part(key) and R.model.part(key).no_peeq)), default=None)
+        bv = max((b.V for b in R.bolts), default=0.0)
+        bt = max((b.T for b in R.bolts), default=0.0)
+        self.lbl_3d.setText(
+            f"<b>Combinacion {nm}:</b> {R.n_nodes:,} nodos y {R.n_elems:,} elementos.  <b>|U| max</b> = {u.q('L', R.umax)}  ·  "
+            f"<b>von Mises maximo</b> = {u.q('S', R.vmmax)}" + (f"  ·  <b>deformacion plastica maxima</b> = {pk * 100:.3f} % (limite {self.prj.fea.plastic_limit:g} %)" if pk is not None else "")
+            + (f"  ·  <b>perno:</b> V max = {u.q('F', bv)}, T max = {u.q('F', bt)}" if R.bolts else "")
+            + f"  ·  contactos activos: {R.n_contacts}; equilibrio: residuo {R.equil[0]:.3g} kip<br>"
+            + (f"<span style='color:{self.tc('#9c0006')}'>El analisis elasto-plastico no alcanzo la carga de diseno (llego al {100 * R.load_frac:.0f} %): "
+               f"se muestran los resultados elasticos.</span><br>" if R.collapsed else "")
+            + f"Archivos en: {R.folder}<br>"
+            + f"<span style='color:{self.tc('#595959')}'>Los picos de von Mises en aristas vivas y en el borde de los agujeros (cuerpos rigidos) son singularidades de malla; "
+              f"las verificaciones usan la fuerza de los pernos, el esfuerzo promedio del cordon y la deformacion plastica promediada.</span>")
 
     def _cancel_3d(self):
         """Boton 'Cancelar analisis': mata Gmsh/CalculiX en curso."""
@@ -2059,8 +2301,50 @@ class MainWindow(QMainWindow):
                                          f"{self.pairs[self._governing(self.pairs)][0].combos[self._governing(self.pairs)].name}",
                                          8000)
 
+    def _fill_tables_conn(self):
+        """Tablas del analisis 3D de las conexiones que no son placa base: cordones y pernos."""
+        from .conn.fem import post as cpost
+        for tb in (self.tbl_w3, self.tbl_b3):
+            tb.setRowCount(0)
+        self.lbl_tw3.setText("<b>Cordones de soldadura (esfuerzo en la garganta, leido del solido)</b>")
+        self.lbl_tb3.setText("<b>Cortante y traccion por perno (3D)</b>")
+        R = self._cfem_map().get(self.cfem_idx)
+        u = self.us
+        hw = ["Cordon", "Pico", "Media", "φ·0.60·FEXX", "D/C pico", "D/C media"]
+        hb = ["Perno", f"x ({u.L})", f"y ({u.L})", f"z ({u.L})", f"V ({u.F})", f"T ({u.F})", "D/C V", "D/C T"]
+        self.tbl_w3.setColumnCount(len(hw)); self.tbl_w3.setHorizontalHeaderLabels(hw)
+        self.tbl_b3.setColumnCount(len(hb)); self.tbl_b3.setHorizontalHeaderLabels(hb)
+        if R is None:
+            return
+        cpost.bolt_caps(R)
+        red, green = QColor("#ffc7ce"), QColor("#c6efce")
+        F = max(1.0, float(getattr(self.prj.fea, "weld_peak_factor", 1.5)))
+
+        def put(tb, vals, dcs):
+            i = tb.rowCount(); tb.insertRow(i)
+            for j, v in enumerate(vals):
+                it = QTableWidgetItem(v)
+                if j in dcs:
+                    try:
+                        ok = float(v) <= dcs[j]
+                    except ValueError:
+                        ok = True
+                    it.setBackground(green if ok else red)
+                    it.setForeground(QColor("#1b1b1b"))
+                tb.setItem(i, j, it)
+        for w in R.welds:
+            put(self.tbl_w3, [w.name, u.fmt("S", w.stress_max), u.fmt("S", w.stress_avg), u.fmt("S", w.cap), f"{w.stress_max / w.cap:.3f}", f"{w.stress_avg / w.cap:.3f}"],
+                {4: F, 5: 1.0})
+        for b in sorted(R.bolts, key=lambda b: -max(b.V / b.phiV, (b.T / b.phiT) if b.phiT > 0 else 0.0)):
+            put(self.tbl_b3, [b.tag, u.fmt("L", b.pos[0]), u.fmt("L", b.pos[1]), u.fmt("L", b.pos[2]), u.fmt("F", b.V), u.fmt("F", b.T), f"{b.V / b.phiV:.3f}",
+                              f"{(b.T / b.phiT if b.phiT > 0 else 0.0):.3f}"], {6: 1.0, 7: 1.0})
+        self.tbl_w3.setToolTip("Traccion resultante en el plano de la garganta (AISC J2.4: φ·0.60·FEXX). El pico es el percentil 95 de los nodos libres del cordon "
+                               "elastico y se admite hasta el limite del proyecto (por defecto 1.5); la media, hasta 1.0.")
+
     def fill_3d_tables(self):
         """Tablas del modelo 3D: soldadura por zona y traccion por perno."""
+        if self.is_conn:
+            return self._fill_tables_conn()
         from .weld3d import summary_rows
         fem = self._fem_now()
         post = fem.post if fem is not None else None
@@ -2142,6 +2426,14 @@ class MainWindow(QMainWindow):
                 self.tbl.setItem(i, j, it)
         gov = r.governing
         html = [f"<b>{self.prj.ctype}</b>"]
+        fm = getattr(r, "fem_map", None) or {}
+        ncomb = len(cfem_session.combo_names(self.prj))
+        if fm:
+            html.append(f"Incluye las verificaciones del <b>analisis 3D (FEM)</b> de {len(fm)} de {ncomb} combinacion(es)"
+                        + ("" if len(fm) == ncomb else " — presione CALCULAR (F8) para completar las demas") + ".")
+        else:
+            html.append(f"<span style='color:{self.tc('#7f6000')}'>Analisis 3D (FEM) sin calcular: el veredicto es el del calculo cerrado. "
+                        "Presione CALCULAR (F8) para agregar las verificaciones del modelo solido.</span>")
         if gov:
             html.append(f"Gobierna: <b>{gov.title}</b>  (D/C = {gov.ratio:.3f})")
         for w in r.warnings:
@@ -2150,7 +2442,7 @@ class MainWindow(QMainWindow):
         self.txt_info.setHtml("<br>".join(html))
         ok = r.ok
         self.lbl_verdict.setText(f"  {'CUMPLE' if ok else 'NO CUMPLE'}   D/C max = {r.max_ratio:.3f}"
-                                 + (f"  ({gname})" if len(rows) > 1 else "") + "  ")
+                                 + (f"  ({gname})" if len(rows) > 1 else "") + ("" if fm else "  · sin FEM") + "  ")
         bg, fg = ("#c6efce", "#006100") if ok else ("#ffc7ce", "#9c0006")
         self.lbl_verdict.setToolTip("")
         self.lbl_verdict.setStyleSheet(f"background:{bg}; color:{fg}; border-radius:4px; padding:2px 8px;")
@@ -2332,7 +2624,19 @@ class MainWindow(QMainWindow):
     def export_3d(self):
         self.store_ui()
         if self.is_conn:
-            QMessageBox.information(self, "Modelo 3D", "El modelo solido para Gmsh solo existe para la placa base.")
+            fn, _ = QFileDialog.getSaveFileName(self, "Modelo solido 3D (STEP)", f"{self.prj.element or 'conexion'}_3d.step", "STEP (*.step *.stp)")
+            if not fn:
+                return
+            try:
+                from .conn.fem import driver
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                driver.export_step(self.prj, self._conn_vals(), fn)
+            except Exception as e:
+                QMessageBox.critical(self, "Modelo 3D", f"{type(e).__name__}: {e}")
+                return
+            finally:
+                QApplication.restoreOverrideCursor()
+            self._done(fn)
             return
         fn, _ = QFileDialog.getSaveFileName(
             self, "Modelo solido 3D (Gmsh)",

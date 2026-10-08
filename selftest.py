@@ -646,8 +646,7 @@ try:
     _w2.load_ui(); _w2.recalc()
     _tin = [_w2.tabs_in.tabText(i) for i in range(_w2.tabs_in.count()) if _w2.tabs_in.isTabVisible(i)]
     _tout = [_w2.tabs_out.tabText(i) for i in range(_w2.tabs_out.count()) if _w2.tabs_out.isTabVisible(i)]
-    if not _w2.is_conn or _tin != ["Proyecto", "Conexion de corte"] or "Esquema de la conexion" not in _tout \
-            or "Analisis FEM" in _tout or "Modelo y vistas" in _tout:
+    if not _w2.is_conn or _tin != ["Proyecto", "Conexion de corte"] or _tout != ["Modelo 3D", "Analisis FEM", "Resultados", "Esquema de la conexion"]:
         FAIL.append(f"conn UI: pestañas de la tipologia incorrectas: {_tin} / {_tout}")
     if _w2.tbl.rowCount() != len(_w2.res.checks) or "CUMPLE" not in _w2.lbl_verdict.text():
         FAIL.append(f"conn UI: tabla o veredicto incorrectos ({_w2.tbl.rowCount()} filas; '{_w2.lbl_verdict.text().strip()}')")
@@ -1256,6 +1255,125 @@ for _nm, _mut, _txt in (("perno 3/8 sin pretension tabulada", dict(bolt_size="3/
     if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
         FAIL.append(f"Puente alcance ({_nm}): debe dar aviso critico y no cumplir")
 print(f"{'  Puente: variantes':34} A490, sin interiores, clase A, sobredimensionado, junta > 38 in, rosca, servicio y alcance: OK")
+
+# ====================================================================================================
+# MODELO 3D Y FEM DE LAS CONEXIONES (conn/fem): geometria, malla (Gmsh) y .inp (CalculiX) de todas las tipologias; el analisis completo
+# con CalculiX corre solo con --3d
+# ====================================================================================================
+import json as _json2
+from steelconpro import conn as _connpkg
+from steelconpro.conn.fem import builders as _fb, model3d as _m3, scene as _sc3, driver as _drv, ccxgen as _cg, post as _post, session as _ses
+_mesh_info = []
+for _ct, _mod in _connpkg.modules():
+    _q = Project(); _q.ctype = _ct
+    _vals = getattr(_q, _mod.ATTR).loads()[0][1]
+    try:
+        _m = _fb.build_model(_q, _vals)
+        _names = [p_.name for p_ in _m.parts]
+        if len(set(_names)) != len(_names):
+            FAIL.append(f"FEM {_mod.PREFIX}: nombres de pieza repetidos")
+        for _b in _m.bolts:
+            for (_pn, _s0, _s1) in _b.grip:
+                if _pn not in _names or _s1 <= _s0:
+                    FAIL.append(f"FEM {_mod.PREFIX}: perno {_b.tag} con una pieza inexistente o grosor nulo ({_pn})")
+        for _w in _m.welds:
+            if _w.A not in _names or _w.B not in _names:
+                FAIL.append(f"FEM {_mod.PREFIX}: cordon {_w.name} entre piezas inexistentes")
+        _m2 = _m3.model_from_dict(_json2.loads(_json2.dumps(_m3.model_to_dict(_m))))
+        if [p_.name for p_ in _m2.parts] != _names or len(_m2.bolts) != len(_m.bolts) or len(_m2.welds) != len(_m.welds) or len(_m2.loads) != len(_m.loads):
+            FAIL.append(f"FEM {_mod.PREFIX}: el modelo no sobrevive a la serializacion")
+        _scn = _sc3.scene_model(_m, loads=True)
+        if sum(len(a_) for a_ in _scn.opaque) < 100:
+            FAIL.append(f"FEM {_mod.PREFIX}: la escena 3D esta vacia")
+        if not _m.supports or not _m.loads:
+            FAIL.append(f"FEM {_mod.PREFIX}: faltan apoyos o cargas")
+        # malla y .inp (sin resolver)
+        _fold = _pathlib_tmp = __import__("pathlib").Path(_tf.mkdtemp(prefix="scpfem_"))
+        _par = _drv.mesh_params(_m, _q.fea, 2.0)
+        _npz, _out = _drv._mesh(_m, _par, _fold, "m", None)
+        if _npz is None:
+            FAIL.append(f"FEM {_mod.PREFIX}: Gmsh no genero la malla: {str(_out)[-200:]}")
+            continue
+        _mesh = _cg.Mesh(str(_npz))
+        _case = _cg.CcxCase(_m, _mesh, {"plastic": True, "contacts": True})
+        _inp = _case.write(str(_fold / "m.inp"))
+        _txt = open(_inp, encoding="utf-8").read()
+        if "*RIGID BODY" not in _txt or "*CLOAD" not in _txt or "*BOUNDARY" not in _txt:
+            FAIL.append(f"FEM {_mod.PREFIX}: el .inp no tiene cuerpos rigidos, cargas o apoyos")
+        if len(_case.meta["bolts"]) != len(_m.bolts) or len(_case.meta["welds"]) != len(_m.welds):
+            FAIL.append(f"FEM {_mod.PREFIX}: pernos o cordones perdidos al armar el .inp")
+        _mesh_info.append(f"{_mod.PREFIX} {len(_mesh.node_ids) // 1000}k")
+    except Exception as _e_:
+        FAIL.append(f"FEM {_mod.PREFIX}: {type(_e_).__name__}: {_e_}")
+print(f"{'FEM: modelo 3D y malla':34} 10 tipologias: geometria, serializacion, escena, malla y .inp  ({', '.join(_mesh_info)} nodos)")
+
+# firma de vigencia y verificaciones a partir de resultados sinteticos
+_q = Project(); _q.ctype = CT_SHEAR_TAB
+_sg0 = _ses.conn_sig(_q)
+_q.stab.n = 4
+if _ses.conn_sig(_q) == _sg0:
+    FAIL.append("FEM: la firma no cambia al cambiar la geometria")
+_q.stab.n = 3
+_q.u_len = "ft"
+if _ses.conn_sig(_q) != _sg0:
+    FAIL.append("FEM: la firma no debe depender de las unidades de presentacion")
+_R = _post.FemResult(ok=True, plastic=True, lc=0.5, n_nodes=1000, n_elems=500)
+_R.model = _fb.build_model(_q, (25.0,))
+_R.bolts = [_post.BoltRes("P1", (0, 0, 0), 12.0, 3.0, [12.0], 0.75, "A325-N", 1)]
+_R.welds = [_post.WeldRes("C1", "g", 20.0, 10.0, 31.5, 0.25, 9.0)]
+_R.peeq_parts = {"Placa": {"raw": (0.02, 0, 0, 0), "avg": (0.01, 0, 0, 0), "r": 0.5}}
+_R.labels = {"Placa": "Placa"}
+_ck = {c.key: c for c in _post.fem_checks(_R.model, _R, _q)}
+_Ab = math.pi * 0.75 ** 2 / 4
+_near("FEM: φRnv del perno", _ck["fem_bolt_v"].capacity, 0.75 * 54.0 * _Ab, 1e-9)
+_near("FEM: cordon (demanda = max(pico/1.5, media))", _ck["fem_weld0"].demand, max(20.0 / 1.5, 10.0), 1e-9)
+_near("FEM: cordon (φ·0.6·FEXX)", _ck["fem_weld0"].capacity, 31.5, 1e-9)
+_near("FEM: PEEQ en %", _ck["fem_peeq_Placa"].demand, 1.0, 1e-9)
+_R.collapsed, _R.load_frac = True, 0.36
+_cap = {c.key: c for c in _post.fem_checks(_R.model, _R, _q)}.get("fem_cap")
+if _cap is None or _cap.ratio < 2.7:
+    FAIL.append("FEM: el colapso plastico debe dar una verificacion con D/C = 1/fraccion")
+_R.collapsed = False
+_res0 = solve(_q)
+_n0 = len(_res0.checks)
+_res1 = _ses.augment(solve(_q), _q, {0: _R})
+if len(_res1.checks) <= _n0 or not any(c.key.startswith("fem_") for c in _res1.checks):
+    FAIL.append("FEM: las verificaciones del 3D no se agregan al resultado de la conexion")
+print(f"{'FEM: verificaciones':34} φRnv, cordon, PEEQ, colapso, firma y suma al resultado cerrado: OK")
+
+if "--3d" in sys.argv:
+    # analisis completo con Gmsh + CalculiX (varios minutos): placa de corte y placa extrema, contra los valores a mano
+    print()
+    print("ANALISIS 3D DE LAS CONEXIONES (--3d)")
+    for _ct, _mut, _chk in ((CT_SHEAR_TAB, {}, "shear"), (CT_ENDPLATE, {}, "endplate"), (CT_BEAM_SPLICE, {}, "splice")):
+        _q = Project(); _q.ctype = _ct
+        _q.fea.plastic = True
+        _vals = getattr(_q, _connpkg.module_for(_ct).ATTR).loads()[0][1]
+        _Rf, _msgf = _drv.run_fem(_q, _vals, _tf.mkdtemp(prefix="scp3d_"), "m")
+        if _Rf is None:
+            FAIL.append(f"FEM 3D {_chk}: no corrio: {_msgf[-300:]}")
+            continue
+        if _Rf.equil[0] > 0.01 * max(_Rf.equil[1], 1.0):
+            FAIL.append(f"FEM 3D {_chk}: el equilibrio no cierra ({_Rf.equil})")
+        if _chk == "shear":
+            _bs = {b.tag: b for b in _Rf.bolts}
+            _vmax = max(b.V for b in _Rf.bolts)
+            _want = math.hypot(25.0 / 3, 25.0 * 3.0 / (2 * 3.0))              # metodo elastico de los 3 pernos (e = a = 3 in, s = 3 in)
+            if abs(_vmax - _want) > 0.06 * _want:
+                FAIL.append(f"FEM 3D placa de corte: perno mas cargado {_vmax:.2f} kip; a mano (elastico) {_want:.2f} kip")
+            if abs(_bs["P2"].V - 25.0 / 3) > 0.12 * 25.0 / 3:
+                FAIL.append(f"FEM 3D placa de corte: el perno central deberia tomar V/3 = {25.0 / 3:.2f} kip y toma {_bs['P2'].V:.2f}")
+        if _chk == "endplate":
+            _Tsum = sum(b.T for b in _Rf.bolts)
+            if not (100.0 < _Tsum < 200.0):
+                FAIL.append(f"FEM 3D placa extrema: la traccion total de los pernos ({_Tsum:.0f} kip) debe superar la fuerza del ala (~103 kip) por el efecto palanca")
+        if _chk == "splice":
+            _Vw = sum(b.V for b in _Rf.bolts if b.tag.startswith("W"))
+            if not (_Vw > 0.0):
+                FAIL.append("FEM 3D empalme: los pernos del alma no toman cortante")
+        _cks = _post.fem_checks(_Rf.model, _Rf, _q)
+        print(f"{'  ' + _chk:34} {_Rf.n_nodes:,} nodos; pernos V max {max(b.V for b in _Rf.bolts):.2f} kip, T max {max(b.T for b in _Rf.bolts):.2f} kip; "
+              f"D/C FEM max {max((c.ratio for c in _cks if not c.skip), default=0):.3f}; equilibrio {_Rf.equil[0]:.2g}/{_Rf.equil[1]:.3g}")
 
 # ====================================================================================================
 # FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
