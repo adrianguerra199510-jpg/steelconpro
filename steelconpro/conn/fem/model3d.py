@@ -265,6 +265,7 @@ class Model3D:
     bonded: list = field(default_factory=list)       # pares (pieza A, pieza B) soldados con penetracion completa o continuos: nodos compartidos
     notes: list = field(default_factory=list)
     dims: list = field(default_factory=list)      # cotas para el visor: (a, b, desplazamiento, texto, vistas)
+    tags: list = field(default_factory=list)      # etiquetas de miembros para el visor: (punto, texto)
 
     def part(self, name):
         return next((p for p in self.parts if p.name == name), None)
@@ -353,4 +354,5 @@ def model_from_dict(d: dict) -> Model3D:
     m.zone = tuple(d["zone"]) if d.get("zone") else None
     m.notes = list(d.get("notes", []))
     m.dims = list(d.get("dims", []))
+    m.tags = [(tuple(p), t) for p, t in d.get("tags", [])]
     return m

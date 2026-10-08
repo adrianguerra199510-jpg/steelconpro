@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ "claude/**" ]
-    paths: [ "steelconpro/**", "steelconpro.spec", "requirements.txt", "run.py", "selftest.py", ".github/workflows/build-windows.yml" ]
+    paths: [ "steelconpro/**", "steelconpro.spec", "requirements.txt", "run.py", "selftest.py", "selftest_nodes.py", ".github/workflows/build-windows.yml" ]
 
 jobs:
   build:

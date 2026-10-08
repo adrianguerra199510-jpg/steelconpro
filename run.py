@@ -9,7 +9,7 @@
                                      --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
                                               (--3d corre Gmsh + CalculiX y verifica con sus resultados;
-                                               en las conexiones que no son placa base los agrega al calculo cerrado)
+                                               en los modulos de nudo escribe las imagenes del modelo 3D: solo geometria)
 """
 import os
 import sys
@@ -51,33 +51,33 @@ def _out(argv, flag, suf):
     return base + suf + ext
 
 
+def batch_node(prj, argv, suf=""):
+    """Modulos de nudo (solo geometria): no hay calculo; --3d carpeta escribe las imagenes del modelo y el esquema."""
+    from steelconpro import conn
+    print(f"{prj.element}: {conn.module_for(prj.ctype).label(prj)}   (solo geometria: sin calculo ni analisis)")
+    if "--3d" in argv:
+        for p in conn.save_figures(prj, None, _out(argv, "--3d", suf)):
+            print("  ->", p)
+    for flag in ("--pdf", "--docx", "--geo"):
+        if flag in argv:
+            print(f"  aviso: {flag} no esta disponible en los modulos de nudo (todavia no tienen memoria de calculo).")
+    return 0
+
+
 def batch_one(prj, argv, suf=""):
     import tempfile
+    from steelconpro.conn.specs import CT_BASEPLATE
+    if prj.ctype != CT_BASEPLATE:
+        return batch_node(prj, argv, suf)
     from steelconpro.solver import solve
     from steelconpro import report, mesh3d
-    from steelconpro.conn.specs import CT_BASEPLATE
-
     fem = None
-    fem_map = {}
-    if prj.ctype != CT_BASEPLATE and "--geo" in argv:
-        print(f"  aviso: --geo solo aplica a la placa base; '{prj.ctype}' se exporta con la interfaz (Exportar > Modelo solido 3D, .step).")
-    if prj.ctype != CT_BASEPLATE and "--3d" in argv:
-        from steelconpro.conn import module_for
-        from steelconpro.conn.fem import driver
-        for i, (nm, vals) in enumerate(getattr(prj, module_for(prj.ctype).ATTR).loads()):
-            R, msg = driver.run_fem(prj, vals, os.path.join(_out(argv, "--3d", suf), f"comb{i + 1}"), "modelo3d")
-            print(f"  3D [{nm}]:", msg)
-            if R is not None:
-                fem_map[i] = R
     if "--3d" in argv and prj.ctype == CT_BASEPLATE:
         from steelconpro.rep3d import make_fem
         r3, msg = mesh3d.full_3d(prj, _out(argv, "--3d", suf))
         print("  3D:", msg)
         fem = make_fem(prj, r3) if r3 is not None else None
     res = solve(prj, fem=fem)
-    if fem_map:
-        from steelconpro.conn.fem import session
-        res = session.augment(res, prj, fem_map)
     gov = res.governing
     print(f"{prj.element}: {'CUMPLE' if res.ok else 'NO CUMPLE'}   "
           f"D/C max = {res.max_ratio:.3f}" + (f"   gobierna: {gov.title}" if gov else ""))

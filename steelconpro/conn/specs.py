@@ -1,414 +1,119 @@
 # -*- coding: utf-8 -*-
-"""Datos de las tipologias de conexion distintas de la placa base.
+"""Datos de los modulos de conexion distintos de la placa base: nudo viga-columna, viga a viga y crucetas.
 
 Solo dataclasses y listas de catalogo, sin importar nada del resto del programa:
-`model.py` importa este modulo para guardar la tipologia dentro de `Project`, asi
+`model.py` importa este modulo para guardar el modulo dentro de `Project`, asi
 que aqui no puede importarse `model` (importacion circular).
 
-Para agregar una tipologia:
-  1. su dataclass aqui y su nombre en CONN_TYPES;
-  2. un campo en `Project` (model.py) con ese dataclass;
-  3. un modulo en `steelconpro/conn/` con `NAME` y `solve(prj, detail) -> Results`,
-     registrado en `conn/__init__.py`.
-Unidades internas: in, kip, ksi.
+Los tres modulos comparten el mismo modelo: un MIEMBRO PRINCIPAL (columna, viga o cordon) que pasa por el nudo y cualquier numero de
+MIEMBROS conectados (vigas, diagonales) que llegan a el con un azimut (angulo en planta), una elevacion (inclinacion) y una posicion
+sobre el miembro principal.  Cada miembro tiene su propia conexion (corte, momento, cartela o en blanco).
+
+Unidades internas: in, grados.  Por ahora los modulos son solo geometria y vista 3D: no tienen calculo ni analisis.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
 
-def loads_of(combos, nvals: int, default):
-    """[(nombre, (v1, v2, ...))] a partir de [[nombre, v1, v2, ...], ...]; nunca vacia."""
-    out = []
-    for c in combos or []:
-        try:
-            out.append((str(c[0]), tuple(float(x) for x in c[1:1 + nvals])))
-        except (IndexError, TypeError, ValueError):
-            continue
-        if len(out[-1][1]) != nvals:
-            out.pop()
-    return out or [(default[0], tuple(default[1]))]
-
-
-# La primera es la placa base (el resto del programa); las demas se calculan en steelconpro/conn/.
+# La primera es la placa base (el resto del programa); las demas se arman en steelconpro/conn/.
 CT_BASEPLATE = "Placa base de columna"
-CT_SHEAR_TAB = "Conexion de corte — placa simple (viga a viga / viga a columna)"
-CT_DOUBLE_ANGLE = "Conexion de corte — doble angulo (viga a viga / viga a columna)"
-CT_SEATED = "Conexion de asiento (seated) — angulo o rigidizado"
-CT_BEAM_SPLICE = "Empalme de viga — placas de alas y alma atornilladas"
-CT_COL_SPLICE = "Empalme de columna — placas atornilladas (con o sin contacto)"
-CT_ENDPLATE = "Placa extrema a momento — a ras o extendida (viga a columna)"
-CT_GUSSET = "Cartela de arriostramiento — Whitmore y fuerza uniforme (UFM)"
-CT_HSS = "HSS a HSS — nudos de celosia (T, Y, X, K con separacion)"
-CT_RBS = "Precalificada AISC 358 — viga de seccion reducida (RBS)"
-CT_BRIDGE = "Puente — empalme de ala con pernos pretensados (deslizamiento critico, AASHTO)"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE, CT_GUSSET, CT_HSS,
-              CT_RBS, CT_BRIDGE]
+CT_NODE = "Nudo viga-columna"
+CT_B2B = "Viga a viga"
+CT_TRUSS = "Crucetas (celosia y diagonales)"
+CONN_TYPES = [CT_BASEPLATE, CT_NODE, CT_B2B, CT_TRUSS]
 
-# ---- placa simple de corte (shear tab)
-SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
+# modo del miembro principal de cada modulo
+MODE_COL, MODE_BEAM, MODE_CHORD = "col", "viga", "cordon"
+MODE_OF = {CT_NODE: MODE_COL, CT_B2B: MODE_BEAM, CT_TRUSS: MODE_CHORD}
+ATTR_OF = {CT_NODE: "ncol", CT_B2B: "nbb", CT_TRUSS: "ntr"}
+
 BOLT_GRADES = ["A325-N", "A325-X", "A490-N", "A490-X", "A307"]
 SHEAR_BOLT_SIZES = ["5/8", "3/4", "7/8", "1", "1-1/8"]
 
+# ---- conexion de cada miembro
+CK_BLANK = "En blanco (sin conexión)"
+CK_TAB = "Corte — placa simple"
+CK_DANG = "Corte — doble ángulo"
+CK_SEAT = "Corte — asiento (ángulo)"
+CK_EP_FLUSH = "Momento — placa extrema a ras"
+CK_EP_EXT = "Momento — placa extrema extendida"
+CK_WELD = "Momento — alas soldadas y alma atornillada"
+CK_GUSSET = "Diagonal — cartela atornillada"
+CK_GUSSET_W = "Diagonal — cartela con miembro soldado"
+CONNECT_KINDS = [CK_BLANK, CK_TAB, CK_DANG, CK_SEAT, CK_EP_FLUSH, CK_EP_EXT, CK_WELD, CK_GUSSET, CK_GUSSET_W]
+MOMENT_KINDS = (CK_EP_FLUSH, CK_EP_EXT, CK_WELD)
+SHEAR_KINDS = (CK_TAB, CK_DANG, CK_SEAT)
+GUSSET_KINDS = (CK_GUSSET, CK_GUSSET_W)
 
-@dataclass
-class ShearTab:
-    """Viga apoyada (secundaria) unida con una placa simple soldada al soporte y atornillada al alma."""
-    # --- viga apoyada (secundaria)
-    beam: str = "W16X31"
-    beam_steel: str = "ASTM A992"
-    # --- soporte
-    sup_kind: str = "Alma de viga maestra"
-    sup_label: str = "W24X55"
-    sup_steel: str = "ASTM A992"
-    # --- pernos (una sola fila vertical, agujeros estandar)
-    bolt_size: str = "3/4"
-    bolt_grade: str = "A325-N"
-    n: int = 3                   # pernos en la fila (2 a 12 en la configuracion convencional)
-    s: float = 3.0               # separacion vertical, in
-    a: float = 3.0               # distancia de la soldadura a la fila de pernos, in
-    # --- placa
-    tp: float = 0.375
-    plate_steel: str = "ASTM A36"
-    lev_p: float = 1.5           # distancia vertical al borde (extremos de la placa), in
-    leh_p: float = 1.5           # distancia horizontal del perno al borde libre de la placa, in
-    # --- posicion respecto a la viga
-    gap: float = 0.5             # retranqueo del extremo de la viga respecto a la cara del soporte, in
-    y_top: float = -1.0          # del tope de la viga al perno superior, in (-1 = centrado en el alma que queda)
-    # --- cope (despatinado) de la viga apoyada
-    cope_top: float = 0.0        # profundidad del cope superior, in (0 = sin cope)
-    cope_bot: float = 0.0        # profundidad del cope inferior, in
-    cope_len: float = 0.0        # longitud del cope desde el extremo de la viga, in
-    top_flush: bool = False      # tope de la viga a ras con el de la viga maestra (solo informa el cope minimo)
-    # --- soldadura placa-soporte (filete a ambos lados)
-    weld_size: float = 0.25
-    electrode: str = "E70XX"
-    weld_dir: bool = True        # incremento direccional AISC J2-5
-    # --- reacciones factorizadas de la viga: [nombre, Vu (kip)]
-    combos: list = field(default_factory=lambda: [["Comb 1", 25.0]])
-    combo_idx: int = 0
-
-    def loads(self) -> list:
-        """[(nombre, (Vu,))] nunca vacia."""
-        return loads_of(self.combos, 1, ("Comb 1", (25.0,)))
-
-
-# ---- doble angulo
-DA_ATTACH = ["Atornillado al soporte", "Soldado al soporte"]
+# ---- como termina el miembro principal en el nudo (indice 0 = continuo en los dos sentidos)
+END_LABELS = {
+    MODE_COL: ["Intermedia (continúa arriba y abajo)", "Extremo superior (la columna termina en el nudo)",
+               "Extremo inferior (la columna nace en el nudo)"],
+    MODE_BEAM: ["Continua (a ambos lados del nudo)", "Extremo (termina en el nudo, lado +X)", "Extremo (termina en el nudo, lado −X)"],
+    MODE_CHORD: ["Cordón continuo", "Extremo (termina en el nudo, lado +X)", "Extremo (termina en el nudo, lado −X)"],
+}
+MAIN_NAMES = {MODE_COL: "Columna", MODE_BEAM: "Viga principal", MODE_CHORD: "Cordón"}
+MEMBER_NAMES = {MODE_COL: "Viga", MODE_BEAM: "Viga secundaria", MODE_CHORD: "Diagonal"}
+POS_LABELS = {MODE_COL: "Altura del eje respecto del nudo", MODE_BEAM: "Distancia al nudo a lo largo de la viga principal",
+              MODE_CHORD: "Distancia al nudo a lo largo del cordón"}
+OFF_LABELS = {MODE_COL: "", MODE_BEAM: "Desnivel del eje respecto del eje de la viga principal",
+              MODE_CHORD: "Desnivel del eje respecto del eje del cordón"}
 
 
 @dataclass
-class DoubleAngle:
-    """Viga apoyada con dos angulos en el alma (pernos en doble corte) y atornillados o soldados al soporte."""
-    beam: str = "W16X31"
-    beam_steel: str = "ASTM A992"
-    sup_kind: str = "Alma de viga maestra"
-    sup_label: str = "W24X55"
-    sup_steel: str = "ASTM A992"
-    # --- angulos
-    angle: str = "L4X4X3/8"
-    angle_steel: str = "ASTM A36"
-    long_on_support: bool = True     # en angulos de lados distintos: la pierna larga va contra el soporte
-    L_ang: float = 9.0               # largo (altura) de los angulos, in
-    attach: str = "Atornillado al soporte"
-    # --- pernos
-    bolt_size: str = "3/4"
-    bolt_grade: str = "A325-N"
-    n: int = 3                       # pernos por fila (alma y pierna del soporte)
-    s: float = 3.0
-    gw: float = 2.0                  # del respaldo de la pierna del soporte a la fila de pernos del alma (= a), in
-    gs: float = 2.0                  # del respaldo de la pierna del alma a la fila de pernos del soporte, in
-    # --- soldadura (angulos soldados al soporte)
-    weld_size: float = 0.25
-    electrode: str = "E70XX"
-    weld_dir: bool = True
-    weld_lines: int = 1              # lineas de soldadura por angulo: 1 = solo el borde exterior; 2 = ambos bordes verticales
-    # --- posicion respecto a la viga y cope
-    gap: float = 0.5
-    y_top: float = -1.0
-    cope_top: float = 0.0
-    cope_bot: float = 0.0
-    cope_len: float = 0.0
-    top_flush: bool = False
-    combos: list = field(default_factory=lambda: [["Comb 1", 40.0]])
-    combo_idx: int = 0
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 1, ("Comb 1", (40.0,)))
-
-
-# ---- asiento
-SEAT_TYPES = ["Sin rigidizar (angulo de asiento)", "Rigidizado (placa de asiento y rigidizador)"]
-SEAT_ATTACH = ["Atornillado al soporte", "Soldado al soporte"]
-
-
-@dataclass
-class Seated:
-    """Viga apoyada sobre un asiento: angulo sin rigidizar o rigidizador de placa, con angulo superior de estabilidad."""
-    beam: str = "W16X31"
-    beam_steel: str = "ASTM A992"
-    sup_kind: str = "Ala de columna"
-    sup_label: str = "W14X90"
-    sup_steel: str = "ASTM A992"
-    seat_type: str = "Sin rigidizar (angulo de asiento)"
-    # --- comunes
-    L_seat: float = 8.0              # ancho del asiento (a lo largo del soporte), in
-    setback: float = 0.75            # del soporte al extremo de la viga, in
-    N: float = 3.5                   # longitud de apoyo de la viga sobre el asiento, in
-    # --- asiento sin rigidizar
-    angle: str = "L6X6X3/4"
-    angle_steel: str = "ASTM A36"
-    long_horizontal: bool = True     # la pierna larga es la horizontal (la que recibe la viga)
-    attach: str = "Atornillado al soporte"
-    bolt_size: str = "3/4"
-    bolt_grade: str = "A325-N"
-    n: int = 2                       # filas de pernos en la pierna vertical (dos columnas por fila)
-    s: float = 3.0
-    yb: float = 1.25                 # del fondo del asiento a la fila inferior de pernos, in
-    gs: float = 4.0                  # separacion entre las dos columnas de pernos, in
-    weld_size: float = 0.3125
-    electrode: str = "E70XX"
-    weld_dir: bool = True
-    # --- asiento rigidizado
-    st_W: float = 5.0                # ancho (proyeccion) del rigidizador, in
-    st_H: float = 8.0                # alto del rigidizador, in
-    st_t: float = 0.625
-    st_steel: str = "ASTM A36"
-    st_weld: float = 0.3125
-    # --- reaccion factorizada
-    combos: list = field(default_factory=lambda: [["Comb 1", 25.0]])
-    combo_idx: int = 0
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 1, ("Comb 1", (25.0,)))
-
-
-# ---- empalmes atornillados de perfiles I (viga y columna)
-SPLICE_SHARE = ["Las alas toman todo el momento", "Momento repartido segun la inercia (alas / alma)"]
-
-
-@dataclass
-class _SpliceBase:
-    shape: str = "W16X50"
+class Member:
+    """Miembro conectado al principal (viga o diagonal)."""
+    name: str = "V1"
+    shape: str = "W16X31"
     steel: str = "ASTM A992"
+    az: float = 0.0              # azimut en planta, grados, desde +X hacia +Y (visto desde arriba)
+    el: float = 0.0              # inclinacion sobre la horizontal, grados (+ hacia arriba)
+    pos: float = 0.0             # posicion sobre el miembro principal medida desde el nudo (in): altura (columna) o distancia (viga/cordon)
+    off: float = 0.0             # desnivel del eje respecto del eje del principal (viga/cordon), in
+    L: float = 48.0              # largo libre dibujado del miembro, in
+    roll: float = 0.0            # giro del miembro sobre su eje, grados
+    conn: str = CK_TAB
+    gap: float = 0.5             # retranqueo del extremo respecto de la cara del miembro principal, in
+    # ---- herraje
+    bolt_size: str = "3/4"
+    bolt_grade: str = "A325-N"
+    n_bolts: int = 3             # pernos por fila (placa simple, doble angulo) o filas (cartela)
+    bolt_s: float = 3.0          # separacion de los pernos, in
+    plate_t: float = 0.375       # espesor de placas / angulos / cartela, in
     plate_steel: str = "ASTM A36"
-    gap: float = 0.5                 # separacion entre los extremos de los perfiles, in
-    # --- alas: placa exterior (una por ala) e interiores (dos por ala; 0 = sin ellas)
-    fo_b: float = 7.0
-    fo_t: float = 0.625
-    fi_b: float = 0.0
-    fi_t: float = 0.0
-    bolt_size: str = "7/8"
-    bolt_grade: str = "A325-N"
-    f_rows: int = 3                  # filas de pernos a lo largo del perfil, a cada lado del empalme
-    f_cols: int = 2                  # pernos a lo ancho del ala (2 o 4)
-    f_s: float = 3.0
-    f_g: float = 3.5                 # separacion entre columnas de pernos a lo ancho
-    f_end: float = 1.5               # del extremo del perfil a la primera fila
-    f_pend: float = 1.5              # de la ultima fila al extremo de la placa
-    # --- alma: dos placas, una a cada lado
-    w_t: float = 0.375
-    w_h: float = 9.0
-    w_nv: int = 3
-    w_nh: int = 1
-    w_sv: float = 3.0
-    w_sh: float = 3.0
-    w_end: float = 2.0
-    w_pend: float = 1.5
-    wbolt_size: str = "3/4"
-    # --- reparto del momento
-    share: str = "Las alas toman todo el momento"
-    combos: list = field(default_factory=list)
-    combo_idx: int = 0
+    ep_ext: float = 3.0          # extension de la placa extrema extendida sobre el ala, in
+    cont: bool = True            # placas de continuidad en la columna (momento contra el ala de una columna I)
 
 
 @dataclass
-class BeamSplice(_SpliceBase):
-    combos: list = field(default_factory=lambda: [["Comb 1", 1200.0, 30.0, 0.0]])    # [nombre, Mu, Vu, Nu(+ traccion)]
+class Nodo:
+    """Nudo: miembro principal + miembros conectados.  `mode` fija el eje del principal (columna vertical; viga o cordon a lo largo de X)."""
+    mode: str = MODE_COL
+    main_shape: str = "W14X90"
+    main_steel: str = "ASTM A992"
+    main_roll: float = 0.0       # giro de la seccion sobre su eje, grados
+    main_slope: float = 0.0      # inclinacion del eje respecto de la horizontal (viga / cordon), grados
+    main_end: str = ""           # uno de END_LABELS[mode]; vacio = continuo
+    main_len_neg: float = 60.0   # largo del miembro principal antes del nudo (abajo / lado -X), in
+    main_len_pos: float = 60.0   # largo despues del nudo (arriba / lado +X), in
+    members: list = field(default_factory=list)      # [Member]
+    show_hw: bool = True         # dibujar los herrajes (placas, angulos, pernos)
 
-    def loads(self) -> list:
-        return loads_of(self.combos, 3, ("Comb 1", (1200.0, 30.0, 0.0)))
+    def __post_init__(self):
+        self.members = [m if isinstance(m, Member) else _mk_member(m) for m in (self.members or [])]
+        if not self.main_end:
+            self.main_end = END_LABELS[self.mode][0]
 
+    @property
+    def end_index(self) -> int:
+        labs = END_LABELS.get(self.mode, [])
+        return labs.index(self.main_end) if self.main_end in labs else 0
 
-@dataclass
-class ColSplice(_SpliceBase):
-    shape: str = "W14X90"
-    fo_b: float = 8.0
-    fo_t: float = 0.75
-    f_g: float = 4.0
-    w_h: float = 10.0
-    contact: bool = True             # extremos aserrados o fresados en contacto (J1.4)
-    combos: list = field(default_factory=lambda: [["Comb 1", 400.0, 300.0, 20.0]])   # [nombre, Pu(+ compresion), Mu, Vu]
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 3, ("Comb 1", (400.0, 300.0, 20.0)))
-
-
-# ---- placa extrema a momento
-EP_FLANGE_WELD = ["CJP (penetracion completa)", "Filete a ambos lados"]
-
-
-@dataclass
-class EndPlate:
-    """Viga con placa extrema soldada, atornillada al ala de la columna. Una fila de pernos (2) dentro de cada ala y,
-    si se pide, una fila (2) fuera de cada ala (placa extendida)."""
-    beam: str = "W18X50"
-    beam_steel: str = "ASTM A992"
-    col: str = "W14X90"
-    col_steel: str = "ASTM A992"
-    cont_plates: bool = False        # placas de continuidad en la columna (se omiten las verificaciones locales del ala y del alma)
-    plate_steel: str = "ASTM A572 Gr.50"
-    bp: float = 8.0                  # ancho de la placa extrema
-    tp: float = 1.0
-    bolt_size: str = "7/8"
-    bolt_grade: str = "A325-N"
-    g: float = 5.5                   # gramil de los pernos (entre las dos columnas)
-    pfo: float = 2.0                 # de la cara exterior del ala a la fila exterior de pernos
-    pfi: float = 2.0                 # de la cara interior del ala a la fila interior de pernos
-    e_ext: float = 1.5               # de la fila exterior al borde de la placa
-    ext_t: bool = True               # fila exterior en el lado traccionado (placa extendida)
-    ext_c: bool = True               # fila exterior en el lado comprimido
-    # --- soldaduras viga-placa
-    fw_type: str = "CJP (penetracion completa)"
-    fw_size: float = 0.5             # cateto del filete (si es filete) o espesor de garganta de referencia
-    ww_size: float = 0.3125          # filete del alma, a ambos lados
-    electrode: str = "E70XX"
-    weld_dir: bool = True
-    combos: list = field(default_factory=lambda: [["Comb 1", 1800.0, 40.0]])    # [nombre, Mu (+ traccion arriba), Vu]
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 2, ("Comb 1", (1800.0, 40.0)))
+    def lengths(self):
+        """(largo en el lado negativo, largo en el lado positivo) segun como termina el principal."""
+        k = self.end_index
+        return (self.main_len_neg if k != 2 else 0.0, self.main_len_pos if k != 1 else 0.0)
 
 
-# ---- cartela de arriostramiento
-GUS_CONN = ["Arriostramiento atornillado a la cartela", "Arriostramiento soldado a la cartela"]
-
-
-@dataclass
-class Gusset:
-    """Cartela en la esquina viga-columna (arriostramiento diagonal), con las fuerzas de interfaz del metodo de fuerza
-    uniforme (UFM, caso sin momentos en las interfaces). El angulo se mide desde la VERTICAL."""
-    beam: str = "W18X50"
-    beam_steel: str = "ASTM A992"
-    col: str = "W14X90"
-    col_steel: str = "ASTM A992"
-    theta: float = 45.0              # angulo del arriostramiento con la vertical, grados
-    t: float = 0.75
-    steel: str = "ASTM A36"
-    L_b: float = 24.0                # largo de la cartela soldado al ala de la viga
-    L_c: float = 0.0                 # largo soldado a la columna (0 = el que exige el UFM)
-    w_gb: float = 0.375              # filete cartela-viga (a ambos lados)
-    w_gc: float = 0.375              # filete cartela-columna (a ambos lados)
-    electrode: str = "E70XX"
-    weld_dir: bool = True
-    conn: str = "Arriostramiento atornillado a la cartela"
-    # --- union del arriostramiento (pernos)
-    bolt_size: str = "7/8"
-    bolt_grade: str = "A325-N"
-    n_rows: int = 4                  # filas de pernos a lo largo del eje del arriostramiento
-    n_lines: int = 2                 # lineas de pernos transversales al eje
-    s: float = 3.0
-    g_t: float = 3.0                 # separacion transversal entre lineas de pernos (o entre lineas de soldadura)
-    m_planes: int = 2                # planos de corte por perno (2 = cartela entre dos angulos/placas)
-    e_b: float = 0.0                 # excentricidad del arriostramiento respecto al grupo, in
-    t_br: float = 1.0                # espesor total del arriostramiento unido en un plano de apoyo (suma de elementos), in
-    Fu_br: float = 58.0              # Fu del arriostramiento, ksi
-    Le: float = 1.5                  # del extremo del arriostramiento a la primera fila
-    lg_end: float = 1.5              # de la ultima fila al borde libre de la cartela
-    # --- union soldada
-    nlw: int = 2                     # lineas de soldadura (2 o 4)
-    Lw: float = 10.0
-    w_br: float = 0.3125
-    # --- geometria respecto al punto de trabajo
-    D1: float = 14.0                 # del punto de trabajo a la primera fila de pernos (o inicio de la soldadura), in
-    L_avg: float = 0.0               # longitud de pandeo de Thornton, in (0 = automatica)
-    combos: list = field(default_factory=lambda: [["Comb 1", 120.0]])        # [nombre, P (+ traccion, − compresion)]
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 1, ("Comb 1", (120.0,)))
-
-
-# ---- HSS a HSS (nudos de celosia, AISC 360 Cap. K)
-HSS_SHAPES = ["Redondo (HSS circular)", "Rectangular / cuadrado"]
-HSS_TYPES = ["T o Y (una diagonal)", "X (dos diagonales opuestas)", "K o N con separacion (dos diagonales)"]
-
-
-@dataclass
-class HSSJoint:
-    """Nudo de celosia HSS a HSS en el plano de la cercha; diagonales soldadas directamente al cordon."""
-    shape: str = "Redondo (HSS circular)"
-    jt: str = "T o Y (una diagonal)"
-    chord: str = "HSS10.000X0.500"
-    chord_steel: str = "ASTM A500 Gr.C (HSS red.)"
-    br1: str = "HSS6.625X0.280"
-    br1_steel: str = "ASTM A500 Gr.C (HSS red.)"
-    theta1: float = 60.0             # angulo agudo entre la diagonal 1 y el cordon, grados
-    br2: str = "HSS4.500X0.237"
-    br2_steel: str = "ASTM A500 Gr.C (HSS red.)"
-    theta2: float = 60.0
-    gap: float = 1.0                 # separacion entre las puntas de las diagonales sobre el cordon (K, N), in
-    chord_P: float = 0.0             # axial del cordon junto al nudo (compresion +), kip
-    combos: list = field(default_factory=lambda: [["Comb 1", 40.0, -40.0]])    # [nombre, P1, P2] axiales de las diagonales (compresion +)
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 2, ("Comb 1", (40.0, -40.0)))
-
-
-# ---- AISC 358: viga de seccion reducida (RBS)
-RBS_FRAMES = ["Porticos especiales a momento (SMF)", "Porticos intermedios a momento (IMF)"]
-
-
-@dataclass
-class RBSConn:
-    """Conexion precalificada RBS (AISC 358-16, Cap. 5) con diseno por demanda: Mpr, cortante, Mf, zona del panel y columna fuerte-viga debil."""
-    beam: str = "W18X50"
-    beam_steel: str = "ASTM A992"
-    col: str = "W14X145"
-    col_steel: str = "ASTM A992"
-    frame: str = "Porticos especiales a momento (SMF)"
-    a: float = 4.75                  # de la cara de la columna al inicio del recorte, in
-    b: float = 13.5                  # largo del recorte, in
-    c: float = 1.5                   # profundidad del recorte en cada lado del ala, in
-    L: float = 300.0                 # luz de la viga entre ejes de columna, in
-    n_beams: int = 1                 # vigas que llegan a la columna en el plano (1 o 2)
-    two_cols: bool = True            # columna arriba y abajo del nudo
-    cont_plates: bool = True         # placas de continuidad colocadas
-    H_story: float = 0.0             # altura de entrepiso para descontar el cortante de la columna en la zona del panel (0 = no descontar)
-    combos: list = field(default_factory=lambda: [["Comb 1", 8.0, 150.0]])      # [nombre, Vg (cortante de gravedad en el RBS, kip), Puc (axial de la columna, kip)]
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 2, ("Comb 1", (8.0, 150.0)))
-
-
-# ---- puente: empalme de ala atornillado con pernos pretensados
-BR_SURFACE = ["Clase A (limpia, sin pintar)", "Clase B (granallada, sin pintar)", "Clase C (galvanizada y rugosa)"]
-BR_HOLES = ["Estandar", "Sobredimensionado o ranura corta", "Ranura larga"]
-BR_GRADES = ["A325", "A490"]
-
-
-@dataclass
-class BridgeSplice:
-    """Empalme atornillado de una ala de viga de puente con pernos de alta resistencia pretensados (AASHTO LRFD 6.13.6): placa exterior
-    y dos placas interiores. La fuerza de diseno del ala se da ya calculada (6.13.6.1.4)."""
-    fl_b: float = 14.0
-    fl_t: float = 1.0
-    fl_steel: str = "ASTM A709 Gr.50"
-    po_b: float = 14.0
-    po_t: float = 0.75
-    pi_b: float = 6.0
-    pi_t: float = 0.75
-    sp_steel: str = "ASTM A709 Gr.50"
-    bolt_size: str = "7/8"
-    bolt_grade: str = "A325"
-    threads_excl: bool = True        # rosca fuera de los planos de corte
-    surface: str = "Clase B (granallada, sin pintar)"
-    holes: str = "Estandar"
-    n_rows: int = 4                  # filas a cada lado del empalme
-    n_cols: int = 4                  # pernos a lo ancho
-    s: float = 3.0
-    g: float = 3.0
-    e_end: float = 1.75              # del extremo del ala a la primera fila
-    e_pend: float = 1.75             # de la ultima fila al extremo de la placa
-    combos: list = field(default_factory=lambda: [["Comb 1", 450.0, 320.0]])      # [nombre, fuerza de resistencia (kip), fuerza de servicio II (kip)]
-
-    def loads(self) -> list:
-        return loads_of(self.combos, 2, ("Comb 1", (450.0, 320.0)))
-
+def _mk_member(d) -> Member:
+    ok = Member.__dataclass_fields__
+    return Member(**{k: v for k, v in dict(d).items() if k in ok})

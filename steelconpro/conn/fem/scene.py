@@ -39,8 +39,13 @@ def _bolt_faces(b):
     return out
 
 
-def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label=None, hide=()):
-    """Escena de la geometria. `scale` convierte las coordenadas (in) a las unidades mostradas."""
+GRAY = "#a6a6a6"
+
+
+def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label=None, hide=(), bolts: bool = True, gray: bool = False,
+                tags: bool = False):
+    """Escena de la geometria. `scale` convierte las coordenadas (in) a las unidades mostradas.  gray: todas las piezas en gris (miniaturas de
+    geometria); bolts: dibujar los pernos; tags: nombre de cada miembro en su extremo."""
     from .. .gl3d import Scene
     sc = Scene()
     pts = []
@@ -52,14 +57,14 @@ def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label
             faces += [[tuple(np.asarray(q) * scale) for q in f] for f in pr.faces()]
         pts += [q for f in faces for q in f]
         sc.group = "g_" + p.kind
-        sc.add_faces(faces, _rgb(COLORS.get(p.kind, COLORS["other"])), 1.0 if p.kind not in ("support",) else 0.55, edges=True)
-    for w in mdl.welds:
+        sc.add_faces(faces, _rgb(GRAY if gray else COLORS.get(p.kind, COLORS["other"])), 1.0 if p.kind not in ("support",) else 0.55, edges=True)
+    for w in (mdl.welds if not gray else []):
         pr = weld_prism(w)
         fs = [[tuple(np.asarray(q) * scale) for q in f] for f in pr.faces()]
         sc.group = "g_weld"
         sc.add_faces(fs, _rgb(COLORS["weld"]), 1.0, edges=False)
     bolt_parts = {"shank": [], "head": []}
-    for b in mdl.bolts:
+    for b in (mdl.bolts if bolts else []):
         f = _bolt_faces(b)
         for k in bolt_parts:
             bolt_parts[k] += [[tuple(np.asarray(q) * scale) for q in fc] for fc in f[k]]
@@ -69,6 +74,9 @@ def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label
     sc.group = "other"
     sc.pts = pts
     sc.title = mdl.name
+    if tags:
+        for pos, text in getattr(mdl, "tags", []):
+            sc.labels.append((tuple(np.asarray(pos, float) * scale), text, "#1f3864", "#ffffffd9", "#1f3864", True))
     if loads:
         _add_loads(sc, mdl, scale, load_label)
     return sc
@@ -114,18 +122,23 @@ def scene_arrays(sc, mode=None):
     return tris, cols, segs
 
 
-def render_scene_png(sc, path, elev=24.0, azim=50.0, size=(1100, 800), title="", mode=None):
-    """Imagen de la escena con z-buffer. Las etiquetas de la escena se dibujan sobre la imagen."""
+def render_scene_image(sc, elev=24.0, azim=50.0, size=(1100, 800), title="", mode=None, ss=2, margin=0.06):
+    """Imagen PIL de la escena con z-buffer. Las etiquetas de la escena se dibujan sobre la imagen."""
     from PIL import ImageDraw
-    from .raster import render, camera
+    from .raster import render
     tris, cols, segs = scene_arrays(sc, mode)
     if not len(tris):
         raise ValueError("escena vacia")
     pts = np.asarray(sc.pts, float) if len(sc.pts) else tris.reshape(-1, 3)
-    im = render(tris, cols, segs, elev, azim, size, bounds=pts)
+    im = render(tris, cols, segs, elev, azim, size, bounds=pts, ss=ss, margin=margin)
     if title:
         ImageDraw.Draw(im).text((10, 8), title, fill=(30, 30, 30))
-    im.save(path)
+    return im
+
+
+def render_scene_png(sc, path, elev=24.0, azim=50.0, size=(1100, 800), title="", mode=None):
+    """Imagen de la escena con z-buffer (PNG)."""
+    render_scene_image(sc, elev, azim, size, title, mode).save(path)
     return path
 
 
@@ -246,6 +259,9 @@ def draw_scene_mpl(ax, sc, max_tris=30000, sub=True):
     ax.set_ylim(lo[1], hi[1])
     ax.set_zlim(lo[2], hi[2])
     ax.set_box_aspect(tuple(np.maximum(hi - lo, 1e-6)))
+    for pos, text, fg, _bg, border, bold in getattr(sc, "labels", []):
+        ax.text(pos[0], pos[1], pos[2], text, color=fg, fontsize=8, weight="bold" if bold else "normal", ha="center", va="center",
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=border or fg, alpha=0.9, lw=0.8))
     return pc
 
 

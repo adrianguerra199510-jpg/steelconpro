@@ -65,6 +65,16 @@ def mesh_job(job: dict, out_npz: str) -> dict:
                     tools.append((3, occ.addCylinder(*c0, *(ax * (ln + 0.1)), dh / 2.0)))
                 dts, _ = occ.cut(dts, tools)
             vols[p.name] = [d for d in dts if d[0] == 3]
+        if job.get("step"):                         # exportacion de la geometria (STEP): piezas con sus agujeros, vastagos de pernos y cordones; sin malla
+            for b in mdl.bolts:
+                ax = unit(b.axis)
+                c0 = np.asarray(b.p, float) + ax * b.head_s
+                occ.addCylinder(*c0, *(ax * (b.nut_s - b.head_s)), b.db / 2.0)
+            for w in mdl.welds:
+                _prism_vol(occ, weld_prism(w))
+            occ.synchronize()
+            gmsh.write(str(job["step"]))
+            return {"nodes": 0, "elems": 0}
         wvols = []
         for w in mdl.welds:
             wvols.append(_prism_vol(occ, weld_prism(w)))

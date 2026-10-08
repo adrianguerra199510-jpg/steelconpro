@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Analisis 3D por elementos finitos de las conexiones (Gmsh + CalculiX): modelo, malla, solucion y resultados.
+"""Modelo 3D y (mas adelante) analisis por elementos finitos de los modulos de conexion (Gmsh + CalculiX).
 
-    builders.build_model(prj, vals) -> Model3D       geometria, pernos, cordones, apoyos y cargas de cada tipologia
-    driver.run_fem(prj, vals, folder, ...)           malla + CalculiX + resultados (FemResult)
-    post.fem_checks(mdl, R, prj)                     verificaciones que salen del analisis
-    scene.scene_model / render_scene_png             vista 3D y PNG
+    builders.build_model(prj) -> Model3D            geometria, pernos y placas del nudo (conn/assembly.py)
+    scene.scene_model / render_scene_image          vista 3D y miniaturas (z-buffer propio)
+    driver / ccxgen / solve / post / mesher         malla, CalculiX y resultados: SIN USO por ahora (el analisis esta desactivado en los
+                                                    modulos nuevos hasta que se ordene reactivarlo)
 """

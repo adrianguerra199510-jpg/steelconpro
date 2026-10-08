@@ -2,12 +2,20 @@
 
 # SteelConPro 1.1
 
-Diseño y verificación de **conexiones de acero**: placas base de columna (perfiles **W, HSS cuadrado/rectangular, HSS circular y Pipe**, anclajes ACI 318-19,
-llave de corte, rigidizadores, soldadura), conexiones de corte (placa simple, doble ángulo, asiento), empalmes de viga y de columna, placa extrema a
-momento, cartelas de arriostramiento, nudos HSS a HSS, RBS (AISC 358) y empalmes de puente con pernos pretensados. Todas con dibujo paramétrico, **vista 3D**
-y **análisis de elementos finitos** sólido (Gmsh + CalculiX) además del cálculo cerrado.
+Diseño y verificación de **conexiones de acero** en cuatro módulos:
 
-Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**; para las conexiones: AISC Manual 15ª Ed., AISC 358-16, AISC 341-22, AASHTO LRFD y RCSC.
+| Módulo | Qué es | Estado |
+|---|---|---|
+| **Placa base** | placas base de columna (perfiles **W, HSS cuadrado/rectangular, HSS circular y Pipe**), anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis de elementos finitos sólido (Gmsh + CalculiX) | terminado |
+| **Nudo viga-columna** | cualquier columna, de extremo o intermedia, con vigas en cualquier ubicación y ángulo (y diagonales con cartela) | solo geometría y vista 3D |
+| **Viga a viga** | cualquier viga principal con vigas secundarias ubicadas respecto del nudo, a corte o a momento | solo geometría y vista 3D |
+| **Crucetas** | cordón (o viga) con diagonales y montantes en cualquier ángulo, con cartela | solo geometría y vista 3D |
+
+Los tres módulos de nudo no tienen todavía cálculo ni análisis: sus pestañas *Análisis FEM* y *Resultados* y el botón CALCULAR están desactivados, y no
+se corre nada. Con estos módulos se podrán generar todas las tipologías de conexión; las tipologías anteriores (placa de corte, doble ángulo, asiento,
+empalmes, placa extrema, cartela, HSS, RBS y puente) se retiraron.
+
+Normas de la placa base: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**.
 
 > **Cambio de nombre (1.1).** El programa antes tenía otro nombre y otra numeración de versiones; la de SteelConPro empieza en 1.1. Los proyectos se guardan ahora como `.scp`; los archivos `.pbase` y el formato de libro de las
 > versiones anteriores se siguen abriendo (al guardar quedan como `.scp`), y los materiales y perfiles importados de la carpeta de datos anterior se copian solos a la
@@ -20,163 +28,44 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
-## Modelo 3D y análisis FEM de todas las conexiones
 
-- **Nuevo nombre y nuevo logo** (`tools/make_logo.py` los regenera). Los proyectos se guardan como `.scp`; los `.pbase` anteriores se siguen abriendo.
-- **Pestaña «Modelo 3D»** en las diez tipologías de conexión (placa de corte, doble ángulo, asiento, empalmes de viga y de columna, placa extrema, cartela,
-  HSS a HSS, RBS y puente): vigas, columnas, placas, ángulos, rigidizadores, pernos con cabeza y tuerca, cordones y las flechas de la combinación que gobierna.
-  Se gira con el ratón (OpenGL; sin OpenGL se usa matplotlib).
-- **Análisis de elementos finitos sólido (Gmsh + CalculiX) igual que el de la placa base**: `CALCULAR (F8)` corre cada combinación de carga y agrega sus
-  verificaciones a las del cálculo cerrado; la pestaña **«Análisis FEM»** muestra von Mises, desplazamiento, deformada amplificable y deformación plástica por
-  pieza o del conjunto, con las tablas de **pernos** (cortante y tracción, D/C) y de **cordones** (esfuerzo en la garganta, pico y media). Los PDF/Word llevan un
-  *Anexo C* con las imágenes y las tablas. `SteelConPro.exe archivo.scp --3d carpeta` hace lo mismo por lotes; *Exportar > Modelo sólido 3D* escribe un `.step`.
+## Módulos de nudo: viga-columna, viga a viga y crucetas
 
-**Cómo se modela** (`steelconpro/conn/fem/`; unidades in, kip, ksi):
+**Nueva conexión** abre un asistente de tres pasos con miniaturas 3D, en el estilo de los programas de conexiones:
 
-| Elemento | Modelo |
-|---|---|
-| Piezas | tetraedros cuadráticos (C3D10), un cuerpo por pieza; acero elasto-plástico perfecto con límite **φ·Fy** (0.9·Fy); RBS: viga con endurecimiento (Ry·Fy → Cpr·Ry·Fy) y columna con Fy |
-| Pernos | el borde de cada agujero (y la corona de cabeza y tuerca) es un cuerpo rígido (ecuaciones lineales de pequeños giros, no el *RIGID BODY* de CalculiX, que hacía divergir el paso plástico); entre los de piezas consecutivas actúan resortes de cortante (en las dos direcciones del plano) y, entre cabeza y tuerca, un resorte axial **solo a tracción**. La fuerza del perno sale de los resortes: se compara con φ·Fnv·Ab por plano de corte y con φ·F'nt·Ab (J3.7) |
-| Cordones de filete | prismas triangulares unidos a las dos piezas; se lee el esfuerzo resultante en el plano de la garganta (nodos libres del cordón) y se compara con φ·0.60·FEXX: **D/C = máx(pico / 1.5, media)** (el cordón es elástico: el pico de los extremos es singular) |
-| Contacto | resortes solo-compresión entre nodos gemelos de las superficies que se tocan (penalización); se resuelve con un **conjunto activo** de problemas lineales (cada iteración es una corrida de CalculiX) |
-| Apoyos y cargas | extremos de columnas, vigas o perfiles empotrados; las fuerzas y momentos de la combinación actúan sobre una cara rígida en el punto de aplicación del cálculo cerrado (p. ej. la reacción en la cara del soporte). En el asiento la viga solo apoya (sin fricción): se fijan el deslizamiento y el giro en planta del extremo cargado para que no quede un modo de cuerpo rígido |
-| Plasticidad | se verifica la **deformación plástica equivalente** promediada (límite del proyecto, 5 %); si el análisis plástico no converge antes de la carga de diseño se informa «capacidad = x % de la carga» con D/C = 1/x |
+1. **Clase**: nudo viga-columna, viga a viga, crucetas o placa base.
+2. **Geometría**: la configuración inicial del nudo (columna de extremo con una viga, intermedia con dos o cuatro vigas, una o dos secundarias, V, N, cruz…) en
+   perfil I, HSS rectangular o HSS circular.
+3. **Diseño**: la conexión que se asigna a todos los miembros — *momento* (placa extrema a ras o extendida; alas soldadas con alma atornillada y placas de
+   continuidad), *corte* (placa simple, doble ángulo, asiento), *truss* (cartela atornillada o con miembros soldados) o *en blanco*.
 
-Si ninguna pieza se acerca a la fluencia (von Mises promediado < 0.8·φ·Fy) la pasada plástica se omite: el elástico ya es la solución (queda indicado en la pestaña FEM). La malla automática es algo más gruesa que la «Fina»; los cordones se mallan más fino.
+Después todo se edita en la pestaña del módulo:
 
-Tiempo típico por combinación (4 núcleos, malla *Automática*): HSS ≈ 15 s; placa de corte, doble ángulo, asiento y placa extrema, de 1.5 a 4 min; cartela, empalmes y puente, de 3 a 6 min; RBS (plástica con endurecimiento) ≈ 6 min. Con la malla *Fina* o muchos contactos puede pasar de 10 min.
+- **Miembro principal** (la columna, la viga principal o el cordón): **cualquier sección del catálogo AISC** (I, canal, ángulo, te, HSS rectangular y circular, tubo,
+  y las que importe o defina), acero, giro de la sección sobre su eje, inclinación del eje (viga y cordón), y cómo termina en el nudo: *intermedio* (continúa a los
+  dos lados) o *extremo* (la columna termina en el nudo por arriba o nace en él), con el largo a cada lado.
+- **Miembros conectados**: una tabla con **Agregar, Duplicar y Quitar**; cada miembro tiene su propia sección y acero, su **azimut** (ángulo en planta, desde +X
+  hacia +Y), su **elevación** (inclinación sobre la horizontal: 0° viga, ±45° diagonal, ±90° montante), su **posición** respecto del nudo (altura sobre la columna, o
+  distancia al nudo a lo largo de la viga principal o del cordón: el nudo es el punto de aplicación de la carga), un desnivel de eje (viga y cordón), su largo, su giro
+  sobre el eje y su retranqueo. El miembro arranca donde su eje sale de la sección del principal, sea cual sea el ángulo.
+- **Conexión de cada miembro** (o la misma para todos con *Aplicar*): en blanco, placa simple, doble ángulo, asiento, placa extrema a ras o extendida, alas
+  soldadas con alma atornillada (con placas de continuidad si llega al ala de una columna I) y, para las diagonales, cartela atornillada o con el miembro soldado.
+  Parámetros: diámetro y calidad de los pernos, número y separación, espesor y acero de las placas, extensión de la placa extrema.
+  Las diagonales que comparten plano **comparten una sola cartela**.
+- **Vista**: *Modelo 3D* (gira con el ratón; con *Mostrar nombres* cada miembro lleva su nombre en el extremo) y *Planta y elevación* (esquema). *Exportar >
+  Modelo sólido 3D* escribe la geometría en **STEP**.
 
-**Lo que este análisis NO hace** (y por qué conviene leer sus resultados con criterio):
-- **Pernos**: sin plastificación, fractura ni pretensión. Los empalmes de puente con pernos pretensados se analizan como pernos de aplastamiento (el deslizamiento crítico sólo
-  está en el cálculo cerrado). La rigidez al cortante del perno (3500·d² kip/in) es un valor de modelo, no medido.
-- **Soldaduras**: los cordones de filete de la placa de corte, doble ángulo, asiento y cartela se modelan; en la placa extrema, los nudos HSS y la unión viga-columna de la cartela y de la RBS
-  la unión es continua (equivale a penetración completa) y no se verifica el cordón.
-- **Contacto sin fricción** y sin preapretado; las partes rígidas de los agujeros ocultan la concentración de esfuerzos en el borde (el aplastamiento se verifica en el cálculo cerrado).
-- **Pandeo** (local o global) y grandes desplazamientos: análisis de pequeños desplazamientos.
-- RBS: la plastificación de la viga en la zona reducida es lo buscado y no se verifica; se verifican la columna, las placas de continuidad y la zona del panel.
-- Los resultados del 3D no sustituyen las verificaciones de la norma: se agregan a ellas. Fueron contrastados con cálculos manuales (reparto elástico de la placa de corte,
-  tracción de la placa extrema, equilibrio), **no con ejemplos publicados ni con otro programa**; revíselos antes de usarlos en un proyecto.
+Los herrajes son representaciones visuales (placas, ángulos, pernos con cabeza y tuerca) con proporciones razonables: **no están dimensionados ni verificados**.
+Los archivos de ejemplo `ejemplos/NC-01_nudo_viga_columna.scp`, `VV-01_viga_a_viga.scp` y `CR-01_crucetas.scp` se regeneran con `tools/make_examples.py`.
 
-## Tipologías de conexión
+**Archivos anteriores.** Los `.scp` que contengan conexiones de las tipologías retiradas se abren, pero esas conexiones se omiten (el programa avisa cuáles); las
+placas base se abren igual que siempre.
 
-Cada conexión del proyecto tiene una **tipología** (Proyecto > Tipología, o el diálogo del botón *Nueva*). Un mismo archivo `.scp`
-puede mezclarlas; los archivos de placa base de versiones anteriores se abren como placa base. Todas las tipologías se calculan en **forma cerrada** (el modelo 3D y el análisis FEM, descritos arriba, se suman a ese cálculo),
-con varias combinaciones de carga (gobierna la peor), tabla de verificaciones D/C, dibujo con cotas, memoria detallada y PDF/Word, y se pueden
-correr por lotes (`run.py libro.scp --pdf memoria.pdf`).
+**Para modificar o ampliar un módulo**: los datos están en `conn/specs.py` (`Member`, `Nodo`), las configuraciones del asistente en `conn/presets.py`, la geometría
+3D (secciones, recorte de cada miembro contra el principal, herrajes, cartelas) en `conn/assembly.py` y la pestaña de entrada en `ui_nodes.py`; el asistente es
+`ui_wizard.py`. `selftest_nodes.py` prueba la geometría con valores calculados a mano, todas las combinaciones del asistente y 300 nudos al azar.
 
-| Tipología | Pestaña | Norma | Qué verifica |
-|---|---|---|---|
-| Placa base de columna | (las de siempre) | AISC DG1, ACI 318-19 cap. 17 | como siempre; con análisis 3D (Gmsh + CalculiX) |
-| **Placa de corte (shear tab)** | Conexión de corte | AISC 360-22, Manual 15ª Parte 7, 9, 10 | viga secundaria a viga maestra (con cope), viga a alma o ala de columna |
-| **Doble ángulo** | Doble angulo | AISC 360-22, Manual Parte 10 | atornillado o atornillado-soldado al soporte; viga a viga o a columna |
-| **Asiento (seated)** | Asiento | AISC 360-22, Manual Parte 10 | sin rigidizar (ángulo) o rigidizado (ménsula) |
-| **Empalme de viga** | Empalme de viga | AISC 360-22 cap. D, J | placas de ala y de alma atornilladas; momento, cortante y axial |
-| **Empalme de columna** | Empalme de columna | AISC 360-22 cap. D, J | igual, con contacto de extremos opcional (J1.4(a)) |
-| **Placa extrema a momento** | Placa extrema | AISC 360-22, Manual Parte 9 | a ras o extendida; filas de pernos con efecto palanca, lado de la columna |
-| **Cartela de arriostramiento** | Cartela | AISC Manual Parte 13 | Whitmore, bloque de cortante, Thornton, UFM sin momentos |
-| **HSS a HSS (celosía)** | HSS a HSS | AISC 360-22 cap. K | nudos T, Y, X y K con separación (redondos); T, Y, X (rectangulares) |
-| **RBS precalificada** | AISC 358 RBS | AISC 358-16 cap. 5, AISC 341 | Mpr, Mf en la cara, zona del panel, columna fuerte-viga débil |
-| **Puente pretensado** | Puente pretensado | AASHTO LRFD 6.13, RCSC | empalme de ala con pernos A325/A490 de deslizamiento crítico |
-
-Cargas: cada tipología tiene su tabla de combinaciones, con las columnas que le corresponden: Vu (placa de corte, doble ángulo), R (asiento), Mu, Vu, Nu
-(empalme de viga), Pu, Mu, Vu (empalme de columna), Mu, Vu (placa extrema), P del arriostramiento (cartela), P de cada diagonal (HSS), Vg y Puc (RBS)
-y la fuerza del ala en Resistencia y en Servicio II (puente). Una nota sobre la tabla explica la convención de signos y de qué combinación se trata.
-
-### Placa de corte (shear tab)
-
-Cubre la **viga secundaria apoyada en el alma de una viga maestra** (con cope superior y/o inferior), la viga apoyada
-en el alma de una columna y en el ala de una columna. Una fila vertical de 2 a 12 pernos en agujeros estándar, placa soldada al soporte con filete
-a ambos lados. Se verifica, por cada reacción factorizada Vu (varias combinaciones; gobierna la peor):
-
-- **Pernos**: cortante con excentricidad por el método del centro instantáneo (AISC Manual Parte 7; curva de Crawford y Kulak, Δmax = 0.34 in;
-  e = a, la distancia de la soldadura a la fila de pernos); se informa también el coeficiente del método elástico. Aplastamiento y desgarramiento
-  (J3.10) por perno en la placa y en el alma, con la componente vertical y la horizontal de la fuerza de cada perno según el centro instantáneo.
-- **Placa**: fluencia y rotura por cortante (J4.2), bloque de cortante (J4.3), flexión en la soldadura (F11), interacción flexión-cortante
-  (criterio plástico del programa, conservador) y rotura por flexión en la sección neta.
-- **Soldadura** placa-soporte (J2.4, método elástico con incremento direccional opcional), cortante del **metal base del soporte** (equivale a
-  la Ec. 9-2 del Manual), tamaño mínimo y máximo del filete.
-- **Viga apoyada**: fluencia por cortante y rotura por cortante neto del alma, **bloque de cortante** con cope superior, **flexión de la sección
-  con cope** (Snet de la sección en T, brazo = retranqueo + longitud del cope − a).
-- Distancias mínimas (J3.3, J3.4, J2.4) y avisos de la configuración convencional (Tabla 10-9: 2 ≤ n ≤ 12, a ≤ 3.5 in, leh ≥ 2·db, tp ≤ db/2 + 1/16, filete ≈ 5/8·tp).
-
-No hace: pandeo local del alma por cope (*NO EVALUADO*; la 15ª edición cambió el procedimiento), carga axial en la viga, agujeros ranurados, deslizamiento
-crítico, configuraciones extendidas (a > 3.5 in), flexión local del ala de la columna ni rigidez del soporte. La excentricidad es la completa (e = a),
-sin la reducción que permite la Tabla 10-9: es conservador.
-
-### Doble ángulo, asiento, empalmes
-
-- **Doble ángulo**: los pernos del alma trabajan en doble corte con excentricidad (centro instantáneo); la pierna al soporte se atornilla (dos columnas,
-  cortante concentrado) o se suelda (líneas verticales con excentricidad). Aplastamiento y desgarramiento en alma, ángulos y soporte; cortante, rotura y
-  bloque de cortante de los ángulos; alma de la viga con cope. *No*: flexión de las piernas, axial, ranuras, deslizamiento crítico, pandeo por cope.
-- **Asiento**: la reacción actúa a e = retranqueo + N/2. Viga: fluencia local y aplastamiento del alma (J10.2, J10.3 en el extremo). Ángulo sin rigidizar:
-  flexión plástica de la pierna horizontal, cortante, tracción de la pierna vertical, pernos o soldadura al soporte con el momento R·e. Rigidizado: ménsula
-  (M, V, interacción plástica) y soldadura de dos líneas. *No*: placa horizontal del asiento rigidizado, ángulo superior, unión del ala inferior,
-  pandeo del rigidizador (solo aviso de esbeltez).
-- **Empalme de viga / columna**: el momento lo toman las alas (o se reparte según la inercia con el alma); el axial se reparte por áreas. Placas de ala
-  exterior e interiores (fluencia, rotura con An ≤ 0.85·Ag, pandeo en compresión), pernos (simple o doble corte, junta larga), aplastamiento, bloque de
-  cortante, tracción neta del ala del perfil; alma con método elástico (V con excentricidad, Mw, N). Columna con contacto: la compresión pasa por
-  contacto y el empalme se dimensiona para el mayor entre la tracción y el 50 % de la compresión (ala y alma). *No*: pandeo de las placas de alma,
-  ranuras, deslizamiento crítico ni la resistencia del perfil fuera del empalme.
-
-### Placa extrema a momento
-
-Cada fila de pernos se trata como una **T equivalente con efecto palanca** (Manual Parte 9): el momento resistente es Mcap = 2·Σ T_i·h_i; el cortante lo
-toman los pernos de compresión. Lado de la columna: flexión local del ala (J10.1), fluencia y aplastamiento del alma (J10.2, J10.3) y zona del panel
-(J10.6); con placas de continuidad se omiten las tres primeras. **Atención: no es el procedimiento de líneas de fluencia de AISC DG4**
-(Murray y Sumner), que no se pudo consultar: es una aproximación conservadora que puede diferir de DG4. *No*: rigidizadores de placa (4ES, 8ES),
-flexión del ala de la columna por líneas de fluencia (*NO EVALUADO*).
-
-### Cartela de arriostramiento
-
-Método de fuerza uniforme (UFM, Manual Parte 13) en la esquina viga-columna, caso sin momentos: tanθ = (α + ec)/(β + eb); fuerzas de interfaz
-H_b, V_b, H_c, V_c. Se verifican la unión del arriostramiento (pernos con método elástico o soldadura), la sección de **Whitmore** (fluencia y rotura en
-tracción; pandeo con K = 0.65 y L_avg, Thornton, en compresión), el bloque de cortante, las soldaduras e interfaces y los efectos locales en viga y
-columna (J10.1, J10.2, J10.3). Si la geometría no cumple la condición del UFM se avisa (fatal si la diferencia pasa de 10 %). *No*: el
-arriostramiento como miembro, el borde libre de la cartela (Dowswell), la conexión viga-columna bajo las fuerzas de la cartela.
-
-### HSS a HSS
-
-AISC 360-22 cap. K: tabla K3.1 (redondos T, Y, X y K con separación: plastificación del cordón y punzonamiento) y tabla K3.2A (rectangulares T, Y, X con
-β ≤ 0.85). Los límites de validez (β, D/t, θ ≥ 30°, Fy ≤ 52 ksi, Fy/Fu ≤ 0.8, g ≥ tb1 + tb2) son avisos críticos: fuera de ellos las ecuaciones no
-aplican y el veredicto no es válido. *No*: nudos rectangulares K/N con separación (aviso fatal «no implementado»), β > 0.85, cortante del cordón en la
-separación, el miembro diagonal, la soldadura diagonal-cordón ni la excentricidad del nudo.
-
-### RBS (AISC 358-16)
-
-Procedimiento de diseño por demanda del cap. 5: Z_RBS, Mpr = Cpr·Ry·Fy·Z_RBS, s_h = a + b/2, V_RBS = 2·Mpr/L_h + Vg, Mf = Mpr + V_RBS·s_h ≤ φd·Mpe; límites de
-a, b, c; límites de precalificación de viga y columna; compacidad sísmica (AISC 341 Tabla D1.1); zona del panel; columna fuerte-viga débil
-(AISC 341 E3.4a) y criterio de placas de continuidad. **Solo la RBS**: las demás conexiones precalificadas de AISC 358 (WUF-W, BFP, placas extremas
-precalificadas, Kaiser, ConXtech, SidePlate...) **no** están. *No*: la soldadura CJP viga-columna ni el arriostramiento lateral en la RBS.
-
-### Puente: empalme con pernos pretensados (AASHTO)
-
-«Conexiones de puente con pretensado» se interpretó como el **empalme atornillado de ala de viga de puente con pernos de alta resistencia pretensados de
-deslizamiento crítico** (AASHTO LRFD 6.13, RCSC): una placa exterior y dos interiores. Servicio II: Rn = Kh·Ks·Ns·Pt (Ks: clase A 0.30, B 0.50, C 0.30; Kh:
-1.0 / 0.85 / 0.70; Pt según RCSC Tabla 8.1). Resistencia: cortante (0.56 o 0.48·Ab·Fub·Ns, φs = 0.80, ×0.80 si la junta pasa de 38 in), aplastamiento, fluencia y
-fractura del ala y de las placas, bloque de cortante, distancias. La fuerza de diseño del ala se ingresa ya calculada (AASHTO 6.13.6.1.4). *No*: fatiga,
-empalme del alma, pandeo de las placas en compresión, fuerza mínima de diseño del ala. Si lo que se buscaba era **postensado** (cables o barras en
-hormigón pretensado), esa tipología **no** está.
-
-### Lo que hay que saber antes de confiar en los resultados
-
-- Las ecuaciones, tablas (J3.2–J3.4, K3.1/K3.2A, Ks/Kh y pretensiones de pernos) y procedimientos se transcribieron **de memoria, sin acceso a las
-  publicaciones primarias** (AISC, AASHTO, RCSC, Manual 15ª, DG4). Las pruebas (`selftest.py`) las comparan contra cálculos manuales independientes
-  y contra otros métodos numéricos (centro instantáneo y efecto palanca resueltos con *brentq*), **no contra tablas o ejemplos publicados**. Revíselos
-  contra la edición vigente antes de usarlos en un proyecto.
-- Lo que cada tipología no evalúa aparece en la tabla como *NO EVALUADO* (sin D/C) y en los avisos de la memoria.
-- Un aviso que empieza con `**` (geometría imposible, tipo de nudo no implementado, fuera del rango de validez) invalida el veredicto: el resultado
-  no dirá CUMPLE.
-- Las conexiones cerradas no pasan por el FEM 3D: el veredicto es el del cálculo cerrado.
-- Es una herramienta de verificación; la responsabilidad del diseño es del ingeniero.
-
-**Modo por lotes.** `SteelConPro.exe proyecto.scp --pdf ...` lee el libro tal como lo guarda la interfaz y calcula **todas** sus conexiones (con varias, el nombre de
-la conexión se agrega a los archivos de salida).
-
-**Para agregar otra tipología:** su dataclass en `steelconpro/conn/specs.py` (con su constante `CT_*` en `CONN_TYPES`); un campo en `Project`
-(`model.py`, y en `_used_extras` si usa perfiles o aceros propios); un módulo en `steelconpro/conn/` con `NAME`, `ATTR`, `TAB`, `PREFIX`, `TITLE`, `NORMS`,
-`LOADS`, `LOADS_NOTE`, `FORM` (formulario declarativo con `formspec.py`), `solve(prj, detail) -> Results` (usa `base.run_combos` y `common.py`: centro
-instantáneo, bloque de cortante, soldadura, efecto palanca...), `draw(fig, prj)`, `input_rows` y `label`, registrado en `conn/__init__.py`. La interfaz, el
-dibujo, las memorias PDF/Word y el modo por lotes lo toman solos; `selftest.py` recorre todas las tipologías registradas con una prueba de fuzz.
+---
 
 ## 1. Usar y compartir
 
@@ -456,7 +345,9 @@ Léalas antes de firmar nada con esto.
 
 ```
 run.py                  punto de entrada (GUI / lote / autopruebas)
-selftest.py             45 casos de prueba del motor
+selftest.py             casos de prueba del motor (placa base); al final corre selftest_nodes.py
+selftest_nodes.py       pruebas de los módulos de nudo (solo geometría): `python selftest_nodes.py`
+tools/                  make_logo.py (logo e iconos), make_examples.py (ejemplos de los nudos)
 steelconpro/
   units.py              sistema de unidades configurable (UnitSet)
   materials.py          aceros, varillas, electrodos, geometría de pernos
@@ -480,7 +371,14 @@ steelconpro/
   dialogs.py            seccion personalizada y biblioteca de materiales
   data/aisc_shapes.json catalogo AISC integrado (1,660 perfiles)
   ui.py, ui_widgets.py  interfaz PySide6
-ejemplos/               tres proyectos resueltos
+  ui_nodes.py           pestaña de entrada de los módulos de nudo (principal + tabla de miembros)
+  ui_wizard.py          asistente Nueva conexión: Clase / Geometría / Diseño con miniaturas
+  conn/specs.py         datos de los módulos de nudo (Member, Nodo) y sus listas
+  conn/presets.py       geometrías y diseños del asistente
+  conn/assembly.py      geometría 3D de los nudos: secciones, recorte contra el principal, herrajes, cartelas
+  conn/nodes.py         los tres módulos vistos por la interfaz y su esquema de planta y elevación
+  conn/fem/             modelo 3D y escena (visor y miniaturas); malla, CalculiX y resultados quedan sin uso hasta reactivar el análisis
+ejemplos/               tres placas base resueltas y un ejemplo de cada módulo de nudo
 ```
 
 Para tocar el motor sin abrir la GUI: `python run.py --selftest` corre los casos y
@@ -498,6 +396,9 @@ completo por lotes.
 | `PB-01_W14X90.scp` | W14X90, 22×22×2", 8 pernos Ø1¼", llave de corte | 0.750 | distancia al borde |
 | `PB-02_HSS12_rigidizada.scp` | HSS12X12X½, 24×24×2", rigidizadores perimetrales, soldadura CJP | 0.949 | esbeltez del rigidizador |
 | `PB-03_poste_circular.scp` | Pipe/HSS16 sobre placa circular Ø30", 12 pernos Ø1½" con gancho en J | 1.000 | aplastamiento del concreto |
+| `NC-01_nudo_viga_columna.scp` | columna W14X90 intermedia con cuatro vigas (placa extrema extendida, doble ángulo, placa simple, alas soldadas) y una diagonal con cartela | — | solo geometría |
+| `VV-01_viga_a_viga.scp` | viga principal W24X55 con tres secundarias (placa extrema a ras, placa simple, doble ángulo esviada 60°) | — | solo geometría |
+| `CR-01_crucetas.scp` | cordón HSS10X10 con dos diagonales en V y un montante, cartela atornillada | — | solo geometría |
 
 ---
 

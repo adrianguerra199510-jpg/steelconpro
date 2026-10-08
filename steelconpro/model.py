@@ -6,7 +6,7 @@ import json
 
 from . import materials as M
 from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
-from .conn.specs import CONN_TYPES, CT_BASEPLATE, ShearTab, DoubleAngle, Seated, BeamSplice, ColSplice, EndPlate, Gusset, HSSJoint, RBSConn, BridgeSplice
+from .conn.specs import CONN_TYPES, CT_BASEPLATE, Nodo, MODE_COL, MODE_BEAM, MODE_CHORD
 import dataclasses
 from .appdata import LEGACY_BOOK_TAGS
 
@@ -407,6 +407,15 @@ class FEAOpts:
     weld_long_reduction: bool = True    # reduccion por cordon largo, AISC J2.2b(d): L > 100·w (el FEM no la captura)
 
 
+class LegacyConnection(ValueError):
+    """La conexion es de una tipologia retirada del programa (placa de corte, doble angulo, asiento, empalmes, placa extrema, cartela, HSS, RBS, puente)."""
+
+
+def _default_nodo(mode):
+    from .conn.presets import default_nodo
+    return default_nodo(mode)
+
+
 @dataclass
 class Project:
     name: str = "Proyecto"
@@ -421,16 +430,9 @@ class Project:
 
     # tipologia de la conexion: la placa base usa section/plate/bolts/... ; las demas, su propio bloque (ver conn/)
     ctype: str = CT_BASEPLATE
-    stab: ShearTab = field(default_factory=ShearTab)
-    dang: DoubleAngle = field(default_factory=DoubleAngle)
-    seat: Seated = field(default_factory=Seated)
-    bsp: BeamSplice = field(default_factory=BeamSplice)
-    csp: ColSplice = field(default_factory=ColSplice)
-    epl: EndPlate = field(default_factory=EndPlate)
-    gus: Gusset = field(default_factory=Gusset)
-    hss: HSSJoint = field(default_factory=HSSJoint)
-    rbs: RBSConn = field(default_factory=RBSConn)
-    brs: BridgeSplice = field(default_factory=BridgeSplice)
+    ncol: Nodo = field(default_factory=lambda: _default_nodo(MODE_COL))       # nudo viga-columna
+    nbb: Nodo = field(default_factory=lambda: _default_nodo(MODE_BEAM))       # viga a viga
+    ntr: Nodo = field(default_factory=lambda: _default_nodo(MODE_CHORD))      # crucetas
 
     section: Section = field(default_factory=Section)
     plate: Plate = field(default_factory=Plate)
@@ -534,6 +536,8 @@ class Project:
             ok = getattr(cls, "__dataclass_fields__", {})
             return cls(**{k: v for k, v in dd.items() if k in ok})
         d = json.loads(txt)
+        if d.get("ctype", CT_BASEPLATE) not in CONN_TYPES:
+            raise LegacyConnection(str(d.get("ctype")))
         p = Project()
         for k, v in d.items():
             if not hasattr(p, k):
@@ -576,18 +580,15 @@ def _used_extras(projects):
     para guardarlos dentro del archivo."""
     shapes, mats = {}, {"steel": {}, "anchor": {}, "concrete": {}}
     for p in projects:
-        for lab in (p.section.label, p.lug.label, p.stab.beam, p.stab.sup_label, p.dang.beam, p.dang.sup_label,
-                    p.dang.angle, p.seat.beam, p.seat.sup_label, p.seat.angle, p.bsp.shape, p.csp.shape, p.epl.beam, p.epl.col, p.gus.beam, p.gus.col, p.hss.chord, p.hss.br1, p.hss.br2, p.rbs.beam, p.rbs.col):
+        nodos = [p.ncol, p.nbb, p.ntr]
+        labs = [p.section.label, p.lug.label] + [nd.main_shape for nd in nodos] + [m.shape for nd in nodos for m in nd.members]
+        for lab in labs:
             s = CATALOG.get(lab)
             if s and s.source not in ("AISC", "integrado"):
                 shapes[s.label] = asdict(s)
-        for name in (p.section.steel, p.plate.steel, p.lug.steel, p.stiff.steel,
-                     p.stab.beam_steel, p.stab.sup_steel, p.stab.plate_steel,
-                     p.dang.beam_steel, p.dang.sup_steel, p.dang.angle_steel,
-                     p.seat.beam_steel, p.seat.sup_steel, p.seat.angle_steel, p.seat.st_steel, p.bsp.steel, p.bsp.plate_steel,
-                     p.csp.steel, p.csp.plate_steel, p.epl.beam_steel, p.epl.col_steel, p.epl.plate_steel,
-                     p.gus.beam_steel, p.gus.col_steel, p.gus.steel, p.hss.chord_steel, p.hss.br1_steel, p.hss.br2_steel,
-                     p.rbs.beam_steel, p.rbs.col_steel, p.brs.fl_steel, p.brs.sp_steel):
+        names = [p.section.steel, p.plate.steel, p.lug.steel, p.stiff.steel] + [nd.main_steel for nd in nodos] + \
+                [x for nd in nodos for m in nd.members for x in (m.steel, m.plate_steel)]
+        for name in names:
             m = next((x for x in M.PLATE_STEELS + M.SHAPE_STEELS if x.name == name), None)
             if m and m.note in ("usuario", "proyecto"):
                 mats["steel"][name] = {"name": m.name, "Fy": m.Fy, "Fu": m.Fu}
@@ -610,6 +611,9 @@ def save_book(path: str, projects: list):
         json.dump(data, f, indent=1, ensure_ascii=False)
 
 
+LAST_SKIPPED: list = []      # [(elemento, tipologia)] de las conexiones omitidas por el ultimo load_book (tipologias retiradas)
+
+
 def load_book(path: str) -> list:
     """Lee un libro (varias conexiones) o un proyecto antiguo de una sola."""
     with open(path, encoding="utf-8") as f:
@@ -620,6 +624,12 @@ def load_book(path: str) -> list:
                 CATALOG.shapes[sd["label"]] = Shape(**sd)
         CATALOG._reindex()
         M.register_embedded(d.get("materiales", {}))
-        return [Project.from_json(json.dumps(c)) for c in d.get("conexiones", [])] \
-            or [Project()]
+        out = []
+        LAST_SKIPPED.clear()
+        for c in d.get("conexiones", []):
+            try:
+                out.append(Project.from_json(json.dumps(c)))
+            except LegacyConnection as e:
+                LAST_SKIPPED.append((str(c.get("element", "")), str(e)))
+        return out or [Project()]
     return [Project.from_json(json.dumps(d))]

@@ -28,7 +28,7 @@ a = Analysis(
     ["run.py"],
     pathex=["."],
     binaries=binaries,
-    datas=datas + [("selftest.py", "."), ("ejemplos", "ejemplos"),
+    datas=datas + [("selftest.py", "."), ("selftest_nodes.py", "."), ("ejemplos", "ejemplos"),
                    ("steelconpro/data", "steelconpro/data")],
     hiddenimports=hidden,
     excludes=["tkinter", "PyQt5", "PyQt6", "PySide2", "IPython", "notebook",

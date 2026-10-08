@@ -9,17 +9,15 @@ from . import post
 
 def conn_sig(prj) -> str:
     """Firma de lo que define el modelo 3D de la conexion: la tipologia, sus datos (con las combinaciones) y las opciones del FEM."""
-    from .. import module_for
-    mod = module_for(prj.ctype)
-    d = {"ctype": prj.ctype, "spec": asdict(getattr(prj, mod.ATTR))}
+    from ..specs import ATTR_OF
+    d = {"ctype": prj.ctype, "spec": asdict(getattr(prj, ATTR_OF[prj.ctype]))}
     fea = asdict(prj.fea)
     d["fea"] = {k: fea[k] for k in ("plastic", "plastic_limit", "mesh3d", "mesh3d_mode", "weld_peak_factor") if k in fea}
     return json.dumps(d, sort_keys=True, ensure_ascii=False)
 
 
 def combo_names(prj) -> list:
-    from .. import module_for
-    return [nm for nm, _ in getattr(prj, module_for(prj.ctype).ATTR).loads()]
+    return [""]
 
 
 def augment(res, prj, fem_map: dict):
