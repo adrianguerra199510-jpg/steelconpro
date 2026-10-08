@@ -1,6 +1,6 @@
 <p align="center"><img src="steelconpro/data/logo.png" width="420" alt="SteelConPro"></p>
 
-# SteelConPro 4.0.0
+# SteelConPro 1.1
 
 Diseño y verificación de **conexiones de acero**: placas base de columna (perfiles **W, HSS cuadrado/rectangular, HSS circular y Pipe**, anclajes ACI 318-19,
 llave de corte, rigidizadores, soldadura), conexiones de corte (placa simple, doble ángulo, asiento), empalmes de viga y de columna, placa extrema a
@@ -9,7 +9,7 @@ y **análisis de elementos finitos** sólido (Gmsh + CalculiX) además del cálc
 
 Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**; para las conexiones: AISC Manual 15ª Ed., AISC 358-16, AISC 341-22, AASHTO LRFD y RCSC.
 
-> **Cambio de nombre (4.0.0).** El programa antes tenía otro nombre. Los proyectos se guardan ahora como `.scp`; los archivos `.pbase` y el formato de libro de las
+> **Cambio de nombre (1.1).** El programa antes tenía otro nombre y otra numeración de versiones; la de SteelConPro empieza en 1.1. Los proyectos se guardan ahora como `.scp`; los archivos `.pbase` y el formato de libro de las
 > versiones anteriores se siguen abriendo (al guardar quedan como `.scp`), y los materiales y perfiles importados de la carpeta de datos anterior se copian solos a la
 > carpeta `SteelConPro` la primera vez que se abre el programa.
 
@@ -20,7 +20,7 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
-## Novedades de la 4.0.0: SteelConPro, modelo 3D y análisis FEM de todas las conexiones
+## Novedades de la 1.1: SteelConPro, modelo 3D y análisis FEM de todas las conexiones
 
 - **Nuevo nombre y nuevo logo** (`tools/make_logo.py` los regenera). Los proyectos se guardan como `.scp`; los `.pbase` anteriores se siguen abriendo.
 - **Pestaña «Modelo 3D»** en las diez tipologías de conexión (placa de corte, doble ángulo, asiento, empalmes de viga y de columna, placa extrema, cartela,
@@ -56,6 +56,10 @@ Tiempo típico por combinación (4 núcleos, malla *Automática*): HSS ≈ 15 s;
 - RBS: la plastificación de la viga en la zona reducida es lo buscado y no se verifica; se verifican la columna, las placas de continuidad y la zona del panel.
 - Los resultados del 3D no sustituyen las verificaciones de la norma: se agregan a ellas. Fueron contrastados con cálculos manuales (reparto elástico de la placa de corte,
   tracción de la placa extrema, equilibrio), **no con ejemplos publicados ni con otro programa**; revíselos antes de usarlos en un proyecto.
+
+## Historial anterior al cambio de nombre
+
+Las secciones que siguen describen versiones del programa con su nombre y su numeración anteriores (3.x). Se conservan solo como historial: la numeración de SteelConPro empieza en 1.1.
 
 ## Novedades de la 3.3.0: tipologías de conexión
 
