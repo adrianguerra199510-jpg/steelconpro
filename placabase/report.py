@@ -13,6 +13,7 @@ from .model import Project
 from .solver import Results
 from . import draw, geometry as G
 from .units import U, UnitSet, float_to_frac
+from .conn.specs import CT_BASEPLATE
 
 
 def _units(prj) -> UnitSet:
@@ -207,6 +208,9 @@ def annex_figs(figs):
 
 
 def save_figures(prj: Project, res: Results, folder: str) -> list[str]:
+    if prj.ctype != CT_BASEPLATE:                          # otras tipologias: ver placabase/conn/
+        from .conn import draw_conn
+        return draw_conn.save_figures(prj, res, folder)
     f = Path(folder)
     f.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -460,6 +464,9 @@ def export_xlsx(prj: Project, res: Results, path: str,
 # ==================================================================== DOCX
 def export_docx(prj: Project, res: Results, path: str,
                 figs: list[str] | None = None, detail: bool = True) -> str:
+    if prj.ctype != CT_BASEPLATE:
+        from .conn import report_conn
+        return report_conn.export_docx(prj, res, path, figs, detail)
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -652,6 +659,9 @@ def export_docx(prj: Project, res: Results, path: str,
 def export_pdf(prj: Project, res: Results, path: str,
                figs: list[str] | None = None, detail: bool = True) -> str:
     """Memoria de calculo en PDF (reportlab, sin depender de Word)."""
+    if prj.ctype != CT_BASEPLATE:
+        from .conn import report_conn
+        return report_conn.export_pdf(prj, res, path, figs, detail)
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

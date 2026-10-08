@@ -29,16 +29,38 @@ def resolve(p):
 
 
 def batch(argv):
+    """Calcula TODAS las conexiones del archivo (un .pbase es un libro, como lo guarda la interfaz).
+    Con varias conexiones, los archivos de --pdf / --docx / --geo llevan el nombre de la conexion al final."""
+    from placabase.model import load_book
+    book = load_book(resolve(argv[0]))
+    rc = 0
+    for i, prj in enumerate(book):
+        suf = "" if len(book) == 1 else "_" + "".join(
+            ch if ch.isalnum() or ch in "-_" else "_" for ch in (prj.element or f"conexion{i + 1}"))
+        rc = max(rc, batch_one(prj, argv, suf))
+    return rc
+
+
+def _out(argv, flag, suf):
+    p = argv[argv.index(flag) + 1]
+    if not suf:
+        return p
+    base, ext = os.path.splitext(p)
+    return base + suf + ext
+
+
+def batch_one(prj, argv, suf=""):
     import tempfile
-    from placabase.model import Project
     from placabase.solver import solve
     from placabase import report, mesh3d
+    from placabase.conn.specs import CT_BASEPLATE
 
-    prj = Project.load(resolve(argv[0]))
     fem = None
-    if "--3d" in argv:
+    if prj.ctype != CT_BASEPLATE and ("--3d" in argv or "--geo" in argv):
+        print(f"  aviso: --3d/--geo solo aplican a la placa base; '{prj.ctype}' se calcula en forma cerrada.")
+    if "--3d" in argv and prj.ctype == CT_BASEPLATE:
         from placabase.rep3d import make_fem
-        r3, msg = mesh3d.full_3d(prj, argv[argv.index("--3d") + 1])
+        r3, msg = mesh3d.full_3d(prj, _out(argv, "--3d", suf))
         print("  3D:", msg)
         fem = make_fem(prj, r3) if r3 is not None else None
     res = solve(prj, fem=fem)
@@ -52,11 +74,11 @@ def batch(argv):
     if any(f in argv for f in ("--docx", "--pdf")):
         figs = report.save_figures(prj, res, tempfile.mkdtemp(prefix="pbase_"))
     if "--pdf" in argv:
-        print("  ->", report.export_pdf(prj, res, argv[argv.index("--pdf") + 1], figs))
+        print("  ->", report.export_pdf(prj, res, _out(argv, "--pdf", suf), figs))
     if "--docx" in argv:
-        print("  ->", report.export_docx(prj, res, argv[argv.index("--docx") + 1], figs))
-    if "--geo" in argv:
-        g, d = mesh3d.export_3d(prj, argv[argv.index("--geo") + 1], prj.fea.mesh3d)
+        print("  ->", report.export_docx(prj, res, _out(argv, "--docx", suf), figs))
+    if "--geo" in argv and prj.ctype == CT_BASEPLATE:
+        g, d = mesh3d.export_3d(prj, _out(argv, "--geo", suf), prj.fea.mesh3d)
         print("  ->", g)
         print("  ->", d)
     return 0 if res.ok else 2

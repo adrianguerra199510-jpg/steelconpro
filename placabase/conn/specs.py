@@ -60,7 +60,7 @@ class ShearTab:
     electrode: str = "E70XX"
     weld_dir: bool = True        # incremento direccional AISC J2-5
     # --- reacciones factorizadas de la viga: [nombre, Vu (kip)]
-    combos: list = field(default_factory=lambda: [["Comb 1", 40.0]])
+    combos: list = field(default_factory=lambda: [["Comb 1", 25.0]])
     combo_idx: int = 0
 
     def loads(self) -> list:
@@ -71,4 +71,4 @@ class ShearTab:
                 out.append((str(c[0]), float(c[1])))
             except (IndexError, TypeError, ValueError):
                 continue
-        return out or [("Comb 1", 40.0)]
+        return out or [("Comb 1", 25.0)]

@@ -634,6 +634,69 @@ if f"{7.59375 * 25.4 ** 3:.4g}" not in _zl:                                     
     FAIL.append(f"conn unidades: Z mal convertido en la memoria: {_zl}")
 print(f"{'consistencia de unidades':34} D/C mm-kN = in-kip = {_rm.max_ratio:.4f};  Z en la memoria: {_zl.split('=')[-2].strip()}")
 
+# ---- interfaz y reportes de la tipologia (offscreen, solo si hay Qt) y modo por lotes
+_od = _tf.mkdtemp(prefix="pbconn_out_")
+try:
+    from PySide6.QtWidgets import QApplication as _QA2
+    from placabase import ui as _ui2, report as _rep
+    _app2 = _QA2.instance() or _QA2([])
+    _w2 = _ui2.MainWindow()
+    _w2.add_connection(CT_SHEAR_TAB)
+    _w2.prj.stab.cope_top, _w2.prj.stab.cope_len = 2.0, 4.5
+    _w2.load_ui(); _w2.recalc()
+    _tin = [_w2.tabs_in.tabText(i) for i in range(_w2.tabs_in.count()) if _w2.tabs_in.isTabVisible(i)]
+    _tout = [_w2.tabs_out.tabText(i) for i in range(_w2.tabs_out.count()) if _w2.tabs_out.isTabVisible(i)]
+    if not _w2.is_conn or _tin != ["Proyecto", "Conexion de corte"] or "Esquema de la conexion" not in _tout \
+            or "Analisis FEM" in _tout or "Modelo y vistas" in _tout:
+        FAIL.append(f"conn UI: pestañas de la tipologia incorrectas: {_tin} / {_tout}")
+    if _w2.tbl.rowCount() != len(_w2.res.checks) or "CUMPLE" not in _w2.lbl_verdict.text():
+        FAIL.append(f"conn UI: tabla o veredicto incorrectos ({_w2.tbl.rowCount()} filas; '{_w2.lbl_verdict.text().strip()}')")
+    _dc0 = _w2.res.max_ratio
+    _w2.fnamed["Conexion de corte"].w("stab.n").setValue(5)
+    _w2.recalc()
+    if not abs(_w2.res.max_ratio - _dc0) > 1e-6 or _w2.prj.stab.n != 5:
+        FAIL.append("conn UI: cambiar el numero de pernos en el formulario debe recalcular")
+    _w2._sc_add(); _w2.recalc()
+    if len(_w2.res.combo_rows) != 2 or _w2.tbl_cmb.rowCount() != 2:
+        FAIL.append("conn UI: agregar una reaccion debe agregar una combinacion")
+    _w2._goto_calc(0)                                                    # salto a la memoria: no debe fallar
+    _qq, _RR = _w2.export_target()
+    _figs = _rep.save_figures(_qq, _RR, _od)
+    _pdf = _rep.export_pdf(_qq, _RR, _os.path.join(_od, "m.pdf"), _figs)
+    _doc = _rep.export_docx(_qq, _RR, _os.path.join(_od, "m.docx"), _figs)
+    if len(_figs) != 2 or any(_os.path.getsize(f) < 5000 for f in (_pdf, _doc, *_figs)):
+        FAIL.append("conn reportes: PDF/Word/figuras no generados o vacios")
+    _w2._switch(0); _w2.recalc()
+    _tin0 = [_w2.tabs_in.tabText(i) for i in range(_w2.tabs_in.count()) if _w2.tabs_in.isTabVisible(i)]
+    if _w2.is_conn or "Placa" not in _tin0 or "Conexion de corte" in _tin0:
+        FAIL.append(f"conn UI: al volver a la placa base deben reaparecer sus pestañas ({_tin0})")
+    print(f"{'UI y reportes de la tipologia':34} pestañas por tipologia, edicion, combinaciones, PDF {_os.path.getsize(_pdf)//1024} KB, "
+          f"Word {_os.path.getsize(_doc)//1024} KB")
+except ImportError:
+    print(f"{'UI y reportes de la tipologia':34} omitida (sin PySide6)")
+except Exception as _e:
+    FAIL.append(f"conn UI/reportes: {type(_e).__name__}: {_e}")
+    traceback.print_exc()
+
+# modo por lotes (run.py): lee el LIBRO (antes usaba Project.load y calculaba un proyecto por defecto) y procesa cada conexion
+import importlib, io, contextlib
+_run = importlib.import_module("run")
+_b1 = Project(); _b1.element = "VS-A"; _b1.ctype = CT_SHEAR_TAB; _b1.stab.combos = [["C1", 25.0]]
+_b2 = Project(); _b2.element = "VS-B"; _b2.ctype = CT_SHEAR_TAB; _b2.stab.combos = [["C1", 60.0]]
+_fb = _os.path.join(_od, "lote.pbase"); save_book(_fb, [_b1, _b2])
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf):
+    _rc = _run.batch([_fb, "--pdf", _os.path.join(_od, "lote.pdf")])
+_txt = _buf.getvalue()
+if "VS-A: CUMPLE" not in _txt or "VS-B: NO CUMPLE" not in _txt or _rc != 2 \
+        or not (_os.path.exists(_os.path.join(_od, "lote_VS-A.pdf")) and _os.path.exists(_os.path.join(_od, "lote_VS-B.pdf"))):
+    FAIL.append(f"conn lote: no proceso las dos conexiones del libro (rc = {_rc}):\n{_txt}")
+with contextlib.redirect_stdout(io.StringIO()) as _buf2:
+    _run.batch(["ejemplos/PB-02_HSS12_rigidizada.pbase"])
+if "PB-02:" not in _buf2.getvalue():
+    FAIL.append("lote: debe calcular el proyecto del archivo (PB-02), no uno por defecto")
+print(f"{'modo por lotes (run.py)':34} libro con 2 conexiones: CUMPLE / NO CUMPLE, codigo de salida {_rc}; ejemplo PB-02 leido del archivo")
+
 # ---- archivos: ida y vuelta de un libro con las dos tipologias, y compatibilidad con los ejemplos viejos
 _f = _os.path.join(_tf.mkdtemp(prefix="pbconn_"), "libro.pbase")
 _bp = Project(); _bp.element = "PB-X"

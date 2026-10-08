@@ -36,6 +36,8 @@ from .units import parse_xy_clipboard
 from . import draw, report, mesh3d, view3d, brand
 from .rep3d import make_fem
 from .ui_widgets import Form, scroll, PasteTable, ThemeSwitch
+from .conn.specs import CONN_TYPES, CT_BASEPLATE, CT_SHEAR_TAB, SUP_KINDS, BOLT_GRADES, SHEAR_BOLT_SIZES
+from .conn import draw_conn
 from . import gl3d
 from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
                     DEFAULT_SETS, KIP_TO_KN, IN_TO_MM, KIPIN_TO_KNM)
@@ -198,7 +200,7 @@ class MainWindow(QMainWindow):
         self.us = UnitSet(self.prj.u_len, self.prj.u_force,
                           self.prj.u_stress, self.prj.u_moment)
 
-        self.setWindowTitle(f"PlacaBasePro {__version__} — Diseno de placas base")
+        self.setWindowTitle(f"PlacaBasePro {__version__} — Diseno de placas base y conexiones de acero")
         self.setWindowIcon(QIcon(brand.ICO()))
         self.resize(1500, 920)
 
@@ -322,13 +324,16 @@ class MainWindow(QMainWindow):
         self.forms = []
 
         self.fnamed = {}
+        self.tab_widgets = {}
 
         def new_form(title):
             f = Form()
             f.changed.connect(self.on_change)
             self.forms.append(f)
             self.fnamed[title] = f
-            self.tabs_in.addTab(scroll(f), title)
+            sw = scroll(f)
+            self.tab_widgets[title] = sw
+            self.tabs_in.addTab(sw, title)
             return f
 
         # ---- proyecto
@@ -338,6 +343,8 @@ class MainWindow(QMainWindow):
         f.text("Elemento", "element")
         f.text("Calculo", "author")
         f.text("Fecha", "date")
+        f.group("Tipologia de la conexion")
+        f.combo("Tipologia", "ctype", CONN_TYPES, help="Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Conexion de corte con placa simple: viga secundaria a viga maestra (con cope) o viga a columna; calculo cerrado AISC 360 (sin analisis 3D). Cada conexion del proyecto tiene su propia tipologia: se elige al crearla (boton Nueva).")
         f.group("Unidades de trabajo")
         self.cb_preset = QComboBox()
         self.cb_preset.addItem("(personalizado)")
@@ -649,6 +656,54 @@ class MainWindow(QMainWindow):
                "correr_3d.py que lo malla con Gmsh, arma el .inp y lo resuelve con CalculiX.")
         f.finish()
 
+        # ---- conexion de corte con placa simple (viga secundaria -> viga maestra / columna)
+        f = new_form("Conexion de corte")
+        _I = [lb for fam in ("W", "M", "S", "HP") for lb in CATALOG.by_family(fam)]
+        f.group("Viga apoyada (secundaria)")
+        f.combo("Perfil", "stab.beam", _I, editable=True, help="Perfil I de la viga que llega al soporte (W, M, S, HP). Puede escribirse: la lista se completa sola.")
+        f.combo("Acero", "stab.beam_steel", [x.name for x in M.SHAPE_STEELS], help="Grado del acero de la viga: Fy y Fu para el alma (cortante, bloque de cortante, aplastamiento y cope).")
+        f.group("Soporte")
+        f.combo("Tipo de soporte", "stab.sup_kind", SUP_KINDS, help="Viga maestra (la placa se suelda a su alma), alma de columna o ala de columna. Define el espesor del metal base bajo el cordon y el dibujo.")
+        f.combo("Perfil del soporte", "stab.sup_label", _I, editable=True, help="Perfil de la viga maestra o de la columna.")
+        f.combo("Acero del soporte", "stab.sup_steel", [x.name for x in M.SHAPE_STEELS], help="Fu del soporte para el cortante del metal base bajo la soldadura.")
+        f.group("Pernos (una sola fila vertical, agujero estandar)")
+        f.combo("Diametro", "stab.bolt_size", SHEAR_BOLT_SIZES, help="Diametro nominal del perno, en pulgadas.")
+        f.combo("Calidad", "stab.bolt_grade", BOLT_GRADES, help="A325/A490 con la rosca incluida (N) o excluida (X) del plano de corte (AISC Tabla J3.2). Solo cortante simple, tipo aplastamiento.")
+        f.int_("Numero de pernos", "stab.n", 1, 14, help="La configuracion convencional admite de 2 a 12 pernos en una fila (Manual Tabla 10-9). Fuera de ese rango el resultado se marca como no valido.")
+        f.num("Separacion vertical  s", "stab.s", 0.5, 12, uk="L", help="Entre centros de pernos. Minimo 2-2/3·db (AISC J3.3); 3·db es lo preferible.")
+        f.num("Soldadura a fila de pernos  a", "stab.a", 0.5, 12, uk="L", help="Distancia de la linea de soldadura a la fila de pernos: es la excentricidad con la que se verifican los pernos y la soldadura. La configuracion convencional exige a ≤ 3.5 in; mas alla es una conexion extendida, que este modulo no cubre.")
+        f.group("Placa")
+        f.num("Espesor  tp", "stab.tp", 0.1, 3, uk="L", help="Espesor de la placa. Para la ductilidad de rotacion de la configuracion convencional conviene tp ≤ db/2 + 1/16 in (aviso).")
+        f.combo("Acero de la placa", "stab.plate_steel", [x.name for x in M.PLATE_STEELS], help="Grado del acero de la placa.")
+        f.num("Distancia vertical al borde", "stab.lev_p", 0.25, 6, uk="L", help="Del centro del perno extremo al borde superior o inferior de la placa. La altura de la placa sale de (n−1)·s + 2·lev.")
+        f.num("Distancia horizontal al borde libre", "stab.leh_p", 0.25, 6, uk="L", help="Del centro de la fila de pernos al borde libre de la placa. La Tabla 10-9 pide al menos 2·db (aviso).")
+        f.group("Posicion respecto a la viga")
+        f.num("Retranqueo del extremo de la viga", "stab.gap", 0, 3, uk="L", help="Separacion entre el extremo de la viga y la cara del soporte (usual 1/2 in). La distancia del extremo a los pernos resulta a − retranqueo.")
+        f.num("Del tope de la viga al perno superior", "stab.y_top", -1, 60, uk="L", help="Negativo = automatico: el grupo de pernos se centra en el alma que queda (descontando los copes).")
+        f.group("Cope (despatinado) de la viga apoyada")
+        f.num("Cope superior: profundidad", "stab.cope_top", 0, 30, uk="L", help="Profundidad que se corta desde el tope de la viga (0 = sin cope). Debe pasar del espesor del ala. Con cope se verifican el bloque de cortante del alma y la flexion de la seccion con cope.")
+        f.num("Cope inferior: profundidad", "stab.cope_bot", 0, 30, uk="L", help="Profundidad que se corta desde el fondo de la viga (0 = sin cope), por ejemplo cuando las vigas quedan a ras por abajo.")
+        f.num("Cope: longitud desde el extremo", "stab.cope_len", 0, 40, uk="L", help="Longitud del cope medida desde el extremo de la viga. Es el brazo del momento en la seccion con cope: retranqueo + longitud − a.")
+        f.check("Tope de la viga a ras con el de la maestra", "stab.top_flush", help="Solo informativo: el programa avisa si el cope no alcanza para librar el ala de la viga maestra (supone 1/2 in de holgura).")
+        f.note("NO se evalua el pandeo local del alma por cope (Manual AISC Parte 9; la 15a Ed. cambio el procedimiento): el programa lo avisa. Verifiquelo aparte.")
+        f.group("Soldadura placa-soporte")
+        f.num("Cateto del filete (ambos lados)", "stab.weld_size", 0.0625, 1, uk="L", help="Filete a ambos lados de la placa, en toda su altura. Metodo elastico para la excentricidad (conservador). La practica del Manual es 5/8·tp.")
+        f.combo("Electrodo", "stab.electrode", [e.name for e in M.ELECTRODES], help="FEXX del metal de aporte.")
+        f.check("Incremento direccional de resistencia (AISC J2-5)", "stab.weld_dir", help="Aplica 1 + 0.5·sen^1.5(θ) con θ el angulo de la resultante respecto al eje de la soldadura.")
+        f.group("Reacciones factorizadas de la viga (LRFD)")
+        self.tbl_sc = QTableWidget(0, 2)
+        self.tbl_sc.setMinimumHeight(150)
+        self.tbl_sc.verticalHeader().setDefaultSectionSize(24)
+        self.tbl_sc.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tbl_sc.itemChanged.connect(lambda *_: self._sc_changed())
+        f._lay.addRow(self.tbl_sc)
+        rowc = QWidget(); hc = QHBoxLayout(rowc); hc.setContentsMargins(0, 0, 0, 0)
+        for txt, fn in (("Agregar", self._sc_add), ("Quitar", self._sc_del)):
+            bt = QPushButton(txt); bt.clicked.connect(fn); hc.addWidget(bt)
+        f._lay.addRow(rowc)
+        f.note("Cada fila es una combinacion con la reaccion vertical Vu de la viga (ya factorizada). El veredicto es el de la mas desfavorable. Sin carga axial en la viga.")
+        f.finish()
+
     # ================================================================== vistas
     def _build_views(self):
         self.tabs_out = QTabWidget()
@@ -701,6 +756,7 @@ class MainWindow(QMainWindow):
             sph.addWidget(spv)
             sph.setSizes([620, 380])
             l3.addWidget(sph, 1)
+        self.tab_model = w3
         self.tabs_out.addTab(w3, "Modelo y vistas")
 
         # ---------------- resultados del 3D (campos, soldadura y pernos): solo tras calcular
@@ -772,6 +828,7 @@ class MainWindow(QMainWindow):
         self.lbl_3d.setWordWrap(True)
         lr3.addWidget(self.lbl_3d)
         self._lbl_3d_idle()
+        self.tab_fem = wr3
         self.tabs_out.addTab(wr3, "Analisis FEM")
 
         # ---------------- resultados + memoria detallada (una sola pestaña)
@@ -837,6 +894,11 @@ class MainWindow(QMainWindow):
         self.txt_mem.setVisible(False)
         l2.addWidget(self.txt_mem, 4)
         self.tabs_out.addTab(w2, "Resultados")
+
+        # ---------------- esquema de las conexiones que no son placa base (elevacion y planta con cotas)
+        self.cv_conn = Canvas(size=(7, 8))
+        self.tab_scheme = self.cv_conn
+        self.tabs_out.addTab(self.cv_conn, "Esquema de la conexion")
 
     # palabras de la memoria que corresponden a cada verificacion (clave -> textos a buscar, en orden)
     MEMO_KEYS = {
@@ -939,6 +1001,7 @@ class MainWindow(QMainWindow):
                 f.load(self.prj)
             self._xy_load()
             self._combo_load()
+            self._sc_load()
         finally:
             self._loading = False
         self._update_visibility()
@@ -949,6 +1012,7 @@ class MainWindow(QMainWindow):
             f.store(self.prj)
         self._xy_store()
         self._combo_store()
+        self._sc_store()
 
     # ------------------------------------------ coordenadas manuales de pernos
     def _xy_load(self):
@@ -1161,7 +1225,7 @@ class MainWindow(QMainWindow):
         self.lst_con.blockSignals(True)
         self.lst_con.clear()
         for p in self.book:
-            self.lst_con.addItem(f"{p.element or '(sin nombre)'}   —   {p.section.describe()}")
+            self.lst_con.addItem(self._con_label(p))
         self.lst_con.setCurrentRow(self.cur)
         self.lst_con.blockSignals(False)
 
@@ -1180,12 +1244,20 @@ class MainWindow(QMainWindow):
 
     def con_new(self):
         self.store_ui()
+        t, ok = QInputDialog.getItem(self, "Nueva conexion", "Tipologia de la conexion:", CONN_TYPES,
+                                     CONN_TYPES.index(self.prj.ctype) if self.prj.ctype in CONN_TYPES else 0, False)
+        if ok:
+            self.add_connection(t)
+
+    def add_connection(self, ctype=CT_BASEPLATE):
+        """Agrega una conexion nueva de la tipologia dada y la deja activa."""
         p = Project()
+        p.ctype = ctype
         p.name = self.prj.name
         p.date = datetime.date.today().isoformat()
         p.u_len, p.u_force, p.u_stress, p.u_moment = (self.prj.u_len, self.prj.u_force,
                                                       self.prj.u_stress, self.prj.u_moment)
-        p.element = f"PB-{len(self.book) + 1:02d}"
+        p.element = f"{'PB' if ctype == CT_BASEPLATE else 'CC'}-{len(self.book) + 1:02d}"
         self.book.append(p)
         self._switch(len(self.book) - 1)
 
@@ -1268,8 +1340,93 @@ class MainWindow(QMainWindow):
         self._update_labels()
         self.timer.start(350)
 
+    # ================================================== tipologia de la conexion activa
+    @property
+    def is_conn(self) -> bool:
+        """True si la conexion actual no es una placa base (se calcula en placabase/conn)."""
+        return self.prj.ctype != CT_BASEPLATE
+
+    def _apply_ctype(self):
+        """Muestra solo las pestañas de entrada y de salida que corresponden a la tipologia de la conexion actual."""
+        conn = self.is_conn
+        for title, sw in self.tab_widgets.items():
+            vis = (title in ("Proyecto", "Conexion de corte")) if conn else (title != "Conexion de corte")
+            self.tabs_in.setTabVisible(self.tabs_in.indexOf(sw), vis)
+        if not self.tabs_in.isTabVisible(self.tabs_in.currentIndex()):
+            self.tabs_in.setCurrentWidget(self.tab_widgets["Proyecto"])
+        for wd, vis in ((self.tab_model, not conn), (self.tab_fem, not conn), (self.tab_scheme, conn)):
+            self.tabs_out.setTabVisible(self.tabs_out.indexOf(wd), vis)
+        if not self.tabs_out.isTabVisible(self.tabs_out.currentIndex()):
+            self.tabs_out.setCurrentWidget(self.tab_scheme if conn else self.tab_model)
+        self.btn3d.setText("RECALCULAR  (F8)" if conn else "CALCULAR  (F8)")
+        self.btn3d.setToolTip("Recalcula la conexion (calculo cerrado AISC; esta tipologia no usa analisis 3D)." if conn else
+                              "Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
+                              "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
+
+    @staticmethod
+    def _con_label(p) -> str:
+        """Texto de la conexion en la lista del proyecto."""
+        nm = p.element or "(sin nombre)"
+        if p.ctype == CT_SHEAR_TAB:
+            st = p.stab
+            return f"{nm}   —   {st.beam} → {st.sup_label}  ({st.n}×Ø{st.bolt_size})"
+        return f"{nm}   —   {p.section.describe()}"
+
+    # ---- reacciones de la conexion de corte (tabla nombre / Vu)
+    def _sc_load(self):
+        u, t = self.us, self.tbl_sc
+        t.blockSignals(True)
+        t.setHorizontalHeaderLabels(["Combinacion", f"Vu ({u.F})"])
+        cs = self.prj.stab.loads()
+        t.setRowCount(len(cs))
+        for i, (nm, v) in enumerate(cs):
+            t.setItem(i, 0, QTableWidgetItem(nm))
+            t.setItem(i, 1, QTableWidgetItem(f"{u.out('F', v):.6g}"))
+        t.blockSignals(False)
+
+    def _sc_store(self):
+        u, t = self.us, self.tbl_sc
+        cs = []
+        for i in range(t.rowCount()):
+            try:
+                nm = t.item(i, 0).text().strip() or f"Comb {i + 1}"
+                v = float(t.item(i, 1).text().replace(",", ""))
+                if not math.isfinite(v):
+                    raise ValueError("valor no finito")
+            except (AttributeError, ValueError):
+                old = self.prj.stab.combos[i] if i < len(self.prj.stab.combos) else None
+                if old is not None:
+                    cs.append(list(old))
+                continue
+            cs.append([nm, u.inn("F", v)])
+        if cs:
+            self.prj.stab.combos = cs
+
+    def _sc_changed(self):
+        if self._loading:
+            return
+        self._sc_store()
+        self.on_change()
+
+    def _sc_add(self):
+        self._sc_store()
+        cs = self.prj.stab.combos
+        cs.append([f"Comb {len(cs) + 1}", cs[-1][1] if cs else 40.0])
+        self._sc_load()
+        self.on_change()
+
+    def _sc_del(self):
+        self._sc_store()
+        cs = self.prj.stab.combos
+        r = self.tbl_sc.currentRow()
+        if len(cs) > 1 and 0 <= r < len(cs):
+            del cs[r]
+            self._sc_load()
+            self.on_change()
+
     def _update_visibility(self):
         """Cada pestaña muestra solo los campos que aplican a lo seleccionado."""
+        self._apply_ctype()
         prj, F = self.prj, self.fnamed
         # ---- placa
         fp, pl = F["Placa"], prj.plate
@@ -1364,7 +1521,7 @@ class MainWindow(QMainWindow):
                "grupo en todo el contorno.</i>" if self.prj.section.generic else ""))
         it = self.lst_con.item(self.cur) if hasattr(self, "lst_con") else None
         if it is not None:
-            it.setText(f"{self.prj.element or '(sin nombre)'}   —   {self.prj.section.describe()}")
+            it.setText(self._con_label(self.prj))
         g = self.prj.bolts.geom()
         u = self.us
         self.lbl_bolt.setText(f"db={u.q('L', g.db)}  Ab={u.q('A', g.Ab)}  "
@@ -1396,6 +1553,8 @@ class MainWindow(QMainWindow):
 
     def _solve_all(self, p):
         """Resultados de TODAS las combinaciones de la conexion p: lista de (proyecto_de_la_combinacion, Results)."""
+        if p.ctype != CT_BASEPLATE:                  # otras tipologias: el motor ya recorre sus combinaciones
+            return [(p, solve(p))]
         out = []
         for i in range(len(p.combo_list())):
             q = p.with_combo(i)
@@ -1418,6 +1577,8 @@ class MainWindow(QMainWindow):
     def export_target(self, p=None):
         """(proyecto, Results) de la combinacion que gobierna, con la tabla resumen de combinaciones."""
         p = p or self.prj
+        if p.ctype != CT_BASEPLATE:
+            return p, solve(p)
         pairs = self._solve_all(p)
         k = self._governing(pairs)
         q, R = pairs[k]
@@ -1432,8 +1593,11 @@ class MainWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             self.pairs = self._solve_all(self.prj)
-            self.res = self.pairs[self.prj.combo_idx][1]
-            self.res.combo_rows = self._combo_rows(self.pairs)
+            if self.is_conn:
+                self.res = self.pairs[0][1]
+            else:
+                self.res = self.pairs[self.prj.combo_idx][1]
+                self.res.combo_rows = self._combo_rows(self.pairs)
         except Exception as e:
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Error de calculo",
@@ -1467,7 +1631,23 @@ class MainWindow(QMainWindow):
         pairs = getattr(self, "pairs", None)
         return bool(pairs) and all(not R.pending for _, R in pairs)
 
+    def _draw_conn(self):
+        """Esquema (elevacion y planta con cotas) de las conexiones que no son placa base."""
+        try:
+            cv = self.cv_conn
+            cv.fig.clf()
+            gs = cv.fig.add_gridspec(2, 1, height_ratios=[1.5, 1])
+            draw_conn.elevation(cv.fig.add_subplot(gs[0]), self.prj)
+            draw_conn.plan(cv.fig.add_subplot(gs[1]), self.prj)
+            cv.cv.draw_idle()
+        except Exception as e:
+            log = self._log_error("_draw_conn", e)
+            self.statusBar().showMessage(f"Error de dibujo: {e}  (detalle en {log})", 10000)
+
     def draw_all(self):
+        if self.is_conn:
+            self._draw_conn()
+            return
         if not self.use_gl:
             try:
                 draw.plan_view(self.cv_plan.ax, self.prj)
@@ -1628,17 +1808,23 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------ combinaciones de carga
     def _fill_combo_box(self):
-        cs = self.prj.combo_list()
+        conn = self.is_conn
+        if conn:
+            names = [nm for nm, _ in self.prj.stab.loads()]
+            idx = self.res.combo_gov if self.res is not None else 0
+        else:
+            names = [c.name for c in self.prj.combo_list()]
+            idx = self.prj.combo_idx
         for cb in (self.cb_combo, self.cb_combo2):
             cb.blockSignals(True)
             cb.clear()
-            for c in cs:
-                cb.addItem(c.name)
-            cb.setCurrentIndex(self.prj.combo_idx)
+            cb.addItems(names)
+            cb.setCurrentIndex(max(0, min(idx, len(names) - 1)))
+            cb.setEnabled(not conn)             # en las otras tipologias siempre se detalla la que gobierna
             cb.blockSignals(False)
 
     def _on_combo_pick(self, i):
-        if self._loading or i < 0 or i == self.prj.combo_idx:
+        if self._loading or i < 0 or self.is_conn or i == self.prj.combo_idx:
             return
         self.store_ui()
         self.prj.apply_combo(i)
@@ -1732,6 +1918,9 @@ class MainWindow(QMainWindow):
         if self.worker is not None and self.worker.isRunning():
             return
         self.recalc()
+        if self.is_conn:                         # sin analisis 3D: el calculo cerrado ya es el veredicto
+            self.statusBar().showMessage("Conexion recalculada (calculo cerrado; esta tipologia no usa analisis 3D)", 5000)
+            return
         jobs = []
         for i in range(len(self.prj.combo_list())):
             if self._fem_now(self.prj, i) is None:                # solo las combinaciones sin 3D vigente
@@ -1886,7 +2075,59 @@ class MainWindow(QMainWindow):
             "compresion se transmite por contacto; el cordon se verifica a traccion y "
             "cortante.")
 
+    def _fill_table_conn(self):
+        """Resultados de las tipologias de calculo cerrado: combinaciones, verificaciones, avisos y veredicto."""
+        r = self.res
+        self.tbl.setRowCount(0)
+        self.tbl_cmb.setRowCount(0)
+        red, green, grey = QColor("#ffc7ce"), QColor("#c6efce"), QColor("#eeeeee")
+        rows = r.combo_rows or []
+        for k, cr in enumerate(rows):
+            self.tbl_cmb.insertRow(k)
+            vals = [cr["name"], f"{cr['ratio']:.3f}", cr["gov"], "CUMPLE" if cr["ok"] else "NO CUMPLE",
+                    "◄" if k == r.combo_gov else ""]
+            for j, v in enumerate(vals):
+                it = QTableWidgetItem(v)
+                if j == 3:
+                    it.setBackground(green if cr["ok"] else red)
+                    it.setForeground(QColor("#1b1b1b"))
+                self.tbl_cmb.setItem(k, j, it)
+        gname = rows[r.combo_gov]["name"] if rows else ""
+        self.lbl_res_ck.setText(f"<b>Verificaciones de la combinacion que gobierna: {gname}</b>")
+        for ch in r.checks:
+            i = self.tbl.rowCount()
+            self.tbl.insertRow(i)
+            dv, cv, ul = report.ck_vals(self.us, ch)
+            vals = [ch.title, f"{dv:,.3f}", f"{cv:,.3f}", ul, "—" if ch.skip else f"{ch.ratio:.3f}",
+                    ch.ref + ("  —  " + ch.note if ch.note else "")]
+            for j, v in enumerate(vals):
+                it = QTableWidgetItem(v)
+                if j in (1, 2, 4):
+                    it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if j == 4:
+                    it.setBackground(grey if ch.skip else (green if ch.ok else red))
+                    it.setForeground(QColor("#1b1b1b"))
+                    f_ = it.font(); f_.setBold(True); it.setFont(f_)
+                it.setToolTip(v)
+                self.tbl.setItem(i, j, it)
+        gov = r.governing
+        html = [f"<b>{self.prj.ctype}</b>"]
+        if gov:
+            html.append(f"Gobierna: <b>{gov.title}</b>  (D/C = {gov.ratio:.3f})")
+        for w in r.warnings:
+            col = self.tc("#9c0006" if w.startswith("**") else "#7f6000")
+            html.append(f"<span style='color:{col}'>• {w}</span>")
+        self.txt_info.setHtml("<br>".join(html))
+        ok = r.ok
+        self.lbl_verdict.setText(f"  {'CUMPLE' if ok else 'NO CUMPLE'}   D/C max = {r.max_ratio:.3f}"
+                                 + (f"  ({gname})" if len(rows) > 1 else "") + "  ")
+        bg, fg = ("#c6efce", "#006100") if ok else ("#ffc7ce", "#9c0006")
+        self.lbl_verdict.setToolTip("")
+        self.lbl_verdict.setStyleSheet(f"background:{bg}; color:{fg}; border-radius:4px; padding:2px 8px;")
+
     def fill_table(self):
+        if self.is_conn:
+            return self._fill_table_conn()
         r = self.res
         self.tbl.setRowCount(0)
         self.tbl_cmb.setRowCount(0)
@@ -2060,6 +2301,9 @@ class MainWindow(QMainWindow):
 
     def export_3d(self):
         self.store_ui()
+        if self.is_conn:
+            QMessageBox.information(self, "Modelo 3D", "El modelo solido para Gmsh solo existe para la placa base.")
+            return
         fn, _ = QFileDialog.getSaveFileName(
             self, "Modelo solido 3D (Gmsh)",
             f"{self.prj.element or 'placa'}_3d.geo", "Gmsh (*.geo)")
@@ -2125,8 +2369,9 @@ class MainWindow(QMainWindow):
             mb.setIconPixmap(pm.scaledToWidth(360, Qt.SmoothTransformation))
         mb.setText(
             f"<b>PlacaBasePro {__version__}</b><br>"
-            "Diseno y verificacion de placas base para perfiles W, HSS y Pipe.<br><br>"
-            "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · ACI 318-19 Cap. 17<br>"
+            "Diseno y verificacion de placas base para perfiles W, HSS y Pipe, y de conexiones de corte "
+            "con placa simple (viga secundaria a viga maestra o a columna).<br><br>"
+            "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · AISC Manual 15a Ed. · ACI 318-19 Cap. 17<br>"
             "Modelo solido 3D (Gmsh + CalculiX) "
             "con el concreto como resortes solo a compresion.<br><br>"
             "Los resultados deben ser revisados por un ingeniero responsable.")
