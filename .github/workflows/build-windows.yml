@@ -1,0 +1,36 @@
+name: Compilar PlacaBasePro (Windows)
+
+# Genera el .exe portable en un equipo Windows de GitHub y lo deja como artefacto descargable
+# (Actions > esta ejecucion > Artifacts > PlacaBasePro_portable).
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "claude/**" ]
+    paths: [ "placabase/**", "placabase.spec", "requirements.txt", "run.py", "selftest.py", ".github/workflows/build-windows.yml" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+      - name: Autoprueba del motor
+        run: python selftest.py
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - name: Compilar
+        run: python -m PyInstaller --noconfirm --clean placabase.spec
+      - name: Solvers y comprimir
+        run: |
+          python -c "import shutil; shutil.copytree('solvers', r'dist\PlacaBasePro\solvers', dirs_exist_ok=True); shutil.copy('LEEME.md', r'dist\PlacaBasePro'); shutil.make_archive('PlacaBasePro_portable', 'zip', 'dist', 'PlacaBasePro')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PlacaBasePro_portable
+          path: PlacaBasePro_portable.zip

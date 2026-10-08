@@ -1,0 +1,11 @@
+aisc_shapes.json
+================
+Propiedades de 1,660 perfiles de la AISC Shapes Database (W, M, S, HP, C, MC, L,
+WT, MT, ST, HSS rectangulares y circulares, Pipe), convertidas a JSON a partir de
+las tablas CSV incluidas en el paquete "steelpy" 1.1.1 (autor: evanfaler,
+licencia Apache-2.0, https://pypi.org/project/steelpy/).  Los datos originales
+son de la AISC Shapes Database (American Institute of Steel Construction).
+
+Unidades: in, in², in³, in⁴.  Campos: d, bf, tf, tw, A, Ix, Sx, Zx, Iy, Sy, Zy,
+kdes.  En angulos: d = ala larga, bf = ala corta, t en tw y tf.  En HSS: d = Ht,
+bf = B, tw = espesor de diseno.  En redondos: d = bf = OD, tw = espesor de diseno.

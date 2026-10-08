@@ -1,0 +1,21 @@
+SOLVERS INCLUIDOS EN PLACABASEPRO
+=================================
+
+calculix/ccx.exe
+    CalculiX CrunchiX 2.14, compilacion estatica para Windows 64 bits
+    (MinGW64, multihilo).  Solo depende de DLLs del propio Windows.
+    Origen: https://github.com/ddfem/ccx_mingw64  (archivo ccx_2.14_MT.exe)
+    Autores de CalculiX: Guido Dhondt y Klaus Wittig - http://www.calculix.de
+    Licencia: GNU GPL version 2 (ver GPL-2.0.txt).
+    Codigo fuente: el mismo repositorio (ccx_2.14_MT_src.zip).
+
+Gmsh 4.15.2 (mallador)
+    No esta en esta carpeta: va dentro del programa como libreria
+    (_internal\gmsh-4.15.dll) y se usa a traves de su API de Python.
+    Origen: paquete oficial "gmsh" de PyPI (https://pypi.org/project/gmsh/).
+    Autores: C. Geuzaine y J.-F. Remacle - https://gmsh.info
+    Licencia: GNU GPL version 2 o posterior (ver GPL-2.0.txt), con las
+    excepciones indicadas por sus autores.  Codigo fuente en https://gmsh.info
+
+PlacaBasePro invoca ambos como procesos separados; no los modifica ni se
+enlaza con ellos.  Se distribuyen sin cambios, junto con su licencia.
