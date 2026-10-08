@@ -35,7 +35,8 @@ CT_DOUBLE_ANGLE = "Conexion de corte — doble angulo (viga a viga / viga a colu
 CT_SEATED = "Conexion de asiento (seated) — angulo o rigidizado"
 CT_BEAM_SPLICE = "Empalme de viga — placas de alas y alma atornilladas"
 CT_COL_SPLICE = "Empalme de columna — placas atornilladas (con o sin contacto)"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE]
+CT_ENDPLATE = "Placa extrema a momento — a ras o extendida (viga a columna)"
+CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE]
 
 # ---- placa simple de corte (shear tab)
 SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
@@ -234,4 +235,40 @@ class ColSplice(_SpliceBase):
 
     def loads(self) -> list:
         return loads_of(self.combos, 3, ("Comb 1", (400.0, 300.0, 20.0)))
+
+
+# ---- placa extrema a momento
+EP_FLANGE_WELD = ["CJP (penetracion completa)", "Filete a ambos lados"]
+
+
+@dataclass
+class EndPlate:
+    """Viga con placa extrema soldada, atornillada al ala de la columna. Una fila de pernos (2) dentro de cada ala y,
+    si se pide, una fila (2) fuera de cada ala (placa extendida)."""
+    beam: str = "W18X50"
+    beam_steel: str = "ASTM A992"
+    col: str = "W14X90"
+    col_steel: str = "ASTM A992"
+    cont_plates: bool = False        # placas de continuidad en la columna (se omiten las verificaciones locales del ala y del alma)
+    plate_steel: str = "ASTM A572 Gr.50"
+    bp: float = 8.0                  # ancho de la placa extrema
+    tp: float = 1.0
+    bolt_size: str = "7/8"
+    bolt_grade: str = "A325-N"
+    g: float = 5.5                   # gramil de los pernos (entre las dos columnas)
+    pfo: float = 2.0                 # de la cara exterior del ala a la fila exterior de pernos
+    pfi: float = 2.0                 # de la cara interior del ala a la fila interior de pernos
+    e_ext: float = 1.5               # de la fila exterior al borde de la placa
+    ext_t: bool = True               # fila exterior en el lado traccionado (placa extendida)
+    ext_c: bool = True               # fila exterior en el lado comprimido
+    # --- soldaduras viga-placa
+    fw_type: str = "CJP (penetracion completa)"
+    fw_size: float = 0.5             # cateto del filete (si es filete) o espesor de garganta de referencia
+    ww_size: float = 0.3125          # filete del alma, a ambos lados
+    electrode: str = "E70XX"
+    weld_dir: bool = True
+    combos: list = field(default_factory=lambda: [["Comb 1", 1800.0, 40.0]])    # [nombre, Mu (+ traccion arriba), Vu]
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 2, ("Comb 1", (1800.0, 40.0)))
 

@@ -920,6 +920,86 @@ for _nm, _mut, _txt in (("placa mas ancha que el ala", dict(fo_b=12.0), "mas anc
 print(f"{'  empalme de columna':34} con contacto D/C = {_rc.max_ratio:.3f}; sin contacto {_rcn.max_ratio:.3f}; interiores / reparto / axial OK")
 
 # ====================================================================================================
+# PLACA EXTREMA (W18X50 -> ala de W14X90, placa 8 x 1 A572-50, 7/8 A325-N, g = 5.5, pfo = pfi = 2, e = 1.5, Mu = 1800, Vu = 40)
+# ====================================================================================================
+from placabase.conn.specs import CT_ENDPLATE, EP_FLANGE_WELD
+from placabase.conn.common import prying_available as _pry
+
+
+def _ep(**mut):
+    q = Project(); q.ctype = CT_ENDPLATE
+    for k, v in mut.items():
+        setattr(q.epl, k, v)
+    return q
+
+
+def _T_ref(Bc, b, a, p_, t, Fu, db, dh):                 # efecto palanca con otro metodo (brentq sobre t_min(T) = t)
+    bp_ = b - db / 2; ap_ = min(a, 1.25 * b) + db / 2; rho = bp_ / ap_; delta = 1 - dh / p_
+    tc = math.sqrt(4.44 * Bc * bp_ / (p_ * Fu))
+    if t >= tc:
+        return Bc
+    def f(T):
+        beta = (Bc / T - 1) / rho
+        al = 1.0 if beta >= 1 else min(1.0, max(0.0, beta / (delta * (1 - beta))))
+        return math.sqrt(4.44 * T * bp_ / (p_ * Fu * (1 + delta * al))) - t
+    return _brentq(f, 1e-6, Bc)
+
+
+_Bc = 0.75 * 90 * math.pi * 0.875 ** 2 / 4
+_dh = 0.875 + 0.0625
+_To = _T_ref(_Bc, 2.0, 1.5, 4.0, 1.0, 65.0, 0.875, _dh)
+_Ti = _T_ref(_Bc, 2.0, 2.5, 4.0, 1.0, 65.0, 0.875, _dh)              # a = 1.25·b = 2.5 para la fila interior
+_near("palanca: T vs brentq (fila exterior)", _pry(_Bc, 2.0, 1.5, 4.0, 1.0, 65.0, 0.875, _dh)[0], _To, 1e-6)
+if not all(_pry(_Bc, 2.0, 1.5, 4.0, t_, 65.0, 0.875, _dh)[0] <= _Bc + 1e-9 for t_ in (0.3, 0.6, 1.0, 1.5)):
+    FAIL.append("palanca: la T disponible no puede pasar de la capacidad del perno")
+_prev = 0.0
+for _t_ in (0.3, 0.5, 0.7, 0.9, 1.1):
+    _Tx = _pry(_Bc, 2.0, 1.5, 4.0, _t_, 65.0, 0.875, _dh)[0]
+    if _Tx < _prev - 1e-9:
+        FAIL.append("palanca: la T debe crecer con el espesor de la placa")
+    _prev = _Tx
+_rp = solve(_ep())
+_kp = {c.key: c for c in _rp.checks}
+_bb = CATALOG.get("W18X50")
+_ho = _bb.d + 2.0 - _bb.tf / 2
+_hi = _bb.d - 1.5 * _bb.tf - 2.0
+print(f"{'placa extrema':34} D/C max = {_rp.max_ratio:.3f}  gobierna: {_rp.governing.title[:48]};  T = {_To:.1f} / {_Ti:.1f} kip")
+_near("placa extrema: momento resistente", _kp["ep_M"].capacity, 2 * _To * _ho + 2 * _Ti * _hi, 1e-6)
+_near("placa extrema: sin palanca", _kp["ep_Mb"].capacity, 2 * _Bc * (_ho + _hi), 1e-9)
+_Ffp = 1800.0 / (_bb.d - _bb.tf)
+_near("placa extrema: cortante por perno", _kp["ep_V"].demand, 40.0 / 4, 1e-9)
+_near("placa extrema: cortante de la extension (capacidad)", _kp["ep_pv_y"].capacity, 0.6 * 50 * 8.0 * 1.0, 1e-9)
+_near("placa extrema: cortante de la extension (demanda)", _kp["ep_pv_y"].demand, _Ffp / 2, 1e-9)
+_cc = CATALOG.get("W14X90")
+_near("placa extrema: J10.1 de la columna", _kp["ep_c_fb"].capacity, 0.9 * 6.25 * _cc.tf ** 2 * 50, 1e-9)
+_near("placa extrema: J10.2 de la columna", _kp["ep_c_wy"].capacity, 50 * _cc.tw * (5 * _cc.kdes + _bb.tf + 2.0), 1e-9)
+_near("placa extrema: zona del panel", _kp["ep_c_pz"].capacity, 0.9 * 0.6 * 50 * _cc.d * _cc.tw, 1e-9)
+_near("placa extrema: soldadura del alma", _kp["ep_ww"].capacity, 0.75 * 0.6 * 70 * 0.707 * 0.3125 * 2 * (_bb.d - 2 * _bb.tf), 1e-9)
+if not _rp.ok or "ep_c_yl" not in _kp or not _kp["ep_c_yl"].skip:
+    FAIL.append(f"placa extrema: caso base debe cumplir y declarar las lineas de fluencia como NO EVALUADO (D/C = {_rp.max_ratio:.3f})")
+# a ras: sin fila exterior -> menos momento; placa mas delgada -> menos momento; continuidad omite checks locales; fillet
+_rf = solve(_ep(ext_t=False))
+_rth = solve(_ep(tp=0.5))
+_rcp = solve(_ep(cont_plates=True))
+_rfw = solve(_ep(fw_type=EP_FLANGE_WELD[1], fw_size=0.5))
+if not {c.key: c for c in _rf.checks}["ep_M"].capacity < _kp["ep_M"].capacity:
+    FAIL.append("placa extrema: sin fila exterior debe bajar el momento resistente")
+if not {c.key: c for c in _rth.checks}["ep_M"].capacity < _kp["ep_M"].capacity:
+    FAIL.append("placa extrema: una placa mas delgada debe bajar el momento resistente")
+if any(c.key in ("ep_c_fb", "ep_c_wy", "ep_c_wc") for c in _rcp.checks) or "ep_c_pz" not in {c.key for c in _rcp.checks}:
+    FAIL.append("placa extrema: con placas de continuidad se omiten J10.1-J10.3 y se mantiene la zona del panel")
+_kfw = {c.key: c for c in _rfw.checks}
+_near("placa extrema: filete del ala", _kfw["ep_fw"].capacity, 0.75 * 0.6 * 70 * 1.5 * 0.707 * 0.5 * (2 * _bb.bf - _bb.tw), 1e-9)
+# inversion del momento: tracciona el ala inferior (mismo resultado si la geometria es simetrica)
+_rneg = solve(_ep(combos=[["c", -1800.0, 40.0]]))
+_near("placa extrema: momento negativo simetrico", {c.key: c for c in _rneg.checks}["ep_M"].capacity, _kp["ep_M"].capacity, 1e-9)
+for _nm, _mut, _txt in (("pernos fuera del ala de la columna", dict(g=13.5), "ancho del ala"), ("perfil inexistente", dict(col="W99X999"), "perfil I")):
+    _rr = solve(_ep(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"placa extrema alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'  placa extrema variantes':34} a ras Mcap = {({c.key: c for c in _rf.checks})['ep_M'].capacity:.0f} kip·in; delgada, continuidad, filete, inversion: OK")
+
+# ====================================================================================================
 # FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
 # no debe haber excepciones ni valores no finitos, y cualquier geometria imposible debe dar aviso critico
 # ====================================================================================================

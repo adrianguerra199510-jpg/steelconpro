@@ -6,7 +6,7 @@ import json
 
 from . import materials as M
 from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
-from .conn.specs import CONN_TYPES, CT_BASEPLATE, ShearTab, DoubleAngle, Seated, BeamSplice, ColSplice
+from .conn.specs import CONN_TYPES, CT_BASEPLATE, ShearTab, DoubleAngle, Seated, BeamSplice, ColSplice, EndPlate
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
@@ -423,6 +423,7 @@ class Project:
     seat: Seated = field(default_factory=Seated)
     bsp: BeamSplice = field(default_factory=BeamSplice)
     csp: ColSplice = field(default_factory=ColSplice)
+    epl: EndPlate = field(default_factory=EndPlate)
 
     section: Section = field(default_factory=Section)
     plate: Plate = field(default_factory=Plate)
@@ -569,7 +570,7 @@ def _used_extras(projects):
     shapes, mats = {}, {"steel": {}, "anchor": {}, "concrete": {}}
     for p in projects:
         for lab in (p.section.label, p.lug.label, p.stab.beam, p.stab.sup_label, p.dang.beam, p.dang.sup_label,
-                    p.dang.angle, p.seat.beam, p.seat.sup_label, p.seat.angle, p.bsp.shape, p.csp.shape):
+                    p.dang.angle, p.seat.beam, p.seat.sup_label, p.seat.angle, p.bsp.shape, p.csp.shape, p.epl.beam, p.epl.col):
             s = CATALOG.get(lab)
             if s and s.source not in ("AISC", "integrado"):
                 shapes[s.label] = asdict(s)
@@ -577,7 +578,7 @@ def _used_extras(projects):
                      p.stab.beam_steel, p.stab.sup_steel, p.stab.plate_steel,
                      p.dang.beam_steel, p.dang.sup_steel, p.dang.angle_steel,
                      p.seat.beam_steel, p.seat.sup_steel, p.seat.angle_steel, p.seat.st_steel, p.bsp.steel, p.bsp.plate_steel,
-                     p.csp.steel, p.csp.plate_steel):
+                     p.csp.steel, p.csp.plate_steel, p.epl.beam_steel, p.epl.col_steel, p.epl.plate_steel):
             m = next((x for x in M.PLATE_STEELS + M.SHAPE_STEELS if x.name == name), None)
             if m and m.note in ("usuario", "proyecto"):
                 mats["steel"][name] = {"name": m.name, "Fy": m.Fy, "Fu": m.Fu}

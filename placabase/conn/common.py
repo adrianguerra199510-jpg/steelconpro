@@ -210,12 +210,13 @@ def long_joint_factor(L_joint: float) -> float:
 
 
 def prying_available(Bc, b, a, p, t, Fu, db, dh):
-    """Traccion disponible por perno de una T equivalente con efecto palanca (AISC Manual, Parte 9, LRFD).
+    """Traccion maxima por perno T de una T equivalente con efecto palanca (AISC Manual, Parte 9, LRFD).
         b' = b − db/2 ;  a' = min(a, 1.25·b) + db/2 ;  ρ = b'/a' ;  δ = 1 − dh/p
-        tc = √(4.44·Bc·b' / (p·Fu))            (espesor sin palanca)
-        α' = [(tc/t)² − 1] / (δ·ρ)  acotado a [0, 1] ;   Ta = Bc·(t/tc)²·(1 + δ·α')   si t < tc, y Bc si t ≥ tc
+        β  = (1/ρ)·(Bc/T − 1) ;  α' = 1 si β ≥ 1, si no  min[ β / (δ·(1 − β)) , 1 ]  (≥ 0)
+        t_min(T) = √( 4.44·T·b' / (p·Fu·(1 + δ·α')) )
+    La capacidad es la mayor T ≤ Bc tal que t ≥ t_min(T) (biseccion); si t ≥ tc = √(4.44·Bc·b'/(p·Fu)) no hay palanca y T = Bc.
     Bc = φ·Rn del perno a traccion; p = ancho tributario por perno; Fu del ala de la T (la placa).
-    Devuelve (Ta, alpha, tc)."""
+    Devuelve (T, alpha, tc)."""
     bp = b - db / 2.0
     ap = min(a, 1.25 * b) + db / 2.0
     rho = bp / ap if ap > 0 else 1.0
@@ -223,8 +224,20 @@ def prying_available(Bc, b, a, p, t, Fu, db, dh):
     tc = math.sqrt(4.44 * Bc * max(bp, 1e-9) / (p * Fu))
     if t >= tc:
         return Bc, 0.0, tc
-    alpha = max(0.0, min(1.0, ((tc / t) ** 2 - 1.0) / (delta * rho)))
-    return Bc * (t / tc) ** 2 * (1.0 + delta * alpha), alpha, tc
+
+    def tmin(T):
+        beta = (1.0 / rho) * (Bc / T - 1.0)
+        alpha = 1.0 if beta >= 1.0 else min(1.0, max(0.0, beta / (delta * (1.0 - beta))))
+        return math.sqrt(4.44 * T * max(bp, 1e-9) / (p * Fu * (1.0 + delta * alpha))), alpha
+
+    lo, hi = 1e-9, Bc
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if tmin(mid)[0] <= t:
+            lo = mid
+        else:
+            hi = mid
+    return lo, tmin(lo)[1], tc
 
 
 def column_fcr(Fy: float, KL_r: float) -> float:
