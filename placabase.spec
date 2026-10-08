@@ -18,6 +18,7 @@ binaries = [(_gmsh.libpath, ".")]
 
 hidden = []
 hidden += collect_submodules("scipy.sparse")
+hidden += collect_submodules("placabase.conn")     # tipologias cargadas con importlib (conn/__init__.py)
 hidden += ["mpl_toolkits.mplot3d", "scipy.sparse.linalg", "scipy.sparse.csgraph",
            "matplotlib.backends.backend_qtagg", "matplotlib.backends.backend_agg",
            "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",

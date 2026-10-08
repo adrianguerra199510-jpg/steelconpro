@@ -6,6 +6,7 @@ import json
 
 from . import materials as M
 from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
+from .conn.specs import CONN_TYPES, CT_BASEPLATE, ShearTab
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
@@ -415,6 +416,10 @@ class Project:
     u_stress: str = "MPa"
     u_moment: str = "kN·m"
 
+    # tipologia de la conexion: la placa base usa section/plate/bolts/... ; las demas, su propio bloque (ver conn/)
+    ctype: str = CT_BASEPLATE
+    stab: ShearTab = field(default_factory=ShearTab)
+
     section: Section = field(default_factory=Section)
     plate: Plate = field(default_factory=Plate)
     bolts: BoltGroup = field(default_factory=BoltGroup)
@@ -559,11 +564,12 @@ def _used_extras(projects):
     para guardarlos dentro del archivo."""
     shapes, mats = {}, {"steel": {}, "anchor": {}, "concrete": {}}
     for p in projects:
-        for lab in (p.section.label, p.lug.label):
+        for lab in (p.section.label, p.lug.label, p.stab.beam, p.stab.sup_label):
             s = CATALOG.get(lab)
             if s and s.source not in ("AISC", "integrado"):
                 shapes[s.label] = asdict(s)
-        for name in (p.section.steel, p.plate.steel, p.lug.steel, p.stiff.steel):
+        for name in (p.section.steel, p.plate.steel, p.lug.steel, p.stiff.steel,
+                     p.stab.beam_steel, p.stab.sup_steel, p.stab.plate_steel):
             m = next((x for x in M.PLATE_STEELS + M.SHAPE_STEELS if x.name == name), None)
             if m and m.note in ("usuario", "proyecto"):
                 mats["steel"][name] = {"name": m.name, "Fy": m.Fy, "Fu": m.Fu}

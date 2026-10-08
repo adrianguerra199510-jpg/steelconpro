@@ -481,6 +481,173 @@ if "--3d" in sys.argv:
             print(f"{'  modelo fusionado (respaldo)':34} zonas = {[z.name for z in _rf.post.zones]}")
 
 
+# ====================================================================================================
+# TIPOLOGIAS DE CONEXION (placabase/conn): placa simple de corte, viga secundaria -> viga maestra / columna
+# Los valores esperados se calcularon a mano, aparte del programa (AISC 360-22, LRFD).
+# ====================================================================================================
+print()
+print("=" * 150)
+print("TIPOLOGIAS DE CONEXION")
+print("=" * 150)
+from placabase.conn.specs import CT_SHEAR_TAB, CT_BASEPLATE, SUP_KINDS
+from placabase.conn import common as _cc
+from placabase.model import save_book, load_book
+import tempfile as _tf, os as _os
+
+
+def _near(name, got, want, tol=0.005):
+    ok = abs(got - want) <= tol * max(1.0, abs(want))
+    if not ok:
+        FAIL.append(f"conn {name}: {got:.4f} (esperado {want:.4f})")
+    return ok
+
+
+def _tab(**mut):
+    q = Project()
+    q.ctype = CT_SHEAR_TAB
+    for k, v in mut.items():
+        setattr(q.stab, k, v)
+    return q
+
+
+# ---- metodo del centro instantaneo: equilibrio y limites
+def _grp(n, s):
+    return [((n - 1) / 2 - i) * s for i in range(n)]
+
+
+_prev = None
+for _e in (0.5, 1.5, 3.0, 6.0, 12.0):                            # C decrece al crecer la excentricidad
+    _ic = _cc.ic_vertical_line(_grp(4, 3.0), _e)
+    _Mic = sum(math.hypot(_ic.x_ic, y) * math.hypot(fx, fy) for y, fx, fy in zip(_ic.ys, _ic.fx, _ic.fy))
+    if abs(sum(_ic.fy) - _ic.C) > 1e-9 or abs(sum(_ic.fx)) > 1e-9 or abs(_Mic - _ic.C * (_ic.x_ic + _e)) > 1e-6 * _ic.C:
+        FAIL.append(f"conn IC: equilibrio (e = {_e})")
+    if _prev is not None and not _ic.C < _prev:
+        FAIL.append("conn IC: C debe decrecer con la excentricidad")
+    _prev = _ic.C
+_ic0 = _cc.ic_vertical_line(_grp(4, 3.0), 0.0)
+_ic1 = _cc.ic_vertical_line(_grp(3, 3.0), 3.0)
+# raiz de la ecuacion del CI con un metodo independiente (brentq) para 3 pernos, s = 3, e = 3
+from scipy.optimize import brentq as _brentq
+def _g(x, ys=_grp(3, 3.0), e=3.0):
+    ds = [math.hypot(x, y) for y in ys]; dm = max(ds)
+    R = [(1 - math.exp(-10 * 0.34 * d / dm)) ** 0.55 for d in ds]
+    return sum(r * d for r, d in zip(R, ds)) - (x + e) * sum(r * x / d for r, d in zip(R, ds))
+_x = _brentq(_g, 1e-6, 1e3)
+_ds = [math.hypot(_x, y) for y in _grp(3, 3.0)]; _dm = max(_ds)
+_C_ref = sum((1 - math.exp(-10 * 0.34 * d / _dm)) ** 0.55 * _x / d for d in _ds)
+print(f"{'IC: 3 pernos s=3 e=3':34} C = {_ic1.C:.4f}  (brentq {_C_ref:.4f})   elastico {_ic1.C_elastic:.3f}   "
+      f"concentrico 4 pernos C = {_ic0.C:.3f} (≈ 4·0.9815)")
+_near("IC vs brentq", _ic1.C, _C_ref, 1e-6)
+_near("IC concentrico", _ic0.C, 4 * (1 - math.exp(-3.4)) ** 0.55, 1e-6)
+if not _ic1.C > _ic1.C_elastic:
+    FAIL.append("conn IC: con 3 pernos el CI debe dar mas que el elastico")
+
+# ---- placa simple, caso base calculado a mano: W16X31 -> alma de W24X55, 3 pernos 3/4 A325-N, s = 3, a = 3,
+#      placa 3/8 A36 (9 in de alto, bordes 1.5), filete 1/4 E70, Vu = 25 kip
+_p = _tab(combos=[["Comb 1", 25.0]])
+_r = solve(_p)
+_k = {c.key: c for c in _r.checks}
+print(f"{'placa simple base (Vu = 25)':34} D/C max = {_r.max_ratio:.3f}  gobierna: {_r.governing.title[:48]}")
+_near("pernos: phi*rn", 0.75 * 54.0 * math.pi * 0.75 ** 2 / 4, 17.893, 0.001)
+_near("pernos: capacidad del grupo", _k["bolt_shear"].capacity, 0.75 * 54.0 * math.pi * 0.75 ** 2 / 4 * _ic1.C, 1e-6)
+_near("placa: fluencia por cortante", _k["plate_vy"].capacity, 0.6 * 36 * 0.375 * 9.0, 1e-9)               # 72.9 kip
+_near("placa: rotura por cortante", _k["plate_vr"].capacity, 0.75 * 0.6 * 58 * 0.375 * (9 - 3 * 0.875), 1e-9)  # 62.4 kip
+_Lgv, _Lnv, _Lnt = 7.5, 7.5 - 2.5 * 0.875, 1.5 - 0.4375
+_bs = 0.75 * min(0.6 * 58 * 0.375 * _Lnv + 58 * 0.375 * _Lnt, 0.6 * 36 * 0.375 * _Lgv + 58 * 0.375 * _Lnt)
+_near("placa: bloque de cortante", _k["plate_bs"].capacity, _bs, 1e-9)                                      # 62.89 kip
+_near("placa: flexion", _k["plate_m"].capacity, 0.9 * 36 * 0.375 * 81 / 4, 1e-9)                          # 246.0 kip·in
+_near("placa: demanda de momento", _k["plate_m"].demand, 25 * 3.0, 1e-9)
+_fv, _fh = 25 / 18.0, 3 * 25 * 3 / 81.0
+_th = math.atan2(_fh, _fv)
+_near("soldadura: demanda", _k["weld"].demand, math.hypot(_fv, _fh), 1e-9)                                  # 3.106 kip/in
+_near("soldadura: capacidad", _k["weld"].capacity,
+      0.75 * 0.6 * 70 * (1 + 0.5 * math.sin(_th) ** 1.5) * 0.707 * 0.25, 1e-9)                              # 7.92 kip/in
+_near("soldadura: metal base del soporte", _k["weld_base"].capacity, 0.75 * 0.6 * 65 * CATALOG.get("W24X55").tw, 1e-9)
+if _r.pending or not _r.closed_form or _r.verdict not in ("CUMPLE", "NO CUMPLE"):
+    FAIL.append("conn: una tipologia de calculo cerrado no debe quedar PENDIENTE de 3D")
+if not _r.ok:
+    FAIL.append(f"conn: el caso base debe cumplir (D/C = {_r.max_ratio:.3f}, {_r.governing.title})")
+# la capacidad por pernos debe coincidir con el D/C esperado a mano
+_near("pernos: D/C", _k["bolt_shear"].ratio, 25.0 / (17.893 * _ic1.C), 0.001)
+
+# ---- monotonia: mas carga, mayor D/C; otro perno, menos D/C de los pernos
+_r2 = solve(_tab(combos=[["Comb 1", 40.0]]))
+if not _r2.max_ratio > _r.max_ratio or _r2.ok:
+    FAIL.append("conn: con Vu = 40 kip la placa base de este caso debe fallar en pernos (D/C > 1)")
+_r4 = solve(_tab(n=4, combos=[["Comb 1", 40.0]]))
+_k4 = {c.key: c for c in _r4.checks}
+if not _k4["bolt_shear"].ratio < {c.key: c for c in _r2.checks}["bolt_shear"].ratio:
+    FAIL.append("conn: 4 pernos deben dar menos D/C de pernos que 3 con la misma carga")
+print(f"{'  Vu = 40 kip, 3 vs 4 pernos':34} pernos D/C {({c.key: c for c in _r2.checks})['bolt_shear'].ratio:.3f} -> {_k4['bolt_shear'].ratio:.3f}")
+
+# ---- viga secundaria -> viga maestra: cope superior de 2 in x 4.5 in
+_pc = _tab(cope_top=2.0, cope_len=4.5, top_flush=True, combos=[["Comb 1", 25.0], ["Comb 2", 30.0]])
+_rc = solve(_pc)
+_kc = {c.key: c for c in _rc.checks}
+_b = CATALOG.get("W16X31")
+print(f"{'viga secundaria a maestra (cope)':34} D/C max = {_rc.max_ratio:.3f}  gobierna: {_rc.governing.title[:48]}")
+if not {"web_bs", "cope_flex", "cope_lwb", "geo_lev_b"} <= set(_kc):
+    FAIL.append(f"conn cope: faltan verificaciones ({sorted(_kc)})")
+if "cope_lwb" in _kc and not _kc["cope_lwb"].skip:
+    FAIL.append("conn cope: el pandeo local del alma no esta implementado y debe figurar como NO EVALUADO (skip)")
+if not any("NO EVALUADO" in w for w in _rc.warnings):
+    FAIL.append("conn cope: debe avisar que el pandeo local por cope no se evalua")
+# seccion del cope: ala inferior + alma restante, por rectangulos independientes
+_y0 = _b.d / 2 - 2.0
+_rs = [(_b.bf, _b.tf, -_b.d / 2 + _b.tf / 2), (_b.tw, _y0 - (-_b.d / 2 + _b.tf), (_y0 + (-_b.d / 2 + _b.tf)) / 2)]
+_A = sum(w * h for w, h, _ in _rs); _yc = sum(w * h * y for w, h, y in _rs) / _A
+_I = sum(w * h ** 3 / 12 + w * h * (y - _yc) ** 2 for w, h, y in _rs)
+_S = _I / max(_yc - (-_b.d / 2), _y0 - _yc)
+_e = 0.5 + 4.5 - 3.0
+_near("cope: modulo neto", _kc["cope_flex"].capacity, 0.9 * 50 * _S, 1e-6)
+_near("cope: momento", _kc["cope_flex"].demand, 30.0 * _e, 1e-9)               # gobierna la combinacion de 30 kip
+_near("cope: bloque de cortante del alma", _kc["web_bs"].capacity, 0.75 * min(
+    0.6 * 65 * _b.tw * (3.95 + 6 - 2.5 * 0.875) + 65 * _b.tw * (2.5 - 0.4375),
+    0.6 * 50 * _b.tw * (3.95 + 6) + 65 * _b.tw * (2.5 - 0.4375)), 1e-9)
+if _rc.combo_gov != 1 or len(_rc.combo_rows) != 2:
+    FAIL.append(f"conn: la combinacion de 30 kip debe gobernar (gob = {_rc.combo_gov})")
+if _rc.rec is None or "COPE" not in _rc.rec.to_html():
+    FAIL.append("conn: la memoria debe incluir la seccion de la viga con cope")
+
+# ---- viga a columna (ala) y limites del alcance
+_rf = solve(_tab(sup_kind=SUP_KINDS[2], sup_label="W14X90", combos=[["Comb 1", 25.0]]))
+_kf = {c.key: c for c in _rf.checks}
+_near("columna: metal base = ala", _kf["weld_base"].capacity, 0.75 * 0.6 * 65 * CATALOG.get("W14X90").tf, 1e-9)
+for _nm, _mut, _txt in (("a > 3.5 in", dict(a=4.0), "EXTENDIDA"), ("1 perno", dict(n=1), "2 a 12"),
+                        ("13 pernos", dict(n=13), "2 a 12"), ("perfil inexistente", dict(beam="W99X999"), "no encontrado"),
+                        ("cope sin longitud", dict(cope_top=2.0), "longitud")):
+    _rr = solve(_tab(**_mut))
+    _fat = [w for w in _rr.warnings if w.startswith("**")]
+    if _rr.ok or not any(_txt in w for w in _fat):
+        FAIL.append(f"conn alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'viga a ala de columna':34} D/C max = {_rf.max_ratio:.3f}   avisos criticos de alcance: OK")
+
+# ---- consistencia de unidades: el D/C no depende del sistema de presentacion y la memoria convierte los modulos de seccion
+_pm = _tab(cope_top=2.0, cope_len=4.5, combos=[["Comb 1", 25.0]])                 # mm, kN, MPa por defecto
+_pi = _tab(cope_top=2.0, cope_len=4.5, combos=[["Comb 1", 25.0]])
+_pi.u_len, _pi.u_force, _pi.u_stress, _pi.u_moment = "in", "kip", "ksi", "kip·in"
+_rm, _ri = solve(_pm), solve(_pi)
+if abs(_rm.max_ratio - _ri.max_ratio) > 1e-12:
+    FAIL.append("conn unidades: el D/C cambia con el sistema de unidades")
+_zl = [t for k, t in _rm.rec.to_lines() if t.startswith("φMp")][0]
+if f"{7.59375 * 25.4 ** 3:.4g}" not in _zl:                                        # Z = 0.375·9²/4 in³ en mm³
+    FAIL.append(f"conn unidades: Z mal convertido en la memoria: {_zl}")
+print(f"{'consistencia de unidades':34} D/C mm-kN = in-kip = {_rm.max_ratio:.4f};  Z en la memoria: {_zl.split('=')[-2].strip()}")
+
+# ---- archivos: ida y vuelta de un libro con las dos tipologias, y compatibilidad con los ejemplos viejos
+_f = _os.path.join(_tf.mkdtemp(prefix="pbconn_"), "libro.pbase")
+_bp = Project(); _bp.element = "PB-X"
+_pc.element = "VS-1"
+save_book(_f, [_bp, _pc])
+_bk = load_book(_f)
+if [x.ctype for x in _bk] != [CT_BASEPLATE, CT_SHEAR_TAB] or _bk[1].stab != _pc.stab:
+    FAIL.append("conn: el libro no conserva la tipologia y los datos de la conexion de corte")
+for _ex in ("PB-01_W14X90", "COMP-1_W14X90_traccion"):
+    _old = load_book(f"ejemplos/{_ex}.pbase")
+    if _old[0].ctype != CT_BASEPLATE:
+        FAIL.append(f"conn: {_ex} debe abrir como placa base")
+print(f"{'libro con dos tipologias':34} guardado y leido OK;  ejemplos antiguos abren como placa base")
+
 print()
 print("=" * 150)
 if FAIL:

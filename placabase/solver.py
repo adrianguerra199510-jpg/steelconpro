@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import math
 
 from .model import Project
+from .conn.specs import CT_BASEPLATE
 from . import design as D
 from . import anchors as A
 from . import geometry as G
@@ -25,6 +26,7 @@ class Results:
     rec: Recorder = None
     combo_rows: list = field(default_factory=list)   # resumen de todas las combinaciones (lo llena la UI)
     combo_gov: int = 0
+    closed_form: bool = False       # tipologia sin FEM 3D: el veredicto es el del calculo cerrado (ver conn/)
 
     @property
     def max_ratio(self) -> float:
@@ -43,7 +45,7 @@ class Results:
     @property
     def pending(self) -> bool:
         """True si falta el analisis 3D: el veredicto final lo da el 3D, no el calculo cerrado."""
-        return self.fem is None
+        return self.fem is None and not self.closed_form
 
     @property
     def verdict(self) -> str:
@@ -59,6 +61,9 @@ class Results:
 
 def solve(prj: Project, detail: bool = True, fem=None) -> Results:
     """`fem`: paquete Fem3D del analisis 3D hecho con ESTE proyecto (o None si no hay uno vigente)."""
+    if prj.ctype != CT_BASEPLATE:                       # otras tipologias: ver placabase/conn/
+        from .conn import solve_conn
+        return solve_conn(prj, detail)
     R = Results()
     R.fem = fem
     notes = prj.normalize()
