@@ -656,7 +656,7 @@ try:
     _w2.recalc()
     if not abs(_w2.res.max_ratio - _dc0) > 1e-6 or _w2.prj.stab.n != 5:
         FAIL.append("conn UI: cambiar el numero de pernos en el formulario debe recalcular")
-    _w2._sc_add(); _w2.recalc()
+    _w2._ld_add(); _w2.recalc()
     if len(_w2.res.combo_rows) != 2 or _w2.tbl_cmb.rowCount() != 2:
         FAIL.append("conn UI: agregar una reaccion debe agregar una combinacion")
     _w2._goto_calc(0)                                                    # salto a la memoria: no debe fallar
@@ -664,7 +664,7 @@ try:
     _figs = _rep.save_figures(_qq, _RR, _od)
     _pdf = _rep.export_pdf(_qq, _RR, _os.path.join(_od, "m.pdf"), _figs)
     _doc = _rep.export_docx(_qq, _RR, _os.path.join(_od, "m.docx"), _figs)
-    if len(_figs) != 2 or any(_os.path.getsize(f) < 5000 for f in (_pdf, _doc, *_figs)):
+    if len(_figs) != 1 or any(_os.path.getsize(f) < 5000 for f in (_pdf, _doc, *_figs)):
         FAIL.append("conn reportes: PDF/Word/figuras no generados o vacios")
     _w2._switch(0); _w2.recalc()
     _tin0 = [_w2.tabs_in.tabText(i) for i in range(_w2.tabs_in.count()) if _w2.tabs_in.isTabVisible(i)]

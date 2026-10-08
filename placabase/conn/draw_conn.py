@@ -155,23 +155,3 @@ def _support_t(st, sup) -> float:
     if sup is None:
         return 0.5
     return sup.tf if st.sup_kind == SUP_KINDS[2] else sup.tw
-
-
-def save_figures(prj, res, folder: str) -> list:
-    """Elevacion y planta en PNG (para los reportes)."""
-    from pathlib import Path
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    f = Path(folder)
-    f.mkdir(parents=True, exist_ok=True)
-    paths = []
-    fig, ax = plt.subplots(figsize=(8.0, 5.8), dpi=150)
-    elevation(ax, prj)
-    fig.tight_layout()
-    p1 = f / "elevacion_conexion.png"; fig.savefig(p1); plt.close(fig); paths.append(str(p1))
-    fig, ax = plt.subplots(figsize=(8.0, 4.4), dpi=150)
-    plan(ax, prj)
-    fig.tight_layout()
-    p2 = f / "planta_conexion.png"; fig.savefig(p2); plt.close(fig); paths.append(str(p2))
-    return paths

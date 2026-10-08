@@ -209,8 +209,8 @@ def annex_figs(figs):
 
 def save_figures(prj: Project, res: Results, folder: str) -> list[str]:
     if prj.ctype != CT_BASEPLATE:                          # otras tipologias: ver placabase/conn/
-        from .conn import draw_conn
-        return draw_conn.save_figures(prj, res, folder)
+        from . import conn
+        return conn.save_figures(prj, res, folder)
     f = Path(folder)
     f.mkdir(parents=True, exist_ok=True)
     paths = []

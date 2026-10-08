@@ -15,6 +15,19 @@ Unidades internas: in, kip, ksi.
 from __future__ import annotations
 from dataclasses import dataclass, field
 
+def loads_of(combos, nvals: int, default):
+    """[(nombre, (v1, v2, ...))] a partir de [[nombre, v1, v2, ...], ...]; nunca vacia."""
+    out = []
+    for c in combos or []:
+        try:
+            out.append((str(c[0]), tuple(float(x) for x in c[1:1 + nvals])))
+        except (IndexError, TypeError, ValueError):
+            continue
+        if len(out[-1][1]) != nvals:
+            out.pop()
+    return out or [(default[0], tuple(default[1]))]
+
+
 # La primera es la placa base (el resto del programa); las demas se calculan en placabase/conn/.
 CT_BASEPLATE = "Placa base de columna"
 CT_SHEAR_TAB = "Conexion de corte — placa simple (viga a viga / viga a columna)"
@@ -64,11 +77,5 @@ class ShearTab:
     combo_idx: int = 0
 
     def loads(self) -> list:
-        """[(nombre, Vu)] nunca vacia."""
-        out = []
-        for c in self.combos or []:
-            try:
-                out.append((str(c[0]), float(c[1])))
-            except (IndexError, TypeError, ValueError):
-                continue
-        return out or [("Comb 1", 25.0)]
+        """[(nombre, (Vu,))] nunca vacia."""
+        return loads_of(self.combos, 1, ("Comb 1", (25.0,)))

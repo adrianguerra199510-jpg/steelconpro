@@ -36,8 +36,8 @@ from .units import parse_xy_clipboard
 from . import draw, report, mesh3d, view3d, brand
 from .rep3d import make_fem
 from .ui_widgets import Form, scroll, PasteTable, ThemeSwitch
-from .conn.specs import CONN_TYPES, CT_BASEPLATE, CT_SHEAR_TAB, SUP_KINDS, BOLT_GRADES, SHEAR_BOLT_SIZES
-from .conn import draw_conn
+from .conn.specs import CONN_TYPES, CT_BASEPLATE
+from . import conn as connpkg
 from . import gl3d
 from .units import (UnitSet, LEN_UNITS, FORCE_UNITS, STRESS_UNITS, MOMENT_UNITS,
                     DEFAULT_SETS, KIP_TO_KN, IN_TO_MM, KIPIN_TO_KNM)
@@ -656,53 +656,65 @@ class MainWindow(QMainWindow):
                "correr_3d.py que lo malla con Gmsh, arma el .inp y lo resuelve con CalculiX.")
         f.finish()
 
-        # ---- conexion de corte con placa simple (viga secundaria -> viga maestra / columna)
-        f = new_form("Conexion de corte")
-        _I = [lb for fam in ("W", "M", "S", "HP") for lb in CATALOG.by_family(fam)]
-        f.group("Viga apoyada (secundaria)")
-        f.combo("Perfil", "stab.beam", _I, editable=True, help="Perfil I de la viga que llega al soporte (W, M, S, HP). Puede escribirse: la lista se completa sola.")
-        f.combo("Acero", "stab.beam_steel", [x.name for x in M.SHAPE_STEELS], help="Grado del acero de la viga: Fy y Fu para el alma (cortante, bloque de cortante, aplastamiento y cope).")
-        f.group("Soporte")
-        f.combo("Tipo de soporte", "stab.sup_kind", SUP_KINDS, help="Viga maestra (la placa se suelda a su alma), alma de columna o ala de columna. Define el espesor del metal base bajo el cordon y el dibujo.")
-        f.combo("Perfil del soporte", "stab.sup_label", _I, editable=True, help="Perfil de la viga maestra o de la columna.")
-        f.combo("Acero del soporte", "stab.sup_steel", [x.name for x in M.SHAPE_STEELS], help="Fu del soporte para el cortante del metal base bajo la soldadura.")
-        f.group("Pernos (una sola fila vertical, agujero estandar)")
-        f.combo("Diametro", "stab.bolt_size", SHEAR_BOLT_SIZES, help="Diametro nominal del perno, en pulgadas.")
-        f.combo("Calidad", "stab.bolt_grade", BOLT_GRADES, help="A325/A490 con la rosca incluida (N) o excluida (X) del plano de corte (AISC Tabla J3.2). Solo cortante simple, tipo aplastamiento.")
-        f.int_("Numero de pernos", "stab.n", 1, 14, help="La configuracion convencional admite de 2 a 12 pernos en una fila (Manual Tabla 10-9). Fuera de ese rango el resultado se marca como no valido.")
-        f.num("Separacion vertical  s", "stab.s", 0.5, 12, uk="L", help="Entre centros de pernos. Minimo 2-2/3·db (AISC J3.3); 3·db es lo preferible.")
-        f.num("Soldadura a fila de pernos  a", "stab.a", 0.5, 12, uk="L", help="Distancia de la linea de soldadura a la fila de pernos: es la excentricidad con la que se verifican los pernos y la soldadura. La configuracion convencional exige a ≤ 3.5 in; mas alla es una conexion extendida, que este modulo no cubre.")
-        f.group("Placa")
-        f.num("Espesor  tp", "stab.tp", 0.1, 3, uk="L", help="Espesor de la placa. Para la ductilidad de rotacion de la configuracion convencional conviene tp ≤ db/2 + 1/16 in (aviso).")
-        f.combo("Acero de la placa", "stab.plate_steel", [x.name for x in M.PLATE_STEELS], help="Grado del acero de la placa.")
-        f.num("Distancia vertical al borde", "stab.lev_p", 0.25, 6, uk="L", help="Del centro del perno extremo al borde superior o inferior de la placa. La altura de la placa sale de (n−1)·s + 2·lev.")
-        f.num("Distancia horizontal al borde libre", "stab.leh_p", 0.25, 6, uk="L", help="Del centro de la fila de pernos al borde libre de la placa. La Tabla 10-9 pide al menos 2·db (aviso).")
-        f.group("Posicion respecto a la viga")
-        f.num("Retranqueo del extremo de la viga", "stab.gap", 0, 3, uk="L", help="Separacion entre el extremo de la viga y la cara del soporte (usual 1/2 in). La distancia del extremo a los pernos resulta a − retranqueo.")
-        f.num("Del tope de la viga al perno superior", "stab.y_top", -1, 60, uk="L", help="Negativo = automatico: el grupo de pernos se centra en el alma que queda (descontando los copes).")
-        f.group("Cope (despatinado) de la viga apoyada")
-        f.num("Cope superior: profundidad", "stab.cope_top", 0, 30, uk="L", help="Profundidad que se corta desde el tope de la viga (0 = sin cope). Debe pasar del espesor del ala. Con cope se verifican el bloque de cortante del alma y la flexion de la seccion con cope.")
-        f.num("Cope inferior: profundidad", "stab.cope_bot", 0, 30, uk="L", help="Profundidad que se corta desde el fondo de la viga (0 = sin cope), por ejemplo cuando las vigas quedan a ras por abajo.")
-        f.num("Cope: longitud desde el extremo", "stab.cope_len", 0, 40, uk="L", help="Longitud del cope medida desde el extremo de la viga. Es el brazo del momento en la seccion con cope: retranqueo + longitud − a.")
-        f.check("Tope de la viga a ras con el de la maestra", "stab.top_flush", help="Solo informativo: el programa avisa si el cope no alcanza para librar el ala de la viga maestra (supone 1/2 in de holgura).")
-        f.note("NO se evalua el pandeo local del alma por cope (Manual AISC Parte 9; la 15a Ed. cambio el procedimiento): el programa lo avisa. Verifiquelo aparte.")
-        f.group("Soldadura placa-soporte")
-        f.num("Cateto del filete (ambos lados)", "stab.weld_size", 0.0625, 1, uk="L", help="Filete a ambos lados de la placa, en toda su altura. Metodo elastico para la excentricidad (conservador). La practica del Manual es 5/8·tp.")
-        f.combo("Electrodo", "stab.electrode", [e.name for e in M.ELECTRODES], help="FEXX del metal de aporte.")
-        f.check("Incremento direccional de resistencia (AISC J2-5)", "stab.weld_dir", help="Aplica 1 + 0.5·sen^1.5(θ) con θ el angulo de la resultante respecto al eje de la soldadura.")
-        f.group("Reacciones factorizadas de la viga (LRFD)")
-        self.tbl_sc = QTableWidget(0, 2)
-        self.tbl_sc.setMinimumHeight(150)
-        self.tbl_sc.verticalHeader().setDefaultSectionSize(24)
-        self.tbl_sc.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.tbl_sc.itemChanged.connect(lambda *_: self._sc_changed())
-        f._lay.addRow(self.tbl_sc)
+        # ---- tipologias de conexion distintas de la placa base: formularios declarativos (conn/formspec.py)
+        self.tbl_ld = {}                 # ATTR -> tabla de cargas de la tipologia
+        self.form_show = {}              # ATTR -> [(tipo, clave, funcion)] visibilidad condicional
+        for _ct, mod in connpkg.modules():
+            f = new_form(mod.TAB)
+            self._build_conn_form(f, mod)
+            f.finish()
+
+    # ------------------------------------------------ formularios de las tipologias
+    @staticmethod
+    def _items(items):
+        """Catalogo de una lista de opciones de formspec ('@I', '@L', ... o una lista)."""
+        if isinstance(items, str) and items.startswith("@"):
+            k = items[1:]
+            fam = {"I": ("W", "M", "S", "HP"), "W": ("W",), "L": ("L",), "HSSR": ("HSS",), "HSSC": ("HSS circular",),
+                   "T": ("WT", "MT", "ST")}
+            if k in fam:
+                return [lb for fm in fam[k] for lb in CATALOG.by_family(fm)]
+            return {"steel_shape": [x.name for x in M.SHAPE_STEELS], "steel_plate": [x.name for x in M.PLATE_STEELS],
+                    "electrode": [e.name for e in M.ELECTRODES]}[k]
+        return list(items)
+
+    def _build_conn_form(self, f, mod):
+        """Construye la pestaña de una tipologia a partir de mod.FORM y le agrega su tabla de cargas."""
+        shows = []
+        for it in mod.FORM:
+            t = it["t"]
+            if t == "group":
+                f.group(it["title"])
+                if it["show"]:
+                    shows.append(("group", it["title"], it["show"]))
+                continue
+            if t == "note":
+                f.note(it["text"])
+                continue
+            if t == "num":
+                f.num(it["label"], it["path"], it["lo"], it["hi"], it["step"], it["dec"], it["suffix"], it["uk"], it["help"])
+            elif t == "int":
+                f.int_(it["label"], it["path"], it["lo"], it["hi"], help=it["help"])
+            elif t == "combo":
+                f.combo(it["label"], it["path"], self._items(it["items"]), editable=it["editable"], help=it["help"])
+            elif t == "check":
+                f.check(it["label"], it["path"], help=it["help"])
+            if it.get("show"):
+                shows.append(("field", it["path"], it["show"]))
+        self.form_show[mod.ATTR] = shows
+        f.group("Cargas factorizadas (LRFD)")
+        tbl = QTableWidget(0, 1 + len(mod.LOADS))
+        tbl.setMinimumHeight(150)
+        tbl.verticalHeader().setDefaultSectionSize(24)
+        tbl.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        tbl.itemChanged.connect(lambda *_: self._ld_changed())
+        self.tbl_ld[mod.ATTR] = tbl
+        f._lay.addRow(tbl)
         rowc = QWidget(); hc = QHBoxLayout(rowc); hc.setContentsMargins(0, 0, 0, 0)
-        for txt, fn in (("Agregar", self._sc_add), ("Quitar", self._sc_del)):
+        for txt, fn in (("Agregar", self._ld_add), ("Quitar", self._ld_del)):
             bt = QPushButton(txt); bt.clicked.connect(fn); hc.addWidget(bt)
         f._lay.addRow(rowc)
-        f.note("Cada fila es una combinacion con la reaccion vertical Vu de la viga (ya factorizada). El veredicto es el de la mas desfavorable. Sin carga axial en la viga.")
-        f.finish()
+        f.note(mod.LOADS_NOTE)
 
     # ================================================================== vistas
     def _build_views(self):
@@ -1001,7 +1013,7 @@ class MainWindow(QMainWindow):
                 f.load(self.prj)
             self._xy_load()
             self._combo_load()
-            self._sc_load()
+            self._ld_load()
         finally:
             self._loading = False
         self._update_visibility()
@@ -1012,7 +1024,7 @@ class MainWindow(QMainWindow):
             f.store(self.prj)
         self._xy_store()
         self._combo_store()
-        self._sc_store()
+        self._ld_store()
 
     # ------------------------------------------ coordenadas manuales de pernos
     def _xy_load(self):
@@ -1257,7 +1269,7 @@ class MainWindow(QMainWindow):
         p.date = datetime.date.today().isoformat()
         p.u_len, p.u_force, p.u_stress, p.u_moment = (self.prj.u_len, self.prj.u_force,
                                                       self.prj.u_stress, self.prj.u_moment)
-        p.element = f"{'PB' if ctype == CT_BASEPLATE else 'CC'}-{len(self.book) + 1:02d}"
+        p.element = f"{'PB' if ctype == CT_BASEPLATE else connpkg.module_for(ctype).PREFIX}-{len(self.book) + 1:02d}"
         self.book.append(p)
         self._switch(len(self.book) - 1)
 
@@ -1349,8 +1361,10 @@ class MainWindow(QMainWindow):
     def _apply_ctype(self):
         """Muestra solo las pestañas de entrada y de salida que corresponden a la tipologia de la conexion actual."""
         conn = self.is_conn
+        mod_tab = self._cur_mod().TAB if conn else None
+        conn_tabs = {m.TAB for _c, m in connpkg.modules()}
         for title, sw in self.tab_widgets.items():
-            vis = (title in ("Proyecto", "Conexion de corte")) if conn else (title != "Conexion de corte")
+            vis = (title in ("Proyecto", mod_tab)) if conn else (title not in conn_tabs)
             self.tabs_in.setTabVisible(self.tabs_in.indexOf(sw), vis)
         if not self.tabs_in.isTabVisible(self.tabs_in.currentIndex()):
             self.tabs_in.setCurrentWidget(self.tab_widgets["Proyecto"])
@@ -1367,67 +1381,85 @@ class MainWindow(QMainWindow):
     def _con_label(p) -> str:
         """Texto de la conexion en la lista del proyecto."""
         nm = p.element or "(sin nombre)"
-        if p.ctype == CT_SHEAR_TAB:
-            st = p.stab
-            return f"{nm}   —   {st.beam} → {st.sup_label}  ({st.n}×Ø{st.bolt_size})"
+        if p.ctype != CT_BASEPLATE:
+            return f"{nm}   —   {connpkg.module_for(p.ctype).label(p)}"
         return f"{nm}   —   {p.section.describe()}"
 
-    # ---- reacciones de la conexion de corte (tabla nombre / Vu)
-    def _sc_load(self):
-        u, t = self.us, self.tbl_sc
+    # ---- cargas de las tipologias (tabla nombre / valores segun mod.LOADS)
+    def _cur_mod(self):
+        return connpkg.module_for(self.prj.ctype) if self.is_conn else None
+
+    def _ld_load(self):
+        mod = self._cur_mod()
+        if mod is None:
+            return
+        u, t = self.us, self.tbl_ld[mod.ATTR]
         t.blockSignals(True)
-        t.setHorizontalHeaderLabels(["Combinacion", f"Vu ({u.F})"])
-        cs = self.prj.stab.loads()
+        t.setHorizontalHeaderLabels(["Combinacion"] + [f"{h} ({u.label(k)})" for h, k in mod.LOADS])
+        cs = getattr(self.prj, mod.ATTR).loads()
         t.setRowCount(len(cs))
-        for i, (nm, v) in enumerate(cs):
+        for i, (nm, vals) in enumerate(cs):
             t.setItem(i, 0, QTableWidgetItem(nm))
-            t.setItem(i, 1, QTableWidgetItem(f"{u.out('F', v):.6g}"))
+            for j, ((_h, k), v) in enumerate(zip(mod.LOADS, vals), 1):
+                t.setItem(i, j, QTableWidgetItem(f"{u.out(k, v):.6g}"))
         t.blockSignals(False)
 
-    def _sc_store(self):
-        u, t = self.us, self.tbl_sc
+    def _ld_store(self):
+        mod = self._cur_mod()
+        if mod is None:
+            return
+        u, t, spec = self.us, self.tbl_ld[mod.ATTR], getattr(self.prj, mod.ATTR)
         cs = []
         for i in range(t.rowCount()):
             try:
                 nm = t.item(i, 0).text().strip() or f"Comb {i + 1}"
-                v = float(t.item(i, 1).text().replace(",", ""))
-                if not math.isfinite(v):
+                v = [float(t.item(i, j).text().replace(",", "")) for j in range(1, 1 + len(mod.LOADS))]
+                if not all(math.isfinite(x) for x in v):
                     raise ValueError("valor no finito")
             except (AttributeError, ValueError):
-                old = self.prj.stab.combos[i] if i < len(self.prj.stab.combos) else None
-                if old is not None:
-                    cs.append(list(old))
+                if i < len(spec.combos):
+                    cs.append(list(spec.combos[i]))
                 continue
-            cs.append([nm, u.inn("F", v)])
+            cs.append([nm] + [u.inn(k, x) for (_h, k), x in zip(mod.LOADS, v)])
         if cs:
-            self.prj.stab.combos = cs
+            spec.combos = cs
 
-    def _sc_changed(self):
+    def _ld_changed(self):
         if self._loading:
             return
-        self._sc_store()
+        self._ld_store()
         self.on_change()
 
-    def _sc_add(self):
-        self._sc_store()
-        cs = self.prj.stab.combos
-        cs.append([f"Comb {len(cs) + 1}", cs[-1][1] if cs else 40.0])
-        self._sc_load()
+    def _ld_add(self):
+        mod = self._cur_mod()
+        self._ld_store()
+        cs = getattr(self.prj, mod.ATTR).combos
+        cs.append([f"Comb {len(cs) + 1}"] + (list(cs[-1][1:]) if cs else [0.0] * len(mod.LOADS)))
+        self._ld_load()
         self.on_change()
 
-    def _sc_del(self):
-        self._sc_store()
-        cs = self.prj.stab.combos
-        r = self.tbl_sc.currentRow()
+    def _ld_del(self):
+        mod = self._cur_mod()
+        self._ld_store()
+        cs = getattr(self.prj, mod.ATTR).combos
+        r = self.tbl_ld[mod.ATTR].currentRow()
         if len(cs) > 1 and 0 <= r < len(cs):
             del cs[r]
-            self._sc_load()
+            self._ld_load()
             self.on_change()
 
     def _update_visibility(self):
         """Cada pestaña muestra solo los campos que aplican a lo seleccionado."""
         self._apply_ctype()
         prj, F = self.prj, self.fnamed
+        if self.is_conn:
+            mod = self._cur_mod()
+            for kind, key, fn in self.form_show.get(mod.ATTR, []):
+                try:
+                    on = bool(fn(prj))
+                except Exception:
+                    on = True
+                (F[mod.TAB].show_group if kind == "group" else F[mod.TAB].show_field)(key, on)
         # ---- placa
         fp, pl = F["Placa"], prj.plate
         circ = pl.shape == "Circular"
@@ -1636,9 +1668,7 @@ class MainWindow(QMainWindow):
         try:
             cv = self.cv_conn
             cv.fig.clf()
-            gs = cv.fig.add_gridspec(2, 1, height_ratios=[1.5, 1])
-            draw_conn.elevation(cv.fig.add_subplot(gs[0]), self.prj)
-            draw_conn.plan(cv.fig.add_subplot(gs[1]), self.prj)
+            connpkg.module_for(self.prj.ctype).draw(cv.fig, self.prj)
             cv.cv.draw_idle()
         except Exception as e:
             log = self._log_error("_draw_conn", e)
@@ -1810,7 +1840,7 @@ class MainWindow(QMainWindow):
     def _fill_combo_box(self):
         conn = self.is_conn
         if conn:
-            names = [nm for nm, _ in self.prj.stab.loads()]
+            names = [nm for nm, _ in getattr(self.prj, self._cur_mod().ATTR).loads()]
             idx = self.res.combo_gov if self.res is not None else 0
         else:
             names = [c.name for c in self.prj.combo_list()]

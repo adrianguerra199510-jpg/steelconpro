@@ -9,39 +9,19 @@ from pathlib import Path
 import datetime
 
 from ..units import UnitSet, float_to_frac
-from .specs import CT_SHEAR_TAB
-
-NORMAS = {CT_SHEAR_TAB: "AISC 360-22 (cap. J, F, G) · AISC Steel Construction Manual 15a Ed., Partes 7, 9 y 10"}
-TITULOS = {CT_SHEAR_TAB: "CONEXION DE CORTE CON PLACA SIMPLE"}
-
 
 def _us(prj) -> UnitSet:
     return UnitSet(prj.u_len, prj.u_force, prj.u_stress, prj.u_moment)
 
 
+def _mod(prj):
+    from . import module_for
+    return module_for(prj.ctype)
+
+
 def input_rows(prj, us: UnitSet) -> list:
     """Filas (concepto, descripcion) de los datos de entrada."""
-    if prj.ctype == CT_SHEAR_TAB:
-        from .shear_tab import geometry
-        st = prj.stab
-        g = geometry(st)
-        b = g["beam"]
-        rows = [
-            ("Viga apoyada", f"{st.beam} ({st.beam_steel})" + (f" — d = {us.q('L', b.d)}, tw = {us.q('L', b.tw)}" if b else "")),
-            ("Soporte", f"{st.sup_label} ({st.sup_steel}) — {st.sup_kind}"),
-            ("Pernos", f"{st.n} Ø{st.bolt_size} in {st.bolt_grade}, agujero estandar; s = {us.q('L', st.s)}, "
-                       f"a = {us.q('L', st.a)}"),
-            ("Placa", f"{us.q('L', g['Lp'])} × {us.q('L', st.a + st.leh_p)} × {us.q('L', st.tp)} — {st.plate_steel}; "
-                      f"lev = {us.q('L', st.lev_p)}, leh = {us.q('L', st.leh_p)}"),
-            ("Soldadura", f"filete {us.q('L', st.weld_size)} ({float_to_frac(st.weld_size)} in) {st.electrode} a ambos lados"
-                          + (", con incremento direccional" if st.weld_dir else "")),
-            ("Retranqueo", f"{us.q('L', st.gap)} del extremo de la viga a la cara del soporte"),
-        ]
-        if g["coped"]:
-            rows.append(("Cope", f"superior {us.q('L', g['ct'])}, inferior {us.q('L', g['cb'])}, longitud {us.q('L', st.cope_len)}"))
-        rows.append(("Cargas (LRFD)", "; ".join(f"{n}: Vu = {us.q('F', v)}" for n, v in st.loads())))
-        return rows
-    return []
+    return _mod(prj).input_rows(prj, us)
 
 
 def _checks_rows(us, res):
@@ -99,11 +79,11 @@ def export_pdf(prj, res, path: str, figs: list | None = None, detail: bool = Tru
         story.append(Spacer(1, 4))
     except Exception:
         pass
-    story.append(Paragraph(f"MEMORIA DE CALCULO — {TITULOS.get(prj.ctype, prj.ctype.upper())}", H0))
+    story.append(Paragraph(f"MEMORIA DE CALCULO — {_mod(prj).TITLE}", H0))
     story.append(Paragraph(f"<b>{esc(prj.name)}</b> &nbsp;|&nbsp; Elemento: {esc(prj.element)} &nbsp;|&nbsp; "
                            f"Calculo: {esc(prj.author or '-')} &nbsp;|&nbsp; "
                            f"Fecha: {prj.date or datetime.date.today().isoformat()}", CEN))
-    story.append(Paragraph(f"Normas: {NORMAS.get(prj.ctype, '')} &nbsp;|&nbsp; Unidades: {us.L}, {us.F}, {us.S}", CEN))
+    story.append(Paragraph(f"Normas: {_mod(prj).NORMS} &nbsp;|&nbsp; Unidades: {us.L}, {us.F}, {us.S}", CEN))
     story.append(Spacer(1, 8))
 
     story.append(Paragraph("1. Datos de entrada", H1))
@@ -174,7 +154,7 @@ def export_pdf(prj, res, path: str, figs: list | None = None, detail: bool = Tru
 
     doc = SimpleDocTemplate(path, pagesize=letter, leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.55 * inch, bottomMargin=0.55 * inch,
-                            title=f"Memoria {TITULOS.get(prj.ctype, 'conexion')} {prj.element}",
+                            title=f"Memoria {_mod(prj).TITLE.lower()} {prj.element}",
                             author=prj.author or "PlacaBasePro")
 
     def _footer(canvas, docu):
@@ -207,12 +187,12 @@ def export_docx(prj, res, path: str, figs: list | None = None, detail: bool = Tr
         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.LEFT
     except Exception:
         pass
-    doc.add_heading(f"MEMORIA DE CALCULO — {TITULOS.get(prj.ctype, prj.ctype.upper())}", level=0)
+    doc.add_heading(f"MEMORIA DE CALCULO — {_mod(prj).TITLE}", level=0)
     p0 = doc.add_paragraph()
     p0.add_run(f"{prj.name}\n").bold = True
     p0.add_run(f"Elemento: {prj.element}     Calculo: {prj.author}     "
                f"Fecha: {prj.date or datetime.date.today().isoformat()}\n")
-    p0.add_run(f"Normas: {NORMAS.get(prj.ctype, '')}.")
+    p0.add_run(f"Normas: {_mod(prj).NORMS}.")
 
     doc.add_heading("1. Datos de entrada", level=1)
     t = doc.add_table(rows=0, cols=2)

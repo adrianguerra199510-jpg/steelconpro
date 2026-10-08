@@ -22,10 +22,12 @@ from .. import materials as M
 from ..design import Check
 from ..explain import Recorder
 from ..shapes import CATALOG, W_SHAPE
+from .base import run_combos, add_check
+from .formspec import G, N, num, intf, combo, check
 from .common import (PHI_BOLT, PHI_RUPT, PHI_YIELD, PHI_FLEX, FNV, bolt_db, hole_std, hole_net, edge_min,
                      bolt_shear_rn, bearing_rn, block_shear_rn, ic_vertical_line, weld_pair_vertical,
                      coped_section, net_flexure_plate)
-from .specs import CT_SHEAR_TAB, SUP_KINDS
+from .specs import CT_SHEAR_TAB, SUP_KINDS, BOLT_GRADES, SHEAR_BOLT_SIZES
 
 NAME = CT_SHEAR_TAB
 E_STEEL = 29000.0
@@ -118,16 +120,12 @@ def check_input(st) -> list:
     return w
 
 
-def _chk(ck, rec, key, title, dem, cap, unit, ref, note="", skip=False):
-    c = Check(key, title, dem, cap, unit, ref, note, skip)
-    ck.append(c)
-    if rec and not skip:
-        rec.check(title, dem, cap, c.kind, c.ratio, c.ok, ref)
-    return c
+_chk = add_check
 
 
-def solve_one(prj, name: str, Vu: float, rec: Recorder | None):
-    """Verificaciones de una combinacion. Devuelve la lista de Check."""
+def solve_one(prj, name: str, vals, rec: Recorder | None):
+    """Verificaciones de una combinacion (vals = (Vu,)). Devuelve la lista de Check."""
+    Vu = vals[0]
     st = prj.stab
     g = geometry(st)
     ck: list[Check] = []
@@ -308,27 +306,83 @@ def solve_one(prj, name: str, Vu: float, rec: Recorder | None):
 
 def solve(prj, detail: bool = True):
     """Calcula todas las combinaciones; el resultado devuelto es el de la que gobierna."""
-    from ..solver import Results
+    return run_combos(prj, prj.stab, check_input, solve_one, detail)
+
+
+# ============================================================ contrato con la UI y los reportes
+ATTR = "stab"                     # campo de Project con los datos
+TAB = "Conexion de corte"         # pestaña de entrada
+PREFIX = "CC"
+TITLE = "CONEXION DE CORTE CON PLACA SIMPLE"
+NORMS = "AISC 360-22 (cap. J, F, G) · AISC Steel Construction Manual 15a Ed., Partes 7, 9 y 10"
+LOADS = [("Vu", "F")]
+LOADS_NOTE = ("Cada fila es una combinacion con la reaccion vertical Vu de la viga (ya factorizada). El veredicto es el de "
+              "la mas desfavorable. Sin carga axial en la viga.")
+
+FORM = [
+    G("Viga apoyada (secundaria)"),
+    combo("Perfil", "stab.beam", "@I", editable=True, help="Perfil I de la viga que llega al soporte (W, M, S, HP). Puede escribirse: la lista se completa sola."),
+    combo("Acero", "stab.beam_steel", "@steel_shape", help="Grado del acero de la viga: Fy y Fu para el alma (cortante, bloque de cortante, aplastamiento y cope)."),
+    G("Soporte"),
+    combo("Tipo de soporte", "stab.sup_kind", SUP_KINDS, help="Viga maestra (la placa se suelda a su alma), alma de columna o ala de columna. Define el espesor del metal base bajo el cordon y el dibujo."),
+    combo("Perfil del soporte", "stab.sup_label", "@I", editable=True, help="Perfil de la viga maestra o de la columna."),
+    combo("Acero del soporte", "stab.sup_steel", "@steel_shape", help="Fu del soporte para el cortante del metal base bajo la soldadura."),
+    G("Pernos (una sola fila vertical, agujero estandar)"),
+    combo("Diametro", "stab.bolt_size", SHEAR_BOLT_SIZES, help="Diametro nominal del perno, en pulgadas."),
+    combo("Calidad", "stab.bolt_grade", BOLT_GRADES, help="A325/A490 con la rosca incluida (N) o excluida (X) del plano de corte (AISC Tabla J3.2). Solo cortante simple, tipo aplastamiento."),
+    intf("Numero de pernos", "stab.n", 1, 14, help="La configuracion convencional admite de 2 a 12 pernos en una fila (Manual Tabla 10-9). Fuera de ese rango el resultado se marca como no valido."),
+    num("Separacion vertical  s", "stab.s", 0.5, 12, uk="L", help="Entre centros de pernos. Minimo 2-2/3·db (AISC J3.3); 3·db es lo preferible."),
+    num("Soldadura a fila de pernos  a", "stab.a", 0.5, 12, uk="L", help="Distancia de la linea de soldadura a la fila de pernos: es la excentricidad con la que se verifican los pernos y la soldadura. La configuracion convencional exige a ≤ 3.5 in; mas alla es una conexion extendida, que este modulo no cubre."),
+    G("Placa"),
+    num("Espesor  tp", "stab.tp", 0.1, 3, uk="L", help="Espesor de la placa. Para la ductilidad de rotacion de la configuracion convencional conviene tp ≤ db/2 + 1/16 in (aviso)."),
+    combo("Acero de la placa", "stab.plate_steel", "@steel_plate", help="Grado del acero de la placa."),
+    num("Distancia vertical al borde", "stab.lev_p", 0.25, 6, uk="L", help="Del centro del perno extremo al borde superior o inferior de la placa. La altura de la placa sale de (n−1)·s + 2·lev."),
+    num("Distancia horizontal al borde libre", "stab.leh_p", 0.25, 6, uk="L", help="Del centro de la fila de pernos al borde libre de la placa. La Tabla 10-9 pide al menos 2·db (aviso)."),
+    G("Posicion respecto a la viga"),
+    num("Retranqueo del extremo de la viga", "stab.gap", 0, 3, uk="L", help="Separacion entre el extremo de la viga y la cara del soporte (usual 1/2 in). La distancia del extremo a los pernos resulta a − retranqueo."),
+    num("Del tope de la viga al perno superior", "stab.y_top", -1, 60, uk="L", help="Negativo = automatico: el grupo de pernos se centra en el alma que queda (descontando los copes)."),
+    G("Cope (despatinado) de la viga apoyada"),
+    num("Cope superior: profundidad", "stab.cope_top", 0, 30, uk="L", help="Profundidad que se corta desde el tope de la viga (0 = sin cope). Debe pasar del espesor del ala. Con cope se verifican el bloque de cortante del alma y la flexion de la seccion con cope."),
+    num("Cope inferior: profundidad", "stab.cope_bot", 0, 30, uk="L", help="Profundidad que se corta desde el fondo de la viga (0 = sin cope), por ejemplo cuando las vigas quedan a ras por abajo."),
+    num("Cope: longitud desde el extremo", "stab.cope_len", 0, 40, uk="L", help="Longitud del cope medida desde el extremo de la viga. Es el brazo del momento en la seccion con cope: retranqueo + longitud − a."),
+    check("Tope de la viga a ras con el de la maestra", "stab.top_flush", help="Solo informativo: el programa avisa si el cope no alcanza para librar el ala de la viga maestra (supone 1/2 in de holgura)."),
+    N("NO se evalua el pandeo local del alma por cope (Manual AISC Parte 9; la 15a Ed. cambio el procedimiento): el programa lo avisa. Verifiquelo aparte."),
+    G("Soldadura placa-soporte"),
+    num("Cateto del filete (ambos lados)", "stab.weld_size", 0.0625, 1, uk="L", help="Filete a ambos lados de la placa, en toda su altura. Metodo elastico para la excentricidad (conservador). La practica del Manual es 5/8·tp."),
+    combo("Electrodo", "stab.electrode", "@electrode", help="FEXX del metal de aporte."),
+    check("Incremento direccional de resistencia (AISC J2-5)", "stab.weld_dir", help="Aplica 1 + 0.5·sen^1.5(θ) con θ el angulo de la resultante respecto al eje de la soldadura."),
+]
+
+
+def label(prj) -> str:
     st = prj.stab
-    loads = st.loads()
-    warns = check_input(st)
-    best = None
-    rows = []
-    for idx, (name, Vu) in enumerate(loads):
-        rec = Recorder(prj.units()) if detail else None
-        ck = solve_one(prj, name, Vu, rec)
-        act = [c for c in ck if not c.skip]
-        mx = max((c.ratio for c in act), default=0.0)
-        gov = max(act, key=lambda c: c.ratio) if act else None
-        rows.append({"name": name, "ratio": mx, "ok": all(c.ok for c in act), "pending": False,
-                     "gov": gov.title if gov else "-"})
-        if best is None or mx > best[0]:
-            best = (mx, idx, ck, rec)
-    R = Results()
-    R.closed_form = True
-    R.checks = best[2] if best else []
-    R.rec = best[3] if best else None
-    R.warnings = list(warns)
-    R.combo_rows = rows
-    R.combo_gov = best[1] if best else 0
-    return R
+    return f"{st.beam} → {st.sup_label}  ({st.n}×Ø{st.bolt_size})"
+
+
+def input_rows(prj, us) -> list:
+    """Filas (concepto, descripcion) de los datos de entrada para los reportes."""
+    st = prj.stab
+    g = geometry(st)
+    b = g["beam"]
+    rows = [
+        ("Viga apoyada", f"{st.beam} ({st.beam_steel})" + (f" — d = {us.q('L', b.d)}, tw = {us.q('L', b.tw)}" if b else "")),
+        ("Soporte", f"{st.sup_label} ({st.sup_steel}) — {st.sup_kind}"),
+        ("Pernos", f"{st.n} Ø{st.bolt_size} in {st.bolt_grade}, agujero estandar; s = {us.q('L', st.s)}, a = {us.q('L', st.a)}"),
+        ("Placa", f"{us.q('L', g['Lp'])} × {us.q('L', st.a + st.leh_p)} × {us.q('L', st.tp)} — {st.plate_steel}; "
+                  f"lev = {us.q('L', st.lev_p)}, leh = {us.q('L', st.leh_p)}"),
+        ("Soldadura", f"filete {us.q('L', st.weld_size)} {st.electrode} a ambos lados"
+                      + (", con incremento direccional" if st.weld_dir else "")),
+        ("Retranqueo", f"{us.q('L', st.gap)} del extremo de la viga a la cara del soporte"),
+    ]
+    if g["coped"]:
+        rows.append(("Cope", f"superior {us.q('L', g['ct'])}, inferior {us.q('L', g['cb'])}, longitud {us.q('L', st.cope_len)}"))
+    rows.append(("Cargas (LRFD)", "; ".join(f"{n}: Vu = {us.q('F', v[0])}" for n, v in st.loads())))
+    return rows
+
+
+def draw(fig, prj):
+    """Elevacion y planta con cotas."""
+    from . import draw_conn
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.5, 1])
+    draw_conn.elevation(fig.add_subplot(gs[0]), prj)
+    draw_conn.plan(fig.add_subplot(gs[1]), prj)
