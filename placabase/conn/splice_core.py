@@ -19,7 +19,7 @@ import math
 from .. import materials as M
 from ..shapes import CATALOG
 from .base import add_check
-from .common import (PHI_BOLT, PHI_RUPT, PHI_YIELD, FNV, E_STEEL, bolt_db, hole_std, hole_net, edge_min, bolt_shear_rn,
+from .common import (PHI_BOLT, PHI_RUPT, PHI_YIELD, FNV, bolt_db, hole_std, hole_net, edge_min, bolt_shear_rn,
                      bearing_rn, block_shear_rn, column_fcr, elastic_bolt_group, long_joint_factor)
 from .specs import SPLICE_SHARE
 
@@ -234,7 +234,7 @@ def checks(prj, sp, name, Mu, Vu, P, contact, rec):
 def draw(fig, prj, sp, title):
     """Elevacion lateral (placas de ala y de alma con pernos) y planta del ala."""
     from . import drawing as D
-    from matplotlib.patches import Rectangle, Circle
+    from matplotlib.patches import Rectangle
     g = geometry(sp)
     sh = g["sh"]
     gs_ = fig.add_gridspec(2, 1, height_ratios=[1.4, 1])

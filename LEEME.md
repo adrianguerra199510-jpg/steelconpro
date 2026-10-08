@@ -5,9 +5,10 @@
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
 rigidizadores, soldadura y análisis de elementos finitos. Desde la 3.3 también
-**conexiones de corte con placa simple** (viga secundaria a viga maestra, viga a columna).
+**otras tipologías de conexión**: placa de corte (viga secundaria a viga maestra, viga a columna), doble ángulo, asiento, empalmes de viga y de
+columna, placa extrema a momento, cartelas de arriostramiento, nudos HSS a HSS, RBS (AISC 358) y empalme de puente con pernos pretensados (AASHTO).
 
-Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**.
+Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**; para las conexiones: AISC Manual 15ª Ed., AISC 358-16, AISC 341-22, AASHTO LRFD y RCSC.
 
 **Unidades configurables**: longitud en in / ft / mm / cm / m, fuerza en kip / lbf /
 kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas, a la
@@ -19,14 +20,31 @@ Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestañ
 ## Novedades de la 3.3.0: tipologías de conexión
 
 Cada conexión del proyecto tiene ahora una **tipología** (Proyecto > Tipología, o el diálogo del botón *Nueva*). Un mismo archivo `.pbase`
-puede mezclarlas; los archivos anteriores se abren como placa base. Tipologías disponibles:
+puede mezclarlas; los archivos anteriores se abren como placa base. Todas las tipologías nuevas se calculan en **forma cerrada** (sin análisis 3D),
+con varias combinaciones de carga (gobierna la peor), tabla de verificaciones D/C, dibujo con cotas, memoria detallada y PDF/Word, y se pueden
+correr por lotes (`run.py libro.pbase --pdf memoria.pdf`).
 
-| Tipología | Cálculo | Análisis 3D (Gmsh + CalculiX) |
-|---|---|---|
-| Placa base de columna | como siempre (DG1, ACI 318-19 cap. 17) | sí |
-| **Conexión de corte — placa simple** | cerrado, AISC 360-22 y Manual 15ª Ed. (Partes 7, 9 y 10) | no (el veredicto es el del cálculo cerrado) |
+| Tipología | Pestaña | Norma | Qué verifica |
+|---|---|---|---|
+| Placa base de columna | (las de siempre) | AISC DG1, ACI 318-19 cap. 17 | como siempre; con análisis 3D (Gmsh + CalculiX) |
+| **Placa de corte (shear tab)** | Conexión de corte | AISC 360-22, Manual 15ª Parte 7, 9, 10 | viga secundaria a viga maestra (con cope), viga a alma o ala de columna |
+| **Doble ángulo** | Doble angulo | AISC 360-22, Manual Parte 10 | atornillado o atornillado-soldado al soporte; viga a viga o a columna |
+| **Asiento (seated)** | Asiento | AISC 360-22, Manual Parte 10 | sin rigidizar (ángulo) o rigidizado (ménsula) |
+| **Empalme de viga** | Empalme de viga | AISC 360-22 cap. D, J | placas de ala y de alma atornilladas; momento, cortante y axial |
+| **Empalme de columna** | Empalme de columna | AISC 360-22 cap. D, J | igual, con contacto de extremos opcional (J1.4(a)) |
+| **Placa extrema a momento** | Placa extrema | AISC 360-22, Manual Parte 9 | a ras o extendida; filas de pernos con efecto palanca, lado de la columna |
+| **Cartela de arriostramiento** | Cartela | AISC Manual Parte 13 | Whitmore, bloque de cortante, Thornton, UFM sin momentos |
+| **HSS a HSS (celosía)** | HSS a HSS | AISC 360-22 cap. K | nudos T, Y, X y K con separación (redondos); T, Y, X (rectangulares) |
+| **RBS precalificada** | AISC 358 RBS | AISC 358-16 cap. 5, AISC 341 | Mpr, Mf en la cara, zona del panel, columna fuerte-viga débil |
+| **Puente pretensado** | Puente pretensado | AASHTO LRFD 6.13, RCSC | empalme de ala con pernos A325/A490 de deslizamiento crítico |
 
-**Placa simple de corte.** Cubre la **viga secundaria apoyada en el alma de una viga maestra** (con cope superior y/o inferior), la viga apoyada
+Cargas: cada tipología tiene su tabla de combinaciones, con las columnas que le corresponden: Vu (placa de corte, doble ángulo), R (asiento), Mu, Vu, Nu
+(empalme de viga), Pu, Mu, Vu (empalme de columna), Mu, Vu (placa extrema), P del arriostramiento (cartela), P de cada diagonal (HSS), Vg y Puc (RBS)
+y la fuerza del ala en Resistencia y en Servicio II (puente). Una nota sobre la tabla explica la convención de signos y de qué combinación se trata.
+
+### Placa de corte (shear tab)
+
+Cubre la **viga secundaria apoyada en el alma de una viga maestra** (con cope superior y/o inferior), la viga apoyada
 en el alma de una columna y en el ala de una columna. Una fila vertical de 2 a 12 pernos en agujeros estándar, placa soldada al soporte con filete
 a ambos lados. Se verifica, por cada reacción factorizada Vu (varias combinaciones; gobierna la peor):
 
@@ -41,28 +59,85 @@ a ambos lados. Se verifica, por cada reacción factorizada Vu (varias combinacio
   con cope** (Snet de la sección en T, brazo = retranqueo + longitud del cope − a).
 - Distancias mínimas (J3.3, J3.4, J2.4) y avisos de la configuración convencional (Tabla 10-9: 2 ≤ n ≤ 12, a ≤ 3.5 in, leh ≥ 2·db, tp ≤ db/2 + 1/16, filete ≈ 5/8·tp).
 
-El dibujo (elevación y planta con cotas, con el cope) está en la pestaña *Esquema de la conexión*; las memorias PDF y Word y el modo por lotes
-(`run.py archivo.pbase --pdf m.pdf`) funcionan igual que para la placa base. Un aviso que empieza con `**` invalida el veredicto (por ejemplo a > 3.5 in).
+No hace: pandeo local del alma por cope (*NO EVALUADO*; la 15ª edición cambió el procedimiento), carga axial en la viga, agujeros ranurados, deslizamiento
+crítico, configuraciones extendidas (a > 3.5 in), flexión local del ala de la columna ni rigidez del soporte. La excentricidad es la completa (e = a),
+sin la reducción que permite la Tabla 10-9: es conservador.
 
-**Lo que esta versión NO hace** (se informa en pantalla y en la memoria cuando aplica):
-- **Pandeo local del alma por cope** (Manual Parte 9): figura como *NO EVALUADO*. La 15ª edición cambió el procedimiento (Dowswell, EJ 2018) y no se
-  pudo consultar la fuente al programarlo; verifíquelo aparte cuando haya cope.
-- Carga axial en la viga, agujeros ranurados, pernos de deslizamiento crítico, configuraciones **extendidas** (a > 3.5 in: pandeo de la placa,
-  torsión del soporte), flexión local del ala de la columna y rigidez del soporte.
-- La excentricidad de los pernos es la completa (e = a), sin la reducción que la Tabla 10-9 permitiría en la configuración convencional: es
-  conservador. Un perno no encaja si el alma no tiene espacio: se avisa.
-- Los valores tabulados de AISC 360 (Tablas J3.2, J3.3 y J3.4) y las demás fórmulas se transcribieron del texto de la Especificación y del Manual **sin
-  poder contrastarlos con un ejemplo publicado**; las pruebas (`selftest.py`) los comparan contra cálculos manuales independientes, no contra tablas
-  del AISC. Revíselos antes de usar el programa en un proyecto.
+### Doble ángulo, asiento, empalmes
+
+- **Doble ángulo**: los pernos del alma trabajan en doble corte con excentricidad (centro instantáneo); la pierna al soporte se atornilla (dos columnas,
+  cortante concentrado) o se suelda (líneas verticales con excentricidad). Aplastamiento y desgarramiento en alma, ángulos y soporte; cortante, rotura y
+  bloque de cortante de los ángulos; alma de la viga con cope. *No*: flexión de las piernas, axial, ranuras, deslizamiento crítico, pandeo por cope.
+- **Asiento**: la reacción actúa a e = retranqueo + N/2. Viga: fluencia local y aplastamiento del alma (J10.2, J10.3 en el extremo). Ángulo sin rigidizar:
+  flexión plástica de la pierna horizontal, cortante, tracción de la pierna vertical, pernos o soldadura al soporte con el momento R·e. Rigidizado: ménsula
+  (M, V, interacción plástica) y soldadura de dos líneas. *No*: placa horizontal del asiento rigidizado, ángulo superior, unión del ala inferior,
+  pandeo del rigidizador (solo aviso de esbeltez).
+- **Empalme de viga / columna**: el momento lo toman las alas (o se reparte según la inercia con el alma); el axial se reparte por áreas. Placas de ala
+  exterior e interiores (fluencia, rotura con An ≤ 0.85·Ag, pandeo en compresión), pernos (simple o doble corte, junta larga), aplastamiento, bloque de
+  cortante, tracción neta del ala del perfil; alma con método elástico (V con excentricidad, Mw, N). Columna con contacto: la compresión pasa por
+  contacto y el empalme se dimensiona para el mayor entre la tracción y el 50 % de la compresión (ala y alma). *No*: pandeo de las placas de alma,
+  ranuras, deslizamiento crítico ni la resistencia del perfil fuera del empalme.
+
+### Placa extrema a momento
+
+Cada fila de pernos se trata como una **T equivalente con efecto palanca** (Manual Parte 9): el momento resistente es Mcap = 2·Σ T_i·h_i; el cortante lo
+toman los pernos de compresión. Lado de la columna: flexión local del ala (J10.1), fluencia y aplastamiento del alma (J10.2, J10.3) y zona del panel
+(J10.6); con placas de continuidad se omiten las tres primeras. **Atención: no es el procedimiento de líneas de fluencia de AISC DG4**
+(Murray y Sumner), que no se pudo consultar: es una aproximación conservadora que puede diferir de DG4. *No*: rigidizadores de placa (4ES, 8ES),
+flexión del ala de la columna por líneas de fluencia (*NO EVALUADO*).
+
+### Cartela de arriostramiento
+
+Método de fuerza uniforme (UFM, Manual Parte 13) en la esquina viga-columna, caso sin momentos: tanθ = (α + ec)/(β + eb); fuerzas de interfaz
+H_b, V_b, H_c, V_c. Se verifican la unión del arriostramiento (pernos con método elástico o soldadura), la sección de **Whitmore** (fluencia y rotura en
+tracción; pandeo con K = 0.65 y L_avg, Thornton, en compresión), el bloque de cortante, las soldaduras e interfaces y los efectos locales en viga y
+columna (J10.1, J10.2, J10.3). Si la geometría no cumple la condición del UFM se avisa (fatal si la diferencia pasa de 10 %). *No*: el
+arriostramiento como miembro, el borde libre de la cartela (Dowswell), la conexión viga-columna bajo las fuerzas de la cartela.
+
+### HSS a HSS
+
+AISC 360-22 cap. K: tabla K3.1 (redondos T, Y, X y K con separación: plastificación del cordón y punzonamiento) y tabla K3.2A (rectangulares T, Y, X con
+β ≤ 0.85). Los límites de validez (β, D/t, θ ≥ 30°, Fy ≤ 52 ksi, Fy/Fu ≤ 0.8, g ≥ tb1 + tb2) son avisos críticos: fuera de ellos las ecuaciones no
+aplican y el veredicto no es válido. *No*: nudos rectangulares K/N con separación (aviso fatal «no implementado»), β > 0.85, cortante del cordón en la
+separación, el miembro diagonal, la soldadura diagonal-cordón ni la excentricidad del nudo.
+
+### RBS (AISC 358-16)
+
+Procedimiento de diseño por demanda del cap. 5: Z_RBS, Mpr = Cpr·Ry·Fy·Z_RBS, s_h = a + b/2, V_RBS = 2·Mpr/L_h + Vg, Mf = Mpr + V_RBS·s_h ≤ φd·Mpe; límites de
+a, b, c; límites de precalificación de viga y columna; compacidad sísmica (AISC 341 Tabla D1.1); zona del panel; columna fuerte-viga débil
+(AISC 341 E3.4a) y criterio de placas de continuidad. **Solo la RBS**: las demás conexiones precalificadas de AISC 358 (WUF-W, BFP, placas extremas
+precalificadas, Kaiser, ConXtech, SidePlate...) **no** están. *No*: la soldadura CJP viga-columna ni el arriostramiento lateral en la RBS.
+
+### Puente: empalme con pernos pretensados (AASHTO)
+
+«Conexiones de puente con pretensado» se interpretó como el **empalme atornillado de ala de viga de puente con pernos de alta resistencia pretensados de
+deslizamiento crítico** (AASHTO LRFD 6.13, RCSC): una placa exterior y dos interiores. Servicio II: Rn = Kh·Ks·Ns·Pt (Ks: clase A 0.30, B 0.50, C 0.30; Kh:
+1.0 / 0.85 / 0.70; Pt según RCSC Tabla 8.1). Resistencia: cortante (0.56 o 0.48·Ab·Fub·Ns, φs = 0.80, ×0.80 si la junta pasa de 38 in), aplastamiento, fluencia y
+fractura del ala y de las placas, bloque de cortante, distancias. La fuerza de diseño del ala se ingresa ya calculada (AASHTO 6.13.6.1.4). *No*: fatiga,
+empalme del alma, pandeo de las placas en compresión, fuerza mínima de diseño del ala. Si lo que se buscaba era **postensado** (cables o barras en
+hormigón pretensado), esa tipología **no** está.
+
+### Lo que hay que saber antes de confiar en los resultados
+
+- Las ecuaciones, tablas (J3.2–J3.4, K3.1/K3.2A, Ks/Kh y pretensiones de pernos) y procedimientos se transcribieron **de memoria, sin acceso a las
+  publicaciones primarias** (AISC, AASHTO, RCSC, Manual 15ª, DG4). Las pruebas (`selftest.py`) las comparan contra cálculos manuales independientes
+  y contra otros métodos numéricos (centro instantáneo y efecto palanca resueltos con *brentq*), **no contra tablas o ejemplos publicados**. Revíselos
+  contra la edición vigente antes de usarlos en un proyecto.
+- Lo que cada tipología no evalúa aparece en la tabla como *NO EVALUADO* (sin D/C) y en los avisos de la memoria.
+- Un aviso que empieza con `**` (geometría imposible, tipo de nudo no implementado, fuera del rango de validez) invalida el veredicto: el resultado
+  no dirá CUMPLE.
+- Las conexiones cerradas no pasan por el FEM 3D: el veredicto es el del cálculo cerrado.
+- Es una herramienta de verificación; la responsabilidad del diseño es del ingeniero.
 
 **Corrección en el modo por lotes.** `PlacaBasePro.exe proyecto.pbase --pdf ...` leía el archivo con `Project.load`, que ignora el formato de libro con el
 que guarda la interfaz y calculaba en silencio un proyecto por defecto. Ahora lee el libro y calcula **todas** sus conexiones (con varias, el nombre de
 la conexión se agrega a los archivos de salida).
 
-**Para agregar otra tipología** (placa de extremo, ángulos dobles, empalmes...): su dataclass en `placabase/conn/specs.py` y su nombre en `CONN_TYPES`;
-un campo en `Project` (`model.py`); un módulo en `placabase/conn/` con `NAME` y `solve(prj, detail) -> Results` (reutiliza `conn/common.py`: centro
-instantáneo, bloque de cortante, soldadura), registrado en `conn/__init__.py`; y su formulario, dibujo y filas de reporte en `ui.py`, `draw_conn.py` y
-`report_conn.py`.
+**Para agregar otra tipología:** su dataclass en `placabase/conn/specs.py` (con su constante `CT_*` en `CONN_TYPES`); un campo en `Project`
+(`model.py`, y en `_used_extras` si usa perfiles o aceros propios); un módulo en `placabase/conn/` con `NAME`, `ATTR`, `TAB`, `PREFIX`, `TITLE`, `NORMS`,
+`LOADS`, `LOADS_NOTE`, `FORM` (formulario declarativo con `formspec.py`), `solve(prj, detail) -> Results` (usa `base.run_combos` y `common.py`: centro
+instantáneo, bloque de cortante, soldadura, efecto palanca...), `draw(fig, prj)`, `input_rows` y `label`, registrado en `conn/__init__.py`. La interfaz, el
+dibujo, las memorias PDF/Word y el modo por lotes lo toman solos; `selftest.py` recorre todas las tipologías registradas con una prueba de fuzz.
 
 ## Novedades de la 3.2.11
 

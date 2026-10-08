@@ -1141,6 +1141,123 @@ for _nm, _mut, _txt in (("β muy chica", dict(br1="HSS1.900X0.145"), "0.2 < β")
 print(f"{'  HSS: X / K / rectangular T':34} X {_rx['jt_cw1'].ratio:.3f}; K {_rk['jt_cw1'].ratio:.3f}/{_rk['jt_cw2'].ratio:.3f}; rect. {_rr_['jt_cw1'].ratio:.3f}; alcance OK")
 
 # ====================================================================================================
+# RBS (W18X50 -> W14X145, a = 4.75, b = 13.5, c = 1.5, L = 300, Vg = 8, Puc = 150, una viga), calculado a mano
+# ====================================================================================================
+from placabase.conn.specs import CT_RBS, RBS_FRAMES
+
+
+def _rb(**mut):
+    q = Project(); q.ctype = CT_RBS
+    for k, v in mut.items():
+        setattr(q.rbs, k, v)
+    return q
+
+
+_rr_ = solve(_rb())
+_kr = {c.key: c for c in _rr_.checks}
+_bb, _cc = CATALOG.get("W18X50"), CATALOG.get("W14X145")
+_Zr = _bb.Zx - 2 * 1.5 * _bb.tf * (_bb.d - _bb.tf)
+_Cpr = min(1.2, (50 + 65) / (2 * 50))
+_Mpr = _Cpr * 1.1 * 50 * _Zr
+_sh = 4.75 + 13.5 / 2
+_Lh = 300 - _cc.d - 2 * _sh
+_V = 2 * _Mpr / _Lh + 8.0
+_Mf = _Mpr + _V * _sh
+print(f"{'RBS (AISC 358)':34} D/C max = {_rr_.max_ratio:.3f}  gobierna: {_rr_.governing.title[:40]};  Mpr = {_Mpr:.0f}, Mf = {_Mf:.0f} kip·in")
+_near("RBS: Mf", _kr["rbs_mf"].demand, _Mf, 1e-9)
+_near("RBS: φd·Mpe", _kr["rbs_mf"].capacity, 1.1 * 50 * _bb.Zx, 1e-9)
+_near("RBS: zona del panel (demanda)", _kr["rbs_pz"].demand, _Mf / (_bb.d - _bb.tf), 1e-9)
+_near("RBS: zona del panel (capacidad)", _kr["rbs_pz"].capacity, 0.6 * 50 * _cc.d * _cc.tw * (1 + 3 * _cc.bf * _cc.tf ** 2 / (_bb.d * _cc.d * _cc.tw)), 1e-9)
+_Mv = _V * (_sh + _cc.d / 2)
+_near("RBS: ΣM*pb", _kr["rbs_scwb"].demand, _Mpr + _Mv, 1e-9)
+_near("RBS: ΣM*pc", _kr["rbs_scwb"].capacity, 2 * _cc.Zx * (50 - 150.0 / _cc.A), 1e-9)
+_near("RBS: compacidad del ala", _kr["rbs_lf"].capacity, 0.32 * math.sqrt(29000 / (1.1 * 50)), 1e-9)
+if not _rr_.ok:
+    FAIL.append(f"RBS: el caso base debe cumplir (D/C = {_rr_.max_ratio:.3f}: {_rr_.governing.title})")
+# mayor recorte -> menor Mpr y Mf; fuera de rango -> falla el limite
+_rc3 = {c.key: c for c in solve(_rb(c=2.0)).checks}
+if not _rc3["rbs_mf"].demand < _kr["rbs_mf"].demand or _rc3["rbs_c"].ok:
+    FAIL.append("RBS: un recorte mayor debe bajar Mf y salirse del rango de c (0.25·bf)")
+_rd2 = {c.key: c for c in solve(_rb(H_story=156.0)).checks}
+if not _rd2["rbs_pz"].demand < _kr["rbs_pz"].demand:
+    FAIL.append("RBS: descontar el cortante de la columna debe bajar la demanda de la zona del panel")
+_r2b = solve(_rb(n_beams=2))
+if {c.key: c for c in _r2b.checks}["rbs_pz"].ratio < 1.5 * _kr["rbs_pz"].ratio:
+    FAIL.append("RBS: con dos vigas la zona del panel debe casi duplicar su demanda")
+_rncp = {c.key: c for c in solve(_rb(cont_plates=False)).checks}
+_t_req = 0.4 * math.sqrt(1.8 * _bb.bf * _bb.tf * (1.1 * 50) / (1.1 * 50))
+_near("RBS: espesor de ala de columna requerido sin placas de continuidad", _rncp["rbs_cp1"].demand, _t_req, 1e-9)
+_near("RBS: bf/6", _rncp["rbs_cp2"].demand, _bb.bf / 6, 1e-9)
+for _nm, _mut, _txt in (("luz muy corta", dict(L=30.0), "luz es muy corta"), ("viga inexistente", dict(beam="W99X999"), "perfiles I")):
+    _rr = solve(_rb(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"RBS alcance ({_nm}): debe dar aviso critico y no cumplir")
+_rimf = {c.key: c for c in solve(_rb(frame=RBS_FRAMES[1])).checks}
+if _rimf["rbs_span"].demand != 5.0:
+    FAIL.append("RBS: en IMF la relacion luz/peralte minima es 5")
+print(f"{'  RBS: variantes':34} recorte mayor, H de entrepiso, dos vigas, sin placas de continuidad, IMF y alcance: OK")
+
+# ====================================================================================================
+# Empalme de puente con pernos pretensados (ala 14x1, placa ext. 14x3/4 + 2 int. 6x3/4, 4x4 Ø7/8 A325, F = 450/320 kip), a mano
+# ====================================================================================================
+from placabase.conn.specs import CT_BRIDGE, BR_SURFACE, BR_HOLES
+
+
+def _br(**mut):
+    q = Project(); q.ctype = CT_BRIDGE
+    for k, v in mut.items():
+        setattr(q.brs, k, v)
+    return q
+
+
+_rbp = solve(_br())
+_kb = {c.key: c for c in _rbp.checks}
+_Ab = math.pi * 0.875 ** 2 / 4
+print(f"{'Puente pretensado (AASHTO)':34} D/C max = {_rbp.max_ratio:.3f}  gobierna: {_rbp.governing.title[:42]}")
+_near("Puente: deslizamiento (demanda)", _kb["bs_slip"].demand, 320.0 / 16, 1e-9)
+_near("Puente: deslizamiento (Kh·Ks·Ns·Pt = 1.0·0.50·2·39)", _kb["bs_slip"].capacity, 1.0 * 0.50 * 2 * 39, 1e-9)
+_near("Puente: cortante (0.80·0.56·Ab·120·2)", _kb["bs_shear"].capacity, 0.80 * 0.56 * _Ab * 120 * 2, 1e-9)
+_dh_b = 0.875 + 0.0625
+_near("Puente: aplastamiento del ala (Lc < 2d)", _kb["bs_brg_f"].capacity, 0.80 * 1.2 * (1.75 - _dh_b / 2) * 1.0 * 65, 1e-9)
+_near("Puente: fluencia del ala", _kb["bs_fl_y"].capacity, 0.95 * 50 * 14.0, 1e-9)
+_near("Puente: fractura neta del ala", _kb["bs_fl_u"].capacity, 0.80 * 65 * 1.0 * (14.0 - 4 * 1.0), 1e-9)
+_Ag_s = 14 * 0.75 + 2 * 6 * 0.75
+_An_s = 0.75 * (14 - 4.0) + 2 * 0.75 * (6 - 2 * 1.0)
+_near("Puente: fractura neta de las placas", _kb["bs_p_u"].capacity, 0.80 * 65 * min(_An_s, 0.85 * _Ag_s), 1e-9)
+_Lgv = 2 * (1.75 + 3 * 3.0)
+_Lnv = _Lgv - 2 * 3.5 * 1.0
+_near("Puente: bloque de cortante del ala", _kb["bs_bs_f"].capacity,
+      0.80 * min(0.58 * 65 * 1.0 * _Lnv, 0.58 * 50 * 1.0 * _Lgv) + 0.80 * 65 * 1.0 * (9.0 - 3 * 1.0), 1e-9)
+if not _rbp.ok:
+    FAIL.append(f"Puente: el caso base debe cumplir (D/C = {_rbp.max_ratio:.3f}: {_rbp.governing.title})")
+# A490 sube la pretension y la resistencia; una sola placa (sin interiores) deja un solo plano de deslizamiento
+_k490 = {c.key: c for c in solve(_br(bolt_grade="A490")).checks}
+_near("Puente: A490 Ø7/8 (Pt = 49 kip)", _k490["bs_slip"].capacity, 1.0 * 0.50 * 2 * 49, 1e-9)
+_k1 = {c.key: c for c in solve(_br(pi_t=0.0, pi_b=0.0)).checks}
+_near("Puente: sin placas interiores, Ns = 1", _k1["bs_slip"].capacity, 1.0 * 0.50 * 1 * 39, 1e-9)
+# clase A o galvanizado: Ks = 0.30; agujero sobredimensionado: Kh = 0.85; ranura larga: 0.70
+_kA = {c.key: c for c in solve(_br(surface=BR_SURFACE[0])).checks}
+_near("Puente: clase A (Ks = 0.30)", _kA["bs_slip"].capacity, 0.30 * 2 * 39, 1e-9)
+_kOv = {c.key: c for c in solve(_br(holes=BR_HOLES[1])).checks}
+_near("Puente: agujero sobredimensionado (Kh = 0.85)", _kOv["bs_slip"].capacity, 0.85 * 0.50 * 2 * 39, 1e-9)
+# junta de mas de 38 in: 0.80 al cortante (solo con 14 filas a 3 in: 39 in)
+_kLj = {c.key: c for c in solve(_br(n_rows=14)).checks}
+_near("Puente: junta > 38 in (×0.80)", _kLj["bs_shear"].capacity, 0.80 * 0.80 * 0.56 * _Ab * 120 * 2, 1e-9)
+# rosca en el plano de corte: 0.48 en lugar de 0.56
+_kTh = {c.key: c for c in solve(_br(threads_excl=False)).checks}
+_near("Puente: rosca en el plano (0.48)", _kTh["bs_shear"].capacity, 0.80 * 0.48 * _Ab * 120 * 2, 1e-9)
+# fuerza de servicio mayor que la de resistencia: gobierna el deslizamiento, no el cortante
+_kBig = {c.key: c for c in solve(_br(combos=[["c", 100.0, 800.0]])).checks}
+if not (_kBig["bs_slip"].ratio > 1.0 and _kBig["bs_shear"].ratio < 1.0):
+    FAIL.append("Puente: deslizamiento (Servicio II) debe gobernar con F,serv = 800 kip")
+# alcance: perno sin pretension tabulada y columnas que no caben
+for _nm, _mut, _txt in (("perno 3/8 sin pretension tabulada", dict(bolt_size="3/8"), "pretension"), ("no caben", dict(n_cols=12), "no caben")):
+    _rr = solve(_br(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"Puente alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'  Puente: variantes':34} A490, sin interiores, clase A, sobredimensionado, junta > 38 in, rosca, servicio y alcance: OK")
+
+# ====================================================================================================
 # FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
 # no debe haber excepciones ni valores no finitos, y cualquier geometria imposible debe dar aviso critico
 # ====================================================================================================
@@ -1193,7 +1310,17 @@ for _ex in ("PB-01_W14X90", "COMP-1_W14X90_traccion"):
     _old = load_book(f"ejemplos/{_ex}.pbase")
     if _old[0].ctype != CT_BASEPLATE:
         FAIL.append(f"conn: {_ex} debe abrir como placa base")
-print(f"{'libro con dos tipologias':34} guardado y leido OK;  ejemplos antiguos abren como placa base")
+# libro con todas las tipologias: cada una conserva su tipo y sus datos
+_allp = []
+for _ct, _mod in _connpkg.modules():
+    _q = Project(); _q.ctype = _ct; _q.element = _mod.PREFIX + "-1"
+    _allp.append(_q)
+_f2 = _os.path.join(_tf.mkdtemp(prefix="pbconn_"), "todas.pbase")
+save_book(_f2, _allp)
+_bk2 = load_book(_f2)
+if [x.ctype for x in _bk2] != [x.ctype for x in _allp] or any(getattr(a, m.ATTR) != getattr(b, m.ATTR) for a, b, (_c, m) in zip(_allp, _bk2, _connpkg.modules())):
+    FAIL.append("conn: el libro con todas las tipologias no conserva tipo y datos")
+print(f"{'libro con dos tipologias':34} guardado y leido OK;  ejemplos antiguos abren como placa base; libro con las {len(_allp)} tipologias OK")
 
 print()
 print("=" * 150)

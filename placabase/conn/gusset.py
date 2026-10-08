@@ -276,7 +276,7 @@ def input_rows(prj, us) -> list:
 
 def draw(fig, prj):
     from . import drawing as D
-    from matplotlib.patches import Rectangle, Polygon, Circle
+    from matplotlib.patches import Rectangle, Polygon
     st = prj.gus
     g = geometry(st)
     beam, col = g["beam"], g["col"]

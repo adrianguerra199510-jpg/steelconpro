@@ -404,3 +404,11 @@ def weld_segments_oop(segs, Fy: float, Mx: float, w: float, FEXX: float, directi
         if f / cap > best["ratio"]:
             best.update(ratio=f / cap, f=f, cap=cap, theta=th)
     return best
+
+
+# ---- factores de sobrerresistencia (AISC 341, Tabla A3.1) por acero
+RY = {"ASTM A992": 1.1, "ASTM A36": 1.5, "ASTM A572 Gr.50": 1.1, "ASTM A913 Gr.50": 1.1}
+
+
+def ry_of(steel_name: str) -> float:
+    return RY.get(steel_name, 1.1)

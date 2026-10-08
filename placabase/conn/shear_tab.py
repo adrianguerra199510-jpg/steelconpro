@@ -27,7 +27,7 @@ from . import beamend
 from .formspec import G, N, num, intf, combo, check
 from .common import (PHI_BOLT, PHI_RUPT, PHI_YIELD, PHI_FLEX, FNV, bolt_db, hole_std, hole_net, edge_min,
                      bolt_shear_rn, bearing_rn, block_shear_rn, ic_vertical_line, weld_pair_vertical,
-                     coped_section, net_flexure_plate)
+                     net_flexure_plate)
 from .specs import CT_SHEAR_TAB, SUP_KINDS, BOLT_GRADES, SHEAR_BOLT_SIZES
 
 NAME = CT_SHEAR_TAB

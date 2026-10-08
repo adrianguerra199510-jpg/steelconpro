@@ -5,10 +5,9 @@
 datos, combinaciones, verificaciones, veredicto, avisos, anexo de ecuaciones y dibujos.
 """
 from __future__ import annotations
-from pathlib import Path
 import datetime
 
-from ..units import UnitSet, float_to_frac
+from ..units import UnitSet
 
 def _us(prj) -> UnitSet:
     return UnitSet(prj.u_len, prj.u_force, prj.u_stress, prj.u_moment)

@@ -38,7 +38,10 @@ CT_COL_SPLICE = "Empalme de columna — placas atornilladas (con o sin contacto)
 CT_ENDPLATE = "Placa extrema a momento — a ras o extendida (viga a columna)"
 CT_GUSSET = "Cartela de arriostramiento — Whitmore y fuerza uniforme (UFM)"
 CT_HSS = "HSS a HSS — nudos de celosia (T, Y, X, K con separacion)"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE, CT_GUSSET, CT_HSS]
+CT_RBS = "Precalificada AISC 358 — viga de seccion reducida (RBS)"
+CT_BRIDGE = "Puente — empalme de ala con pernos pretensados (deslizamiento critico, AASHTO)"
+CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE, CT_GUSSET, CT_HSS,
+              CT_RBS, CT_BRIDGE]
 
 # ---- placa simple de corte (shear tab)
 SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
@@ -347,4 +350,65 @@ class HSSJoint:
 
     def loads(self) -> list:
         return loads_of(self.combos, 2, ("Comb 1", (40.0, -40.0)))
+
+
+# ---- AISC 358: viga de seccion reducida (RBS)
+RBS_FRAMES = ["Porticos especiales a momento (SMF)", "Porticos intermedios a momento (IMF)"]
+
+
+@dataclass
+class RBSConn:
+    """Conexion precalificada RBS (AISC 358-16, Cap. 5) con diseno por demanda: Mpr, cortante, Mf, zona del panel y columna fuerte-viga debil."""
+    beam: str = "W18X50"
+    beam_steel: str = "ASTM A992"
+    col: str = "W14X145"
+    col_steel: str = "ASTM A992"
+    frame: str = "Porticos especiales a momento (SMF)"
+    a: float = 4.75                  # de la cara de la columna al inicio del recorte, in
+    b: float = 13.5                  # largo del recorte, in
+    c: float = 1.5                   # profundidad del recorte en cada lado del ala, in
+    L: float = 300.0                 # luz de la viga entre ejes de columna, in
+    n_beams: int = 1                 # vigas que llegan a la columna en el plano (1 o 2)
+    two_cols: bool = True            # columna arriba y abajo del nudo
+    cont_plates: bool = True         # placas de continuidad colocadas
+    H_story: float = 0.0             # altura de entrepiso para descontar el cortante de la columna en la zona del panel (0 = no descontar)
+    combos: list = field(default_factory=lambda: [["Comb 1", 8.0, 150.0]])      # [nombre, Vg (cortante de gravedad en el RBS, kip), Puc (axial de la columna, kip)]
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 2, ("Comb 1", (8.0, 150.0)))
+
+
+# ---- puente: empalme de ala atornillado con pernos pretensados
+BR_SURFACE = ["Clase A (limpia, sin pintar)", "Clase B (granallada, sin pintar)", "Clase C (galvanizada y rugosa)"]
+BR_HOLES = ["Estandar", "Sobredimensionado o ranura corta", "Ranura larga"]
+BR_GRADES = ["A325", "A490"]
+
+
+@dataclass
+class BridgeSplice:
+    """Empalme atornillado de una ala de viga de puente con pernos de alta resistencia pretensados (AASHTO LRFD 6.13.6): placa exterior
+    y dos placas interiores. La fuerza de diseno del ala se da ya calculada (6.13.6.1.4)."""
+    fl_b: float = 14.0
+    fl_t: float = 1.0
+    fl_steel: str = "ASTM A709 Gr.50"
+    po_b: float = 14.0
+    po_t: float = 0.75
+    pi_b: float = 6.0
+    pi_t: float = 0.75
+    sp_steel: str = "ASTM A709 Gr.50"
+    bolt_size: str = "7/8"
+    bolt_grade: str = "A325"
+    threads_excl: bool = True        # rosca fuera de los planos de corte
+    surface: str = "Clase B (granallada, sin pintar)"
+    holes: str = "Estandar"
+    n_rows: int = 4                  # filas a cada lado del empalme
+    n_cols: int = 4                  # pernos a lo ancho
+    s: float = 3.0
+    g: float = 3.0
+    e_end: float = 1.75              # del extremo del ala a la primera fila
+    e_pend: float = 1.75             # de la ultima fila al extremo de la placa
+    combos: list = field(default_factory=lambda: [["Comb 1", 450.0, 320.0]])      # [nombre, fuerza de resistencia (kip), fuerza de servicio II (kip)]
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 2, ("Comb 1", (450.0, 320.0)))
 

@@ -5,7 +5,6 @@ Ejes de la elevacion: x a lo largo de la viga desde la cara del soporte (x = 0),
 la viga.  Se mira la conexion desde el lado de la placa (la placa queda delante del alma).
 """
 from __future__ import annotations
-import math
 
 from matplotlib.patches import Circle, Rectangle, Polygon
 

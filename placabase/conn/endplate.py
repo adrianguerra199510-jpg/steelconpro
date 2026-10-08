@@ -20,7 +20,7 @@ from .base import run_combos, add_check, not_evaluated
 from .common import (PHI_BOLT, PHI_RUPT, PHI_YIELD, FNV, FNT, bolt_db, hole_std, hole_net, edge_min, bolt_shear_rn,
                      bolt_tension_rn, bearing_rn, prying_available, flange_local_bending, web_local_yielding,
                      web_crippling, panel_zone_shear)
-from .formspec import G, N, num, intf, combo, check
+from .formspec import G, N, num, combo, check
 from .specs import CT_ENDPLATE, BOLT_GRADES, SHEAR_BOLT_SIZES, EP_FLANGE_WELD
 
 NAME = CT_ENDPLATE

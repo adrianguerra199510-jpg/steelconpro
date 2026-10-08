@@ -19,7 +19,6 @@ import math
 from .. import materials as M
 from ..shapes import CATALOG
 from .base import run_combos, add_check, not_evaluated
-from .common import E_STEEL
 from .formspec import G, N, num, combo
 from .specs import CT_HSS, HSS_SHAPES, HSS_TYPES
 
