@@ -14,7 +14,7 @@ importador reconoce las columnas nativas de ese archivo:
     Type, AISC_Manual_Label, d, bf, tf, tw, A, Ix, Zx, Sx, Iy, Zy, Sy,
     Ht, B, tnom, tdes, OD, kdes
 
-Los perfiles importados quedan guardados en   %APPDATA%/PlacaBasePro/shapes.json
+Los perfiles importados quedan guardados en   %APPDATA%/SteelConPro/shapes.json
 y tienen prioridad sobre la tabla integrada.
 """
 from __future__ import annotations
@@ -453,10 +453,8 @@ BUILTIN: dict[str, Shape] = _build_builtin()
 
 # ========================================================= catalogo activo
 def _user_dir() -> Path:
-    base = os.environ.get("APPDATA") or os.path.expanduser("~/.config")
-    p = Path(base) / "PlacaBasePro"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    from .appdata import data_dir
+    return data_dir("APPDATA")
 
 
 USER_DB = _user_dir() / "shapes.json"

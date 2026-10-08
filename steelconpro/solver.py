@@ -61,7 +61,7 @@ class Results:
 
 def solve(prj: Project, detail: bool = True, fem=None) -> Results:
     """`fem`: paquete Fem3D del analisis 3D hecho con ESTE proyecto (o None si no hay uno vigente)."""
-    if prj.ctype != CT_BASEPLATE:                       # otras tipologias: ver placabase/conn/
+    if prj.ctype != CT_BASEPLATE:                       # otras tipologias: ver steelconpro/conn/
         from .conn import solve_conn
         return solve_conn(prj, detail)
     R = Results()

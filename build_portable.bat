@@ -1,8 +1,8 @@
 @echo off
 REM =====================================================================
-REM  PlacaBasePro - arma la version PORTABLE lista para compartir:
-REM     dist\PlacaBasePro\            (carpeta del programa)
-REM     PlacaBasePro_portable.zip     (la misma carpeta comprimida)
+REM  SteelConPro - arma la version PORTABLE lista para compartir:
+REM     dist\SteelConPro\            (carpeta del programa)
+REM     SteelConPro_portable.zip     (la misma carpeta comprimida)
 REM  Incluye Gmsh (dentro del programa) y CalculiX (solvers\calculix).
 REM  La maquina de destino no necesita instalar nada.
 REM =====================================================================
@@ -31,18 +31,18 @@ echo [3/5] Autoprueba del motor de calculo...
 "%VP%" selftest.py || goto :err
 
 echo [4/5] Compilando (tarda varios minutos)...
-"%VP%" -m PyInstaller --noconfirm --clean placabase.spec || goto :err
+"%VP%" -m PyInstaller --noconfirm --clean steelconpro.spec || goto :err
 
 echo [5/5] Copiando solvers y comprimiendo...
 REM  (con Python: no depende de xcopy/powershell ni del PATH de Windows)
-"%VP%" -c "import shutil; shutil.copytree('solvers', r'dist\PlacaBasePro\solvers', dirs_exist_ok=True); shutil.copy('LEEME.md', r'dist\PlacaBasePro'); shutil.make_archive('PlacaBasePro_portable', 'zip', 'dist', 'PlacaBasePro')" || goto :err
+"%VP%" -c "import shutil; shutil.copytree('solvers', r'dist\SteelConPro\solvers', dirs_exist_ok=True); shutil.copy('LEEME.md', r'dist\SteelConPro'); shutil.make_archive('SteelConPro_portable', 'zip', 'dist', 'SteelConPro')" || goto :err
 
 echo.
 echo ==============================================================
 echo  LISTO.
-echo    Carpeta: %CD%\dist\PlacaBasePro\PlacaBasePro.exe
-echo    Para compartir: %CD%\PlacaBasePro_portable.zip
-echo  Quien lo reciba solo descomprime y abre PlacaBasePro.exe.
+echo    Carpeta: %CD%\dist\SteelConPro\SteelConPro.exe
+echo    Para compartir: %CD%\SteelConPro_portable.zip
+echo  Quien lo reciba solo descomprime y abre SteelConPro.exe.
 echo ==============================================================
 pause
 exit /b 0

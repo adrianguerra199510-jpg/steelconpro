@@ -8,10 +8,10 @@ for _st in (sys.stdout, sys.stderr):          # consolas de Windows (cp1252/cp85
     except Exception:
         pass
 
-from placabase.model import Project
-from placabase.solver import solve
-from placabase import geometry as G
-from placabase.shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE
+from steelconpro.model import Project
+from steelconpro.solver import solve
+from steelconpro import geometry as G
+from steelconpro.shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE
 
 FAIL = []
 
@@ -100,9 +100,9 @@ case("llave + rigidizadores", **{"lug.enabled": True, "stiff.enabled": True,
 
 print()
 print("SOLDADURA")
-case("CJP alas", **{"welds.flange": __import__("placabase.model", fromlist=["WeldSpec"]).WeldSpec(
+case("CJP alas", **{"welds.flange": __import__("steelconpro.model", fromlist=["WeldSpec"]).WeldSpec(
     "CJP (penetracion completa)", 0.0, "E70XX", True)})
-case("filete chico", **{"welds.flange": __import__("placabase.model", fromlist=["WeldSpec"]).WeldSpec(
+case("filete chico", **{"welds.flange": __import__("steelconpro.model", fromlist=["WeldSpec"]).WeldSpec(
     "Filete", 0.1875, "E70XX", True), "loads.Mux": 5200.0})
 
 print()
@@ -138,9 +138,9 @@ case("adhesivo + coord. manuales", **{"bolts.atype": "Recto (sin cabeza)",
                                                        [-8.5, 8.5], [0.0, 8.5]]})
 
 # grupo de soldadura contra calculo a mano
-from placabase.shapes import CATALOG, make_custom, PLATE
-from placabase.model import WeldSpec
-from placabase import design as _D
+from steelconpro.shapes import CATALOG, make_custom, PLATE
+from steelconpro.model import WeldSpec
+from steelconpro import design as _D
 CATALOG.shapes["_PLT"] = make_custom("_PLT", PLATE, 12.0, 1.0, 1.0)
 _p = Project(); _p.section.label = "_PLT"
 _g = _D.weld_group(_p, G.section_rects(_p), WeldSpec(size=0.5), P=-100.0)
@@ -180,7 +180,7 @@ if not _cp or not any("NO esta soldada" in w for w in _rw.warnings):
 
 # ---- el veredicto final lo da el analisis 3D
 import types
-from placabase.fem_checks import Fem3D
+from steelconpro.fem_checks import Fem3D
 _m = Project(); _m.loads.Mux = 4200.0
 _rm = solve(_m)
 if not (_rm.pending and _rm.verdict == "PENDIENTE"):
@@ -229,7 +229,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from PIL import Image
 import io
-from placabase import view3d
+from steelconpro import view3d
 _vp = Project()
 _ok_view = True
 for _w, _h in ((10.2, 5.0), (7, 6), (4, 8), (3, 2.5)):
@@ -250,7 +250,7 @@ if not _ok_view:
     FAIL.append("vista 3D: el modelo debe caber completo y ocupar ~90 % del lado limitante")
 
 # tamano de malla 3D automatico: sube con el area de la placa (costo acotado) y respeta el manual
-from placabase import mesh3d
+from steelconpro import mesh3d
 _a = Project(); _b = Project(); _b.plate.N = _b.plate.B = 80.0
 _c = Project(); _c.fea.mesh3d = 1.5
 _la, _lb, _lc = mesh3d.mesh_size_for(_a), mesh3d.mesh_size_for(_b), mesh3d.mesh_size_for(_c)
@@ -267,7 +267,7 @@ case("placa insuficiente", **{"loads.Mux": 26000.0})
 case("perfil mas grande que placa", **{"section.label": "W14X730", "plate.N": 14.0, "plate.B": 14.0})
 
 # ---------------------------------------------------- combinaciones de carga y flexion del perno
-from placabase.model import LoadCombo
+from steelconpro.model import LoadCombo
 _cb = Project()
 _cb.combos = [LoadCombo("A", 400, 1800, 0, 30, 0), LoadCombo("B", -100, 0, 0, 10, 0)]
 _q0, _q1 = _cb.with_combo(0), _cb.with_combo(1)
@@ -294,7 +294,7 @@ print(f"{'flexion del perno (stand-off 2 in)':34} M/φMn = {_k['blt_m'].ratio:.3
 
 
 # ---------------------------------------------------- barras U y visualizacion de cargas
-from placabase.ubar import ubar
+from steelconpro.ubar import ubar
 _u0 = Project(); _u0.combos = [LoadCombo("T", -300, 0, 0, 30, 0)]; _u0.apply_combo(0)
 _u1 = Project.from_json(_u0.to_json()); _u1.conc.u_on = True; _u1.conc.u_n = 2; _u1.conc.u_size = "#5"
 _k0 = {c.key: c for c in solve(_u0).checks}; _k1 = {c.key: c for c in solve(_u1).checks}
@@ -323,7 +323,7 @@ for _k in ("aci_ubar_ten", "aci_ubar_dev", "aci_ubar_hook", "aci_ubar_fit", "aci
 if "aci_ubar_ten" not in {c.key for c in solve(_u1).checks} or "aci_ubar_cover" in {c.key for c in solve(_u1).checks}:
     FAIL.append("barras U: revisiones esperadas (tension, desarrollo, gancho, altura; sin recubrimiento de cola)")
 print(f"{'barras Omega (2 Ω #5)':34} ldh = {_om['ldh']:.1f} in   pata = {_om['leg']:.0f} in   cola = {_om['tail']:.1f} in")
-from placabase import view3d as _v3
+from steelconpro import view3d as _v3
 _its, _pts = _v3.load_arrows(_u0, 1.0)
 if len(_its) != 2 or not _pts:
     FAIL.append("cargas 3D: se esperaban flechas de Pu y Vux")
@@ -331,8 +331,8 @@ if len(_its) != 2 or not _pts:
 
 # ---------------------------------------------------- criterios del cordon (Ghimire et al. 2023)
 try:
-    from placabase import weldfe as _wf
-    from placabase.model import WeldSpec as _WS
+    from steelconpro import weldfe as _wf
+    from steelconpro.model import WeldSpec as _WS
     _pw = Project()
     _sp = _WS("Filete", 0.5, _pw.welds.flange.electrode, True)
     _mk = lambda L: {"periodic": False, "spec": _sp, "p1": (0.0, 0.0), "p2": (L, 0.0)}
@@ -355,7 +355,7 @@ except Exception as _e:
 
 # ---------------------------------------------------- visor OpenGL: la escena se arma sin necesitar GPU
 try:
-    from placabase import gl3d as _gl
+    from steelconpro import gl3d as _gl
     import numpy as _np
     _conc = [(0, 0, 0), (4, 0, 0), (4, 1, 0), (1, 1, 0), (1, 4, 0), (0, 4, 0)]          # poligono concavo en L
     _tr = _gl.tri_poly(_conc)
@@ -374,7 +374,7 @@ except Exception as _e:
 try:
     os_ = __import__("os"); os_.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication as _QA
-    from placabase import ui as _ui
+    from steelconpro import ui as _ui
     _app = _QA.instance() or _QA([])
     _w = _ui.MainWindow()
     for _m in ("_bolt_loads", "_fem_now", "_raw_now", "draw_geom", "draw_3d", "_goto_calc", "export_target", "recalc"):
@@ -391,7 +391,7 @@ except Exception as _e:
 
 # ---------------------------------------------------------------- columna descentrada (cx, cy)
 try:
-    from placabase import geometry as _G
+    from steelconpro import geometry as _G
     _pc = Project()
     _pc.loads.Pu, _pc.loads.Mux, _pc.loads.Muy, _pc.loads.Vux, _pc.loads.Vuy = 400.0, 1800.0, 0.0, 30.0, 10.0
     _pc.section.cx, _pc.section.cy = 2.0, -3.0
@@ -410,7 +410,7 @@ try:
     for _n, _o in (("geometria", _ok_geo), ("traslado de cargas", _ok_ld), ("voladizo", _ok_m), ("calculo", _ok_run)):
         if not _o:
             FAIL.append(f"columna descentrada: {_n}")
-    from placabase import view3d as _V3
+    from steelconpro import view3d as _V3
     _gf = _V3.geometry_faces(_pc)
     _cf = [q for g in _gf if g[5] == "column" for q in g[1]]
     _cxs = [p[0] for q in _cf for p in q]
@@ -423,8 +423,8 @@ except Exception as _e_:
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile
-    from placabase import mesh3d
-    from placabase.rep3d import make_fem
+    from steelconpro import mesh3d
+    from steelconpro.rep3d import make_fem
     print()
     print("ANALISIS SOLIDO 3D (--3d)")
     _p3 = Project()
@@ -482,16 +482,16 @@ if "--3d" in sys.argv:
 
 
 # ====================================================================================================
-# TIPOLOGIAS DE CONEXION (placabase/conn): placa simple de corte, viga secundaria -> viga maestra / columna
+# TIPOLOGIAS DE CONEXION (steelconpro/conn): placa simple de corte, viga secundaria -> viga maestra / columna
 # Los valores esperados se calcularon a mano, aparte del programa (AISC 360-22, LRFD).
 # ====================================================================================================
 print()
 print("=" * 150)
 print("TIPOLOGIAS DE CONEXION")
 print("=" * 150)
-from placabase.conn.specs import CT_SHEAR_TAB, CT_BASEPLATE, SUP_KINDS
-from placabase.conn import common as _cc
-from placabase.model import save_book, load_book
+from steelconpro.conn.specs import CT_SHEAR_TAB, CT_BASEPLATE, SUP_KINDS
+from steelconpro.conn import common as _cc
+from steelconpro.model import save_book, load_book
 import tempfile as _tf, os as _os
 
 
@@ -635,10 +635,10 @@ if f"{7.59375 * 25.4 ** 3:.4g}" not in _zl:                                     
 print(f"{'consistencia de unidades':34} D/C mm-kN = in-kip = {_rm.max_ratio:.4f};  Z en la memoria: {_zl.split('=')[-2].strip()}")
 
 # ---- interfaz y reportes de la tipologia (offscreen, solo si hay Qt) y modo por lotes
-_od = _tf.mkdtemp(prefix="pbconn_out_")
+_od = _tf.mkdtemp(prefix="scpconn_out_")
 try:
     from PySide6.QtWidgets import QApplication as _QA2
-    from placabase import ui as _ui2, report as _rep
+    from steelconpro import ui as _ui2, report as _rep
     _app2 = _QA2.instance() or _QA2([])
     _w2 = _ui2.MainWindow()
     _w2.add_connection(CT_SHEAR_TAB)
@@ -681,7 +681,7 @@ except Exception as _e:
 # UI + reportes para TODAS las tipologias registradas
 try:
     from PySide6.QtWidgets import QApplication as _QA3
-    from placabase import ui as _ui3, report as _rep3, conn as _cn3
+    from steelconpro import ui as _ui3, report as _rep3, conn as _cn3
     _app3 = _QA3.instance() or _QA3([])
     _w3 = _ui3.MainWindow()
     for _ct3, _m3 in _cn3.modules():
@@ -713,7 +713,7 @@ import importlib, io, contextlib
 _run = importlib.import_module("run")
 _b1 = Project(); _b1.element = "VS-A"; _b1.ctype = CT_SHEAR_TAB; _b1.stab.combos = [["C1", 25.0]]
 _b2 = Project(); _b2.element = "VS-B"; _b2.ctype = CT_SHEAR_TAB; _b2.stab.combos = [["C1", 60.0]]
-_fb = _os.path.join(_od, "lote.pbase"); save_book(_fb, [_b1, _b2])
+_fb = _os.path.join(_od, "lote.scp"); save_book(_fb, [_b1, _b2])
 _buf = io.StringIO()
 with contextlib.redirect_stdout(_buf):
     _rc = _run.batch([_fb, "--pdf", _os.path.join(_od, "lote.pdf")])
@@ -722,7 +722,7 @@ if "VS-A: CUMPLE" not in _txt or "VS-B: NO CUMPLE" not in _txt or _rc != 2 \
         or not (_os.path.exists(_os.path.join(_od, "lote_VS-A.pdf")) and _os.path.exists(_os.path.join(_od, "lote_VS-B.pdf"))):
     FAIL.append(f"conn lote: no proceso las dos conexiones del libro (rc = {_rc}):\n{_txt}")
 with contextlib.redirect_stdout(io.StringIO()) as _buf2:
-    _run.batch(["ejemplos/PB-02_HSS12_rigidizada.pbase"])
+    _run.batch(["ejemplos/PB-02_HSS12_rigidizada.scp"])
 if "PB-02:" not in _buf2.getvalue():
     FAIL.append("lote: debe calcular el proyecto del archivo (PB-02), no uno por defecto")
 print(f"{'modo por lotes (run.py)':34} libro con 2 conexiones: CUMPLE / NO CUMPLE, codigo de salida {_rc}; ejemplo PB-02 leido del archivo")
@@ -731,7 +731,7 @@ print(f"{'modo por lotes (run.py)':34} libro con 2 conexiones: CUMPLE / NO CUMPL
 # ====================================================================================================
 # DOBLE ANGULO (2L4X4X3/8 x 9 in, 3 Ø3/4 A325-N por fila, s = 3, gw = a = 2, Vu = 40 kip), calculado a mano
 # ====================================================================================================
-from placabase.conn.specs import CT_DOUBLE_ANGLE, DA_ATTACH
+from steelconpro.conn.specs import CT_DOUBLE_ANGLE, DA_ATTACH
 
 
 def _da(**mut):
@@ -796,7 +796,7 @@ print(f"{'  doble angulo soldado / cope':34} soldadura {_kw['weld'].ratio:.3f}; 
 # ====================================================================================================
 # ASIENTO (L6X6X3/4 x 8 in, W16X31 sobre ala de W14X90, N = 3.5, retranqueo 3/4, R = 25 kip), calculado a mano
 # ====================================================================================================
-from placabase.conn.specs import CT_SEATED, SEAT_TYPES, SEAT_ATTACH
+from steelconpro.conn.specs import CT_SEATED, SEAT_TYPES, SEAT_ATTACH
 
 
 def _se(**mut):
@@ -847,7 +847,7 @@ print(f"{'  asiento soldado / rigidizado':34} soldadura C {_ksw['weld'].ratio:.3
 # ====================================================================================================
 # EMPALMES: viga W16X50 (Mu = 1200 kip·in, Vu = 30) y columna W14X90 con contacto
 # ====================================================================================================
-from placabase.conn.specs import CT_BEAM_SPLICE, CT_COL_SPLICE, SPLICE_SHARE
+from steelconpro.conn.specs import CT_BEAM_SPLICE, CT_COL_SPLICE, SPLICE_SHARE
 
 
 def _bs(**mut):
@@ -922,8 +922,8 @@ print(f"{'  empalme de columna':34} con contacto D/C = {_rc.max_ratio:.3f}; sin 
 # ====================================================================================================
 # PLACA EXTREMA (W18X50 -> ala de W14X90, placa 8 x 1 A572-50, 7/8 A325-N, g = 5.5, pfo = pfi = 2, e = 1.5, Mu = 1800, Vu = 40)
 # ====================================================================================================
-from placabase.conn.specs import CT_ENDPLATE, EP_FLANGE_WELD
-from placabase.conn.common import prying_available as _pry
+from steelconpro.conn.specs import CT_ENDPLATE, EP_FLANGE_WELD
+from steelconpro.conn.common import prying_available as _pry
 
 
 def _ep(**mut):
@@ -1002,7 +1002,7 @@ print(f"{'  placa extrema variantes':34} a ras Mcap = {({c.key: c for c in _rf.c
 # ====================================================================================================
 # FORMULARIOS: sin rutas duplicadas (un campo oculto desactualizado pisaria al editado) y rutas validas
 # ====================================================================================================
-from placabase import conn as _cnf
+from steelconpro import conn as _cnf
 for _ct, _mod in _cnf.modules():
     _paths = [it["path"] for it in _mod.FORM if "path" in it]
     _dup = {x for x in _paths if _paths.count(x) > 1}
@@ -1021,7 +1021,7 @@ print(f"{'formularios':34} {len(_cnf.modules())} tipologias: sin rutas duplicada
 # ====================================================================================================
 # CARTELA (W18X50 / W14X90, θ = 45° desde la vertical, L_b = 24, t = 3/4 A36, 4×2 pernos 7/8 A325-N, P = 120 kip)
 # ====================================================================================================
-from placabase.conn.specs import CT_GUSSET, GUS_CONN
+from steelconpro.conn.specs import CT_GUSSET, GUS_CONN
 
 
 def _gu(**mut):
@@ -1089,7 +1089,7 @@ print(f"{'  cartela: compresion / soldada':34} Thornton {_kgc['gu_buck'].ratio:.
 # ====================================================================================================
 # HSS A HSS (cordon HSS10.000X0.500 A500 Gr.C, diagonal HSS6.625X0.280 a 60°; rectangular HSS8X8X1/2 con HSS4X4X1/4)
 # ====================================================================================================
-from placabase.conn.specs import CT_HSS, HSS_SHAPES, HSS_TYPES
+from steelconpro.conn.specs import CT_HSS, HSS_SHAPES, HSS_TYPES
 
 
 def _hs(**mut):
@@ -1143,7 +1143,7 @@ print(f"{'  HSS: X / K / rectangular T':34} X {_rx['jt_cw1'].ratio:.3f}; K {_rk[
 # ====================================================================================================
 # RBS (W18X50 -> W14X145, a = 4.75, b = 13.5, c = 1.5, L = 300, Vg = 8, Puc = 150, una viga), calculado a mano
 # ====================================================================================================
-from placabase.conn.specs import CT_RBS, RBS_FRAMES
+from steelconpro.conn.specs import CT_RBS, RBS_FRAMES
 
 
 def _rb(**mut):
@@ -1200,7 +1200,7 @@ print(f"{'  RBS: variantes':34} recorte mayor, H de entrepiso, dos vigas, sin pl
 # ====================================================================================================
 # Empalme de puente con pernos pretensados (ala 14x1, placa ext. 14x3/4 + 2 int. 6x3/4, 4x4 Ø7/8 A325, F = 450/320 kip), a mano
 # ====================================================================================================
-from placabase.conn.specs import CT_BRIDGE, BR_SURFACE, BR_HOLES
+from steelconpro.conn.specs import CT_BRIDGE, BR_SURFACE, BR_HOLES
 
 
 def _br(**mut):
@@ -1262,7 +1262,7 @@ print(f"{'  Puente: variantes':34} A490, sin interiores, clase A, sobredimension
 # no debe haber excepciones ni valores no finitos, y cualquier geometria imposible debe dar aviso critico
 # ====================================================================================================
 import random as _rnd, dataclasses as _dc, copy as _cp
-from placabase import conn as _connpkg
+from steelconpro import conn as _connpkg
 _rnd.seed(20261008)
 for _ct, _mod in _connpkg.modules():
     _bad, _nfat, _nok = [], 0, 0
@@ -1290,7 +1290,7 @@ for _ct, _mod in _connpkg.modules():
             _nfat += any(w.startswith("**") for w in _r.warnings)
             _nok += bool(_r.ok)
             if _k % 40 == 0:
-                from placabase.conn.base import new_figure as _nf
+                from steelconpro.conn.base import new_figure as _nf
                 _fg = _nf(8, 9.5, 60); _mod.draw(_fg, _q)
         except Exception as _e:
             _bad.append(f"{type(_e).__name__}: {_e}")
@@ -1299,7 +1299,7 @@ for _ct, _mod in _connpkg.modules():
     print(f"{'fuzz ' + _mod.PREFIX:34} 400 casos aleatorios sin excepciones; con aviso critico {_nfat}, cumplen {_nok}")
 
 # ---- archivos: ida y vuelta de un libro con las dos tipologias, y compatibilidad con los ejemplos viejos
-_f = _os.path.join(_tf.mkdtemp(prefix="pbconn_"), "libro.pbase")
+_f = _os.path.join(_tf.mkdtemp(prefix="scpconn_"), "libro.scp")
 _bp = Project(); _bp.element = "PB-X"
 _pc.element = "VS-1"
 save_book(_f, [_bp, _pc])
@@ -1307,7 +1307,7 @@ _bk = load_book(_f)
 if [x.ctype for x in _bk] != [CT_BASEPLATE, CT_SHEAR_TAB] or _bk[1].stab != _pc.stab:
     FAIL.append("conn: el libro no conserva la tipologia y los datos de la conexion de corte")
 for _ex in ("PB-01_W14X90", "COMP-1_W14X90_traccion"):
-    _old = load_book(f"ejemplos/{_ex}.pbase")
+    _old = load_book(f"ejemplos/{_ex}.scp")
     if _old[0].ctype != CT_BASEPLATE:
         FAIL.append(f"conn: {_ex} debe abrir como placa base")
 # libro con todas las tipologias: cada una conserva su tipo y sus datos
@@ -1315,11 +1315,19 @@ _allp = []
 for _ct, _mod in _connpkg.modules():
     _q = Project(); _q.ctype = _ct; _q.element = _mod.PREFIX + "-1"
     _allp.append(_q)
-_f2 = _os.path.join(_tf.mkdtemp(prefix="pbconn_"), "todas.pbase")
+_f2 = _os.path.join(_tf.mkdtemp(prefix="scpconn_"), "todas.scp")
 save_book(_f2, _allp)
 _bk2 = load_book(_f2)
 if [x.ctype for x in _bk2] != [x.ctype for x in _allp] or any(getattr(a, m.ATTR) != getattr(b, m.ATTR) for a, b, (_c, m) in zip(_allp, _bk2, _connpkg.modules())):
     FAIL.append("conn: el libro con todas las tipologias no conserva tipo y datos")
+# libros guardados con el formato de las versiones anteriores (otra etiqueta y extension): deben seguir abriendo
+from steelconpro.appdata import LEGACY_BOOK_TAGS as _LTAGS
+import json as _js
+_dleg = _js.load(open(_f2, encoding="utf-8")); _dleg["formato"] = _LTAGS[0]
+_f3 = _os.path.join(_tf.mkdtemp(prefix="scpconn_"), "antiguo.pbase")
+_js.dump(_dleg, open(_f3, "w", encoding="utf-8"))
+if [x.ctype for x in load_book(_f3)] != [x.ctype for x in _allp]:
+    FAIL.append("conn: un libro con la etiqueta de las versiones anteriores no se abre igual")
 print(f"{'libro con dos tipologias':34} guardado y leido OK;  ejemplos antiguos abren como placa base; libro con las {len(_allp)} tipologias OK")
 
 print()

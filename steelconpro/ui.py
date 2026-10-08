@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Ventana principal de PlacaBasePro (PySide6)."""
+"""Ventana principal de SteelConPro (PySide6)."""
 from __future__ import annotations
 import math
 import os
@@ -33,7 +33,7 @@ from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
 from .units import parse_xy_clipboard
-from . import draw, report, mesh3d, view3d, brand
+from . import draw, report, mesh3d, view3d, brand, appdata
 from .rep3d import make_fem
 from .ui_widgets import Form, scroll, PasteTable, ThemeSwitch
 from .conn.specs import CONN_TYPES, CT_BASEPLATE
@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
         self.us = UnitSet(self.prj.u_len, self.prj.u_force,
                           self.prj.u_stress, self.prj.u_moment)
 
-        self.setWindowTitle(f"PlacaBasePro {__version__} — Diseno de placas base y conexiones de acero")
+        self.setWindowTitle(f"SteelConPro {__version__} — Conexiones de acero")
         self.setWindowIcon(QIcon(brand.ICO()))
         self.resize(1500, 920)
 
@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         self.lg = lg
         lg.setPixmap(brand.logo_pixmap(_theme_dark(), 250))
         lg.setAlignment(Qt.AlignCenter)
-        lg.setToolTip(f"PlacaBasePro {__version__}")
+        lg.setToolTip(f"SteelConPro {__version__}")
         cl.addWidget(lg)
         cl.addWidget(QLabel("<b>Conexiones del proyecto</b>"))
         self.lst_con = QListWidget()
@@ -1320,7 +1320,7 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             try:
                 p, r = self.export_target(p)
-                tmp = tempfile.mkdtemp(prefix="pbase_")
+                tmp = tempfile.mkdtemp(prefix="scp_")
                 figs = report.save_figures(p, r, tmp)
                 safe = "".join(ch if ch.isalnum() or ch in "-_ ." else "_"
                                for ch in (p.element or f"conexion_{i+1}"))
@@ -1357,7 +1357,7 @@ class MainWindow(QMainWindow):
     # ================================================== tipologia de la conexion activa
     @property
     def is_conn(self) -> bool:
-        """True si la conexion actual no es una placa base (se calcula en placabase/conn)."""
+        """True si la conexion actual no es una placa base (se calcula en steelconpro/conn)."""
         return self.prj.ctype != CT_BASEPLATE
 
     def _apply_ctype(self):
@@ -1705,8 +1705,7 @@ class MainWindow(QMainWindow):
     def _log_error(tag, exc):
         """Guarda el traceback en error.log (carpeta de datos del programa) y devuelve la ruta."""
         try:
-            base = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "PlacaBasePro"
-            base.mkdir(parents=True, exist_ok=True)
+            base = appdata.temp_dir()
             fn = base / "error.log"
             with open(fn, "a", encoding="utf-8") as f:
                 f.write(f"\n=== {datetime.datetime.now():%Y-%m-%d %H:%M:%S}  {tag}\n")
@@ -1962,8 +1961,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Todas las combinaciones ya estan calculadas", 4000)
             return
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        base = (Path(self.path).parent if self.path else
-                Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "PlacaBasePro")
+        base = (Path(self.path).parent if self.path else appdata.temp_dir())
         folder = str(base / f"{self.prj.element or 'placa'}_3D_{stamp}")
         self.dlg3d = QProgressDialog("Preparando el modelo 3D ...", "Cancelar",
                                      0, 0, self)
@@ -2261,7 +2259,7 @@ class MainWindow(QMainWindow):
 
     def open(self):
         fn, _ = QFileDialog.getOpenFileName(self, "Abrir proyecto", "",
-                                            "Placa base (*.pbase *.json)")
+                                            "SteelConPro (*.scp *.pbase *.json)")
         if not fn:
             return
         try:
@@ -2271,7 +2269,7 @@ class MainWindow(QMainWindow):
             self.path = fn
             self._refresh_material_combos()
             self._switch(0)
-            self.setWindowTitle(f"PlacaBasePro {__version__} — {Path(fn).name}")
+            self.setWindowTitle(f"SteelConPro {__version__} — {Path(fn).name}")
         except Exception as e:
             QMessageBox.critical(self, "Abrir", f"No se pudo abrir el archivo:\n{e}")
 
@@ -2287,11 +2285,11 @@ class MainWindow(QMainWindow):
         # el archivo guarda TODO el proyecto (todas las conexiones): se sugiere el nombre del proyecto
         safe = "".join(ch if (ch.isalnum() or ch in "-_ .") else "_" for ch in (self.prj.name or "").strip()) \
             .strip(" .") or "Proyecto"
-        fn, _ = QFileDialog.getSaveFileName(self, "Guardar proyecto", f"{safe}.pbase", "Placa base (*.pbase)")
+        fn, _ = QFileDialog.getSaveFileName(self, "Guardar proyecto", f"{safe}.scp", "SteelConPro (*.scp)")
         if fn:
             self.path = fn
             self.save()
-            self.setWindowTitle(f"PlacaBasePro {__version__} — {Path(fn).name}")
+            self.setWindowTitle(f"SteelConPro {__version__} — {Path(fn).name}")
 
     def import_aisc(self):
         fn, _ = QFileDialog.getOpenFileName(
@@ -2323,7 +2321,7 @@ class MainWindow(QMainWindow):
         if not fn:
             return
         try:
-            tmp = tempfile.mkdtemp(prefix="pbase_")
+            tmp = tempfile.mkdtemp(prefix="scp_")
             q, R = self.export_target()
             figs = report.save_figures(q, R, tmp)
             report.export_pdf(q, R, fn, figs, self.chk_mem.isChecked())
@@ -2373,7 +2371,7 @@ class MainWindow(QMainWindow):
         if not fn:
             return
         try:
-            tmp = tempfile.mkdtemp(prefix="pbase_")
+            tmp = tempfile.mkdtemp(prefix="scp_")
             q, R = self.export_target()
             figs = report.save_figures(q, R, tmp)
             report.export_docx(q, R, fn, figs, self.chk_mem.isChecked())
@@ -2395,15 +2393,15 @@ class MainWindow(QMainWindow):
 
     def about(self):
         mb = QMessageBox(self)
-        mb.setWindowTitle("Acerca de PlacaBasePro")
+        mb.setWindowTitle("Acerca de SteelConPro")
         pm = QPixmap(brand.LOGO())
         if not pm.isNull():
             mb.setIconPixmap(pm.scaledToWidth(360, Qt.SmoothTransformation))
         mb.setText(
-            f"<b>PlacaBasePro {__version__}</b><br>"
-            "Diseno y verificacion de placas base para perfiles W, HSS y Pipe, y de conexiones de corte "
-            "con placa simple (viga secundaria a viga maestra o a columna).<br><br>"
-            "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · AISC Manual 15a Ed. · ACI 318-19 Cap. 17<br>"
+            f"<b>SteelConPro {__version__}</b><br>"
+            "Diseno y verificacion de conexiones de acero: placas base, conexiones de corte (placa simple, doble angulo, "
+            "asiento), empalmes, placa extrema, cartelas de arriostramiento, nudos HSS, RBS (AISC 358) y empalmes de puente.<br><br>"
+            "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · AISC Manual 15a Ed. · AISC 358/341 · AASHTO LRFD · ACI 318-19 Cap. 17<br>"
             "Modelo solido 3D (Gmsh + CalculiX) "
             "con el concreto como resortes solo a compresion.<br><br>"
             "Los resultados deben ser revisados por un ingeniero responsable.")
@@ -2425,7 +2423,7 @@ class MainWindow(QMainWindow):
             self.lg.setPixmap(brand.logo_pixmap(on, 250))
         try:
             from PySide6.QtCore import QSettings
-            QSettings("PlacaBasePro", "PlacaBasePro").setValue("dark", bool(on))
+            QSettings("SteelConPro", "SteelConPro").setValue("dark", bool(on))
         except Exception:
             pass
 
@@ -2440,7 +2438,7 @@ def _theme_dark():
     """El programa abre en claro salvo que el usuario haya elegido el tema oscuro."""
     try:
         from PySide6.QtCore import QSettings
-        v = QSettings("PlacaBasePro", "PlacaBasePro").value("dark", False)
+        v = QSettings("SteelConPro", "SteelConPro").value("dark", False)
         return str(v).lower() in ("true", "1")
     except Exception:
         return False
@@ -2469,12 +2467,12 @@ def main():
     if sys.platform.startswith("win"):
         try:                      # la barra de tareas de Windows agrupa y muestra el icono propio
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PlacaBasePro.App")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SteelConPro.App")
         except Exception:
             pass
     gl3d.set_default_format()
     app = QApplication(sys.argv)
-    app.setApplicationName("PlacaBasePro")
+    app.setApplicationName("SteelConPro")
     gl3d.available()                       # sondea OpenGL antes de crear la ventana (ajusta el suavizado si es por software)
     app.setStyle("Fusion")
     app.setWindowIcon(QIcon(brand.ICO()))

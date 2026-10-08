@@ -129,7 +129,7 @@ def solve_one(prj, name, vals, rec):
         add_check(ck, rec, "rbs_cp2", "Sin placas de continuidad: tcf ≥ bf/6", bf / 6.0, col.tf, "in", "AISC 341 E3.6f / 358 §2.4.4")
     else:
         t_cp = tbf / 2 if nb == 1 else tbf
-        ck.append(__import__("placabase.design", fromlist=["Check"]).Check(
+        ck.append(__import__("steelconpro.design", fromlist=["Check"]).Check(
             "rbs_cp_info", f"Placas de continuidad colocadas (t ≥ {u.q('L', t_cp)} segun AISC 358 §2.4.4) — no verificadas", 0.0, 1.0, "-", "AISC 358 §2.4.4",
             "Espesor minimo de referencia: 1/2·tbf con una viga, tbf con dos vigas; revise el detalle.", skip=True))
     not_evaluated(ck, "rbs_other", "Soldadura CJP viga-columna, arriostramiento lateral en la RBS y detalle de placas de continuidad", "AISC 358 §5.6-5.7")

@@ -105,7 +105,7 @@ def write_geo(prj: Project, path: str, mesh_size: float = 0.0,
 
     L: list[str] = []
     L.append('SetFactory("OpenCASCADE");')
-    L.append(f"// PlacaBasePro - modelo solido 3D - {prj.name} / {prj.element}")
+    L.append(f"// SteelConPro - modelo solido 3D - {prj.name} / {prj.element}")
     L.append("// Unidades: pulgada")
     L.append(f"lc = {lc:.6f};")
     L.append("")
@@ -402,7 +402,7 @@ def escribir_inp():
     ref = max(nodos) + 1
     eid = max(e[1] for e in elems) + 1
     out = []
-    out.append("** PlacaBasePro - modelo solido 3D")
+    out.append("** SteelConPro - modelo solido 3D")
     out.append("*INCLUDE, INPUT=" + os.path.basename(MSH))
     out.append(f"*NODE\\n{{ref}}, {{CX}}, {{CY}}, {{ZTOP}}")
     out.append("*NSET, NSET=NREF\\n" + str(ref))
@@ -777,7 +777,7 @@ def build_inp(prj: Project, mesh_inp: str, out_inp: str, height: float = 0.0) ->
     # con llave el cortante se devuelve a media altura de la llave (H/2 bajo la cara inferior)
     z_arm = shear_arm(prj) - (0.5 * prj.lug.H if prj.lug.enabled else 0.0)
 
-    L = ["** PlacaBasePro - modelo solido 3D",
+    L = ["** SteelConPro - modelo solido 3D",
          f"** {prj.name} / {prj.element}",
          "*INCLUDE, INPUT=" + os.path.basename(mesh_inp),
          # nodo de referencia: el cortante actua a la altura e (el mismo brazo del 2D y del calculo

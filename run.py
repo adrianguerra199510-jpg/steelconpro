@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Punto de entrada de PlacaBasePro.
+"""Punto de entrada de SteelConPro.
 
-    PlacaBasePro.exe                       -> interfaz grafica
-    PlacaBasePro.exe --selftest            -> autopruebas del motor (sin interfaz)
-    PlacaBasePro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
-    PlacaBasePro.exe proyecto.pbase --pdf mem.pdf --docx s.docx
+    SteelConPro.exe                       -> interfaz grafica
+    SteelConPro.exe --selftest            -> autopruebas del motor (sin interfaz)
+    SteelConPro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
+    SteelConPro.exe proyecto.scp --pdf mem.pdf --docx s.docx
                                      --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
                                               (--3d corre Gmsh + CalculiX y verifica con sus resultados)
@@ -29,9 +29,9 @@ def resolve(p):
 
 
 def batch(argv):
-    """Calcula TODAS las conexiones del archivo (un .pbase es un libro, como lo guarda la interfaz).
+    """Calcula TODAS las conexiones del archivo (un .scp es un libro, como lo guarda la interfaz).
     Con varias conexiones, los archivos de --pdf / --docx / --geo llevan el nombre de la conexion al final."""
-    from placabase.model import load_book
+    from steelconpro.model import load_book
     book = load_book(resolve(argv[0]))
     rc = 0
     for i, prj in enumerate(book):
@@ -51,15 +51,15 @@ def _out(argv, flag, suf):
 
 def batch_one(prj, argv, suf=""):
     import tempfile
-    from placabase.solver import solve
-    from placabase import report, mesh3d
-    from placabase.conn.specs import CT_BASEPLATE
+    from steelconpro.solver import solve
+    from steelconpro import report, mesh3d
+    from steelconpro.conn.specs import CT_BASEPLATE
 
     fem = None
     if prj.ctype != CT_BASEPLATE and ("--3d" in argv or "--geo" in argv):
         print(f"  aviso: --3d/--geo solo aplican a la placa base; '{prj.ctype}' se calcula en forma cerrada.")
     if "--3d" in argv and prj.ctype == CT_BASEPLATE:
-        from placabase.rep3d import make_fem
+        from steelconpro.rep3d import make_fem
         r3, msg = mesh3d.full_3d(prj, _out(argv, "--3d", suf))
         print("  3D:", msg)
         fem = make_fem(prj, r3) if r3 is not None else None
@@ -72,7 +72,7 @@ def batch_one(prj, argv, suf=""):
 
     figs = None
     if any(f in argv for f in ("--docx", "--pdf")):
-        figs = report.save_figures(prj, res, tempfile.mkdtemp(prefix="pbase_"))
+        figs = report.save_figures(prj, res, tempfile.mkdtemp(prefix="scp_"))
     if "--pdf" in argv:
         print("  ->", report.export_pdf(prj, res, _out(argv, "--pdf", suf), figs))
     if "--docx" in argv:
@@ -112,7 +112,7 @@ def main():
         return 0
     if args and not args[0].startswith("-"):
         return batch(args)
-    from placabase.ui import main as gui
+    from steelconpro.ui import main as gui
     return gui()
 
 

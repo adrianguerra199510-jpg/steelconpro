@@ -1,14 +1,17 @@
-<p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
+<p align="center"><img src="steelconpro/data/logo.png" width="420" alt="SteelConPro"></p>
 
-# PlacaBasePro 3.3.0
+# SteelConPro 4.0.0
 
-Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
-HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
-rigidizadores, soldadura y análisis de elementos finitos. Desde la 3.3 también
-**otras tipologías de conexión**: placa de corte (viga secundaria a viga maestra, viga a columna), doble ángulo, asiento, empalmes de viga y de
-columna, placa extrema a momento, cartelas de arriostramiento, nudos HSS a HSS, RBS (AISC 358) y empalme de puente con pernos pretensados (AASHTO).
+Diseño y verificación de **conexiones de acero**: placas base de columna (perfiles **W, HSS cuadrado/rectangular, HSS circular y Pipe**, anclajes ACI 318-19,
+llave de corte, rigidizadores, soldadura), conexiones de corte (placa simple, doble ángulo, asiento), empalmes de viga y de columna, placa extrema a
+momento, cartelas de arriostramiento, nudos HSS a HSS, RBS (AISC 358) y empalmes de puente con pernos pretensados. Todas con dibujo paramétrico, **vista 3D**
+y **análisis de elementos finitos** sólido (Gmsh + CalculiX) además del cálculo cerrado.
 
 Normas: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**; para las conexiones: AISC Manual 15ª Ed., AISC 358-16, AISC 341-22, AASHTO LRFD y RCSC.
+
+> **Cambio de nombre (4.0.0).** El programa antes tenía otro nombre. Los proyectos se guardan ahora como `.scp`; los archivos `.pbase` y el formato de libro de las
+> versiones anteriores se siguen abriendo (al guardar quedan como `.scp`), y los materiales y perfiles importados de la carpeta de datos anterior se copian solos a la
+> carpeta `SteelConPro` la primera vez que se abre el programa.
 
 **Unidades configurables**: longitud en in / ft / mm / cm / m, fuerza en kip / lbf /
 kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas, a la
@@ -19,10 +22,10 @@ Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestañ
 
 ## Novedades de la 3.3.0: tipologías de conexión
 
-Cada conexión del proyecto tiene ahora una **tipología** (Proyecto > Tipología, o el diálogo del botón *Nueva*). Un mismo archivo `.pbase`
+Cada conexión del proyecto tiene ahora una **tipología** (Proyecto > Tipología, o el diálogo del botón *Nueva*). Un mismo archivo `.scp`
 puede mezclarlas; los archivos anteriores se abren como placa base. Todas las tipologías nuevas se calculan en **forma cerrada** (sin análisis 3D),
 con varias combinaciones de carga (gobierna la peor), tabla de verificaciones D/C, dibujo con cotas, memoria detallada y PDF/Word, y se pueden
-correr por lotes (`run.py libro.pbase --pdf memoria.pdf`).
+correr por lotes (`run.py libro.scp --pdf memoria.pdf`).
 
 | Tipología | Pestaña | Norma | Qué verifica |
 |---|---|---|---|
@@ -129,12 +132,12 @@ hormigón pretensado), esa tipología **no** está.
 - Las conexiones cerradas no pasan por el FEM 3D: el veredicto es el del cálculo cerrado.
 - Es una herramienta de verificación; la responsabilidad del diseño es del ingeniero.
 
-**Corrección en el modo por lotes.** `PlacaBasePro.exe proyecto.pbase --pdf ...` leía el archivo con `Project.load`, que ignora el formato de libro con el
+**Corrección en el modo por lotes.** `SteelConPro.exe proyecto.scp --pdf ...` leía el archivo con `Project.load`, que ignora el formato de libro con el
 que guarda la interfaz y calculaba en silencio un proyecto por defecto. Ahora lee el libro y calcula **todas** sus conexiones (con varias, el nombre de
 la conexión se agrega a los archivos de salida).
 
-**Para agregar otra tipología:** su dataclass en `placabase/conn/specs.py` (con su constante `CT_*` en `CONN_TYPES`); un campo en `Project`
-(`model.py`, y en `_used_extras` si usa perfiles o aceros propios); un módulo en `placabase/conn/` con `NAME`, `ATTR`, `TAB`, `PREFIX`, `TITLE`, `NORMS`,
+**Para agregar otra tipología:** su dataclass en `steelconpro/conn/specs.py` (con su constante `CT_*` en `CONN_TYPES`); un campo en `Project`
+(`model.py`, y en `_used_extras` si usa perfiles o aceros propios); un módulo en `steelconpro/conn/` con `NAME`, `ATTR`, `TAB`, `PREFIX`, `TITLE`, `NORMS`,
 `LOADS`, `LOADS_NOTE`, `FORM` (formulario declarativo con `formspec.py`), `solve(prj, detail) -> Results` (usa `base.run_combos` y `common.py`: centro
 instantáneo, bloque de cortante, soldadura, efecto palanca...), `draw(fig, prj)`, `input_rows` y `label`, registrado en `conn/__init__.py`. La interfaz, el
 dibujo, las memorias PDF/Word y el modo por lotes lo toman solos; `selftest.py` recorre todas las tipologías registradas con una prueba de fuzz.
@@ -167,7 +170,7 @@ dibujo, las memorias PDF/Word y el modo por lotes lo toman solos; `selftest.py` 
 ## Novedades de la 3.2.7
 
 - Se retiraron del programa, la documentacion y los ejemplos las referencias a otros programas comerciales. El ejemplo de comparacion se
-  llama ahora `COMP-1_W14X90_traccion.pbase`. Los proyectos guardados con el nombre anterior del criterio del cordon se abren sin problema.
+  llama ahora `COMP-1_W14X90_traccion.scp`. Los proyectos guardados con el nombre anterior del criterio del cordon se abren sin problema.
 
 ## Novedades de la 3.2.6
 
@@ -276,7 +279,7 @@ Basado en Ghimire, Wald, Vild y Kabelac, *Numerical design calculation of the fi
 - **Visor 3D en tiempo real (OpenGL).** "Modelo y vistas" y "Analisis FEM" usan ahora un visor OpenGL con z-buffer por pixel: el orden de
   las piezas es siempre correcto (columna, placa, tuercas, pernos y pedestal translucido) y la rotacion es fluida (>= 30 fps; con tarjeta
   grafica, cientos). Izquierdo: girar. Derecho o central: desplazar. Rueda: zoom. Doble clic: encuadrar. Barra: Iso / Frontal / Lateral /
-  Planta, perspectiva u ortografica y guardar imagen. Si el equipo no ofrece OpenGL 2.1 (o se define `PB_NO_GL=1`) se usa el visor matplotlib
+  Planta, perspectiva u ortografica y guardar imagen. Si el equipo no ofrece OpenGL 2.1 (o se define `SCP_NO_GL=1`) se usa el visor matplotlib
   de siempre. La memoria de calculo sigue usando matplotlib.
 - **Tema claro por defecto** (no depende del perfil de Windows) y un interruptor sol/luna arriba a la derecha; la eleccion se recuerda y
   los graficos siempre van sobre fondo blanco. El logo se adapta al tema oscuro.
@@ -322,7 +325,7 @@ solo el punto maximo, bajo la escala de colores.
 
 ## Identidad visual (2.1)
 
-Icono propio del programa y del .exe (`placabase/data/placabasepro.ico`), logo en la ventana, pantalla de inicio, "Acerca de" y el encabezado de las memorias PDF y Word; barra con acento naranja y boton CALCULAR de marca. Los recursos estan en `placabase/data/` y los colores en `placabase/brand.py`.
+Icono propio del programa y del .exe (`steelconpro/data/steelconpro.ico`), logo en la ventana, pantalla de inicio, "Acerca de" y el encabezado de las memorias PDF y Word; barra con acento naranja y boton CALCULAR de marca. Los recursos estan en `steelconpro/data/` y los colores en `steelconpro/brand.py`.
 
 ## Novedades de la 2.1: combinaciones de carga, flexion del perno y nueva organizacion
 
@@ -383,7 +386,7 @@ seccion 7 aisla la PLACA y muestra en planta: von Mises promediado de la cara su
 (con la etiqueta del maximo y la curva 0.90·Fy), presion de contacto con la traccion de cada perno, y el
 desplazamiento vertical; despues las dos vistas 3D en perspectiva.
 
-### Soldadura perfil-placa: conectores entre cuerpos separados (`placabase/weldfe.py`)
+### Soldadura perfil-placa: conectores entre cuerpos separados (`steelconpro/weldfe.py`)
 
 En el modelo fusionado anterior la union era monolitica (una CJP ideal): una zona sin soldar transmitia
 igual, la compresion pasaba por el cordon y la fuerza del cordon habia que deducirla de los esfuerzos del
@@ -568,7 +571,7 @@ admite 0° o 90°.
 
 ### Varias conexiones
 
-Un archivo `.pbase` guarda ahora todas las conexiones del proyecto, junto con los
+Un archivo `.scp` guarda ahora todas las conexiones del proyecto, junto con los
 perfiles personalizados y materiales propios que usen, para que abra igual en
 otra computadora. Los archivos de versiones anteriores (una sola conexion) se
 siguen abriendo. `Exportar > Reportes ... de TODAS las conexiones` genera un
@@ -617,8 +620,8 @@ reporte de una conexion solo si se corrio con esa conexion tal como esta.
 
 ## 1. Usar y compartir
 
-**Si recibio `PlacaBasePro_portable.zip`:** descomprimalo donde quiera y abra
-`PlacaBasePro\PlacaBasePro.exe`. No hay que instalar nada: Gmsh va dentro del
+**Si recibio `SteelConPro_portable.zip`:** descomprimalo donde quiera y abra
+`SteelConPro\SteelConPro.exe`. No hay que instalar nada: Gmsh va dentro del
 programa y CalculiX en `solvers\calculix`. No separe el `.exe` de su carpeta.
 
 **Para compilarlo desde este codigo fuente (Windows):**
@@ -629,8 +632,8 @@ programa y CalculiX en `solvers\calculix`. No separe el `.exe` de su carpeta.
 El script crea un entorno virtual, instala las dependencias (incluida la libreria
 de Gmsh), corre las autopruebas, compila, copia `solvers\` y deja:
 
-- `dist\PlacaBasePro\PlacaBasePro.exe` — el programa listo para usar.
-- `PlacaBasePro_portable.zip` — la misma carpeta comprimida, para compartir.
+- `dist\SteelConPro\SteelConPro.exe` — el programa listo para usar.
+- `SteelConPro_portable.zip` — la misma carpeta comprimida, para compartir.
 
 `ejecutar_sin_compilar.bat` corre la aplicacion directamente con Python, util
 mientras se prueba.
@@ -638,9 +641,9 @@ mientras se prueba.
 ### Uso por línea de comandos
 
 ```
-PlacaBasePro.exe                                      interfaz gráfica
-PlacaBasePro.exe --selftest                           autopruebas del motor
-PlacaBasePro.exe PB-01.pbase --pdf m.pdf --docx m.docx --inp m.inp
+SteelConPro.exe                                      interfaz gráfica
+SteelConPro.exe --selftest                           autopruebas del motor
+SteelConPro.exe PB-01.scp --pdf m.pdf --docx m.docx --inp m.inp
 ```
 
 En modo lote devuelve código de salida 0 si cumple y 2 si no cumple, así que se
@@ -663,7 +666,7 @@ y Pipe STD/XS). **Para el catálogo completo y verificado**, use
 `aisc-shapes-database-v14.1.xlsx`. El importador reconoce las columnas nativas de
 ese archivo (`Type`, `AISC_Manual_Label`, `d`, `bf`, `tf`, `tw`, `Ht`, `B`, `tdes`,
 `OD`, `A`, `Ix`, `Sx`, `Zx`, …), guarda el resultado en
-`%APPDATA%\PlacaBasePro\shapes.json` y los perfiles importados sustituyen a los
+`%APPDATA%\SteelConPro\shapes.json` y los perfiles importados sustituyen a los
 integrados. Hágalo una vez; queda permanente.
 
 ### 2.2 Pernos en pulgadas y base de materiales
@@ -855,7 +858,7 @@ pestaña) y hay un botón para copiarla al portapapeles.
   contacto y deflexión, y anexo con planta y elevación.
 - **Imágenes PNG** sueltas.
 - **Modelo 3D para Gmsh/CalculiX** (`.geo` y `correr_3d.py`).
-- **Proyecto `.pbase`** (JSON legible) para reabrir o correr por lotes.
+- **Proyecto `.scp`** (JSON legible) para reabrir o correr por lotes.
 
 Todos los reportes salen en el sistema de unidades que haya elegido en la pestaña
 Proyecto, incluida la tabla de verificaciones.
@@ -894,11 +897,11 @@ Léalas antes de firmar nada con esto.
 ```
 run.py                  punto de entrada (GUI / lote / autopruebas)
 selftest.py             45 casos de prueba del motor
-placabase/
+steelconpro/
   units.py              sistema de unidades configurable (UnitSet)
   materials.py          aceros, varillas, electrodos, geometría de pernos
   shapes.py             catálogo AISC integrado + importador de la base oficial
-  model.py              dataclasses del proyecto, serialización .pbase
+  model.py              dataclasses del proyecto, serialización .scp
   geometry.py           contornos, rotación, disposición de pernos, llave,
                         rigidizadores, detección de interferencias
   design.py             aplastamiento, espesor, soldadura, llave, rigidizadores
@@ -923,7 +926,7 @@ ejemplos/               tres proyectos resueltos
 Para tocar el motor sin abrir la GUI: `python run.py --selftest` corre los casos y
 verifica, entre otras cosas, que sin 3D el veredicto sea PENDIENTE y que con 3D (simulado) las fuerzas de
 los pernos salgan de el; con `--3d` (o `python selftest.py --3d`) corre ademas el analisis solido de PB-01, la traccion pura
-y el respaldo fusionado. `python run.py proyecto.pbase --3d carpeta --pdf memoria.pdf` hace el calculo
+y el respaldo fusionado. `python run.py proyecto.scp --3d carpeta --pdf memoria.pdf` hace el calculo
 completo por lotes.
 
 ---
@@ -932,9 +935,9 @@ completo por lotes.
 
 | Archivo | Caso | D/C | Gobierna |
 |---|---|---|---|
-| `PB-01_W14X90.pbase` | W14X90, 22×22×2", 8 pernos Ø1¼", llave de corte | 0.750 | distancia al borde |
-| `PB-02_HSS12_rigidizada.pbase` | HSS12X12X½, 24×24×2", rigidizadores perimetrales, soldadura CJP | 0.949 | esbeltez del rigidizador |
-| `PB-03_poste_circular.pbase` | Pipe/HSS16 sobre placa circular Ø30", 12 pernos Ø1½" con gancho en J | 1.000 | aplastamiento del concreto |
+| `PB-01_W14X90.scp` | W14X90, 22×22×2", 8 pernos Ø1¼", llave de corte | 0.750 | distancia al borde |
+| `PB-02_HSS12_rigidizada.scp` | HSS12X12X½, 24×24×2", rigidizadores perimetrales, soldadura CJP | 0.949 | esbeltez del rigidizador |
+| `PB-03_poste_circular.scp` | Pipe/HSS16 sobre placa circular Ø30", 12 pernos Ø1½" con gancho en J | 1.000 | aplastamiento del concreto |
 
 ---
 

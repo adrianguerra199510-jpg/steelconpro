@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Identidad visual de PlacaBasePro: ruta de los recursos graficos y colores de marca."""
+"""Identidad visual de SteelConPro: ruta de los recursos graficos y colores de marca."""
 from __future__ import annotations
 import os
 import sys
@@ -13,8 +13,8 @@ SLATE = "#4A5563"         # gris del lema
 
 
 def asset(name: str) -> str:
-    """Ruta de un recurso de placabase/data (tambien dentro del ejecutable de PyInstaller)."""
-    for base in (Path(__file__).parent / "data", Path(getattr(sys, "_MEIPASS", ".")) / "placabase" / "data"):
+    """Ruta de un recurso de steelconpro/data (tambien dentro del ejecutable de PyInstaller)."""
+    for base in (Path(__file__).parent / "data", Path(getattr(sys, "_MEIPASS", ".")) / "steelconpro" / "data"):
         p = base / name
         if p.exists():
             return str(p)
@@ -22,8 +22,9 @@ def asset(name: str) -> str:
 
 
 LOGO = lambda: asset("logo.png")          # logo horizontal con lema (fondo transparente)
+LOGO_DARK = lambda: asset("logo_dark.png")   # el mismo, con el texto claro para el tema oscuro
 ICON = lambda: asset("icon.png")          # icono cuadrado 256 px
-ICO = lambda: asset("placabasepro.ico")   # icono de Windows (.ico multi-tamano)
+ICO = lambda: asset("steelconpro.ico")   # icono de Windows (.ico multi-tamano)
 
 STYLE = f"""
 QToolBar {{ background: {GREY}; border-bottom: 2px solid {ORANGE}; spacing: 4px; padding: 2px; }}
@@ -78,29 +79,13 @@ def apply_theme(app, dark=False):
 
 
 def logo_pixmap(dark=False, width=250):
-    """Logo para el fondo actual: en el tema oscuro, los tonos oscuros y neutros (texto y caja) pasan a claro y el
-    naranja de marca se conserva."""
-    import numpy as np
+    """Logo para el fondo actual (el del tema oscuro lleva el texto claro)."""
     from PySide6.QtGui import QImage, QPixmap
     from PySide6.QtCore import Qt
-    img = QImage(LOGO())
+    img = QImage(LOGO_DARK() if dark else LOGO())
     if img.isNull():
         return QPixmap()
-    img = img.scaledToWidth(width, Qt.SmoothTransformation).convertToFormat(QImage.Format_RGBA8888)
-    if dark:
-        w, h = img.width(), img.height()
-        a = np.frombuffer(img.constBits(), np.uint8).reshape(h, img.bytesPerLine())[:, : w * 4].reshape(h, w, 4).astype(np.float32).copy()
-        rgb = a[:, :, :3] / 255.0
-        mx, mn = rgb.max(axis=2), rgb.min(axis=2)
-        lum = rgb @ np.array([0.299, 0.587, 0.114], np.float32)
-        chroma = mx - mn
-        wgt = np.clip((0.62 - lum) / 0.30, 0, 1) * np.clip((0.30 - chroma) / 0.15, 0, 1)
-        light = np.array([0.95, 0.96, 0.97], np.float32)
-        out = rgb * (1 - wgt[..., None]) + light * wgt[..., None]
-        a[:, :, :3] = out * 255.0
-        data = np.ascontiguousarray(a.astype(np.uint8))
-        img = QImage(data.data, w, h, w * 4, QImage.Format_RGBA8888).copy()
-    return QPixmap.fromImage(img)
+    return QPixmap.fromImage(img.scaledToWidth(width, Qt.SmoothTransformation))
 
 
 # colores de las hojas de estilo en linea (claro -> oscuro): textos azules/grises y el panel de ayuda

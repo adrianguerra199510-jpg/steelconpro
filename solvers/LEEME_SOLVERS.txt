@@ -1,4 +1,4 @@
-SOLVERS INCLUIDOS EN PLACABASEPRO
+SOLVERS INCLUIDOS EN STEELCONPRO
 =================================
 
 calculix/ccx.exe
@@ -17,5 +17,5 @@ Gmsh 4.15.2 (mallador)
     Licencia: GNU GPL version 2 o posterior (ver GPL-2.0.txt), con las
     excepciones indicadas por sus autores.  Codigo fuente en https://gmsh.info
 
-PlacaBasePro invoca ambos como procesos separados; no los modifica ni se
+SteelConPro invoca ambos como procesos separados; no los modifica ni se
 enlaza con ellos.  Se distribuyen sin cambios, junto con su licencia.

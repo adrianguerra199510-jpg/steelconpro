@@ -8,6 +8,9 @@ from . import materials as M
 from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
 from .conn.specs import CONN_TYPES, CT_BASEPLATE, ShearTab, DoubleAngle, Seated, BeamSplice, ColSplice, EndPlate, Gusset, HSSJoint, RBSConn, BridgeSplice
 import dataclasses
+from .appdata import LEGACY_BOOK_TAGS
+
+BOOK_TAG = "SteelConPro-libro"
 
 # --------------------------------------------------------------- catalogos
 U_TYPES = ["Opcion A — barras U (patas rectas, ld)", "Opcion B — barras Omega (patas con gancho, ldh)"]
@@ -600,7 +603,7 @@ def _used_extras(projects):
 
 def save_book(path: str, projects: list):
     shapes, mats = _used_extras(projects)
-    data = {"formato": "PlacaBasePro-libro", "version": 2,
+    data = {"formato": BOOK_TAG, "version": 2,
             "conexiones": [asdict(p) for p in projects],
             "perfiles": shapes, "materiales": mats}
     with open(path, "w", encoding="utf-8") as f:
@@ -611,7 +614,7 @@ def load_book(path: str) -> list:
     """Lee un libro (varias conexiones) o un proyecto antiguo de una sola."""
     with open(path, encoding="utf-8") as f:
         d = json.load(f)
-    if isinstance(d, dict) and d.get("formato") == "PlacaBasePro-libro":
+    if isinstance(d, dict) and d.get("formato") in (BOOK_TAG,) + LEGACY_BOOK_TAGS:
         for sd in d.get("perfiles", []):
             if not CATALOG.get(sd["label"]):
                 CATALOG.shapes[sd["label"]] = Shape(**sd)

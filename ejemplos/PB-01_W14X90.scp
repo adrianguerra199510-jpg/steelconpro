@@ -1,28 +1,28 @@
 {
- "formato": "PlacaBasePro-libro",
+ "formato": "SteelConPro-libro",
  "version": 2,
  "conexiones": [
   {
-   "name": "Ejemplo HSS",
-   "element": "PB-02",
+   "name": "Ejemplo AISC DG1",
+   "element": "PB-01",
    "author": "",
-   "date": "",
+   "date": "2026-09-26",
    "metric": false,
    "u_len": "in",
    "u_force": "kip",
    "u_stress": "ksi",
    "u_moment": "kip·in",
    "section": {
-    "label": "HSS12X12X1/2",
-    "steel": "ASTM A500 Gr.C (HSS rect.)",
+    "label": "W14X90",
+    "steel": "ASTM A992",
     "rotation": 0.0,
     "double": false,
     "gap": 0.375
    },
    "plate": {
     "shape": "Rectangular",
-    "N": 24.0,
-    "B": 24.0,
+    "N": 22.0,
+    "B": 22.0,
     "Dp": 26.0,
     "tp": 2.0,
     "steel": "ASTM A572 Gr.50",
@@ -82,20 +82,20 @@
     "electrode": "E70XX"
    },
    "stiff": {
-    "enabled": true,
-    "position": "Perimetro HSS (4 caras)",
+    "enabled": false,
+    "position": "Alas (paralelo a Y)",
     "count": 4,
-    "L": 4.0,
+    "L": 3.5,
     "h": 8.0,
-    "t": 0.75,
+    "t": 0.625,
     "steel": "ASTM A572 Gr.50",
-    "weld_size": 0.75,
+    "weld_size": 0.5,
     "electrode": "E70XX",
-    "spacing_mode": "Separacion fija",
+    "spacing_mode": "Automatico (repartido)",
     "spacing": 6.0,
     "offset": 0.0,
     "offset_angle": 0.0,
-    "shape": "Triangular",
+    "shape": "Rectangular",
     "clip_h": 1.5,
     "clip_v": 1.5,
     "clip_root": 0.75
@@ -114,8 +114,8 @@
      "both_sides": true
     },
     "perimeter": {
-     "wtype": "CJP (penetracion completa)",
-     "size": 0.0,
+     "wtype": "Filete",
+     "size": 0.375,
      "electrode": "E70XX",
      "both_sides": false
     },
@@ -133,10 +133,10 @@
     "seismic": false
    },
    "loads": {
-    "Pu": 250,
-    "Mux": 2400,
+    "Pu": 400.0,
+    "Mux": 1800.0,
     "Muy": 0.0,
-    "Vux": 25,
+    "Vux": 30.0,
     "Vuy": 0.0,
     "friction": false,
     "mu_fric": 0.4,

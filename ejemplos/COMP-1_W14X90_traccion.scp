@@ -1,12 +1,12 @@
 {
- "formato": "PlacaBasePro-libro",
+ "formato": "SteelConPro-libro",
  "version": 2,
  "conexiones": [
   {
-   "name": "Ejemplo AISC DG1",
-   "element": "PB-01",
+   "name": "Comparativa de referencia",
+   "element": "COMP-1",
    "author": "",
-   "date": "2026-09-26",
+   "date": "",
    "metric": false,
    "u_len": "in",
    "u_force": "kip",
@@ -15,33 +15,33 @@
    "section": {
     "label": "W14X90",
     "steel": "ASTM A992",
-    "rotation": 0.0,
+    "rotation": 90.0,
     "double": false,
     "gap": 0.375
    },
    "plate": {
     "shape": "Rectangular",
-    "N": 22.0,
-    "B": 22.0,
+    "N": 19.68503937007874,
+    "B": 19.68503937007874,
     "Dp": 26.0,
-    "tp": 2.0,
-    "steel": "ASTM A572 Gr.50",
-    "grout": 1.5
+    "tp": 0.7874015748031495,
+    "steel": "ASTM A36",
+    "grout": 0.0
    },
    "bolts": {
-    "size": "1-1/4",
-    "steel": "ASTM F1554 Gr.55",
+    "size": "1/2",
+    "steel": "ASTM F1554 Gr.105",
     "atype": "Con cabeza (hex pesada)",
-    "force_method": "DG1 (Tu repartida por igual entre los pernos traccionados)",
     "pattern": "Perimetral (4 lados)",
     "n_major": 3,
     "n_minor": 3,
     "n_circ": 8,
-    "ex": 2.5,
-    "ey": 2.5,
-    "hef": 24.0,
+    "ex": 1.574803149606299,
+    "ey": 1.574803149606299,
+    "hef": 11.811023622047244,
     "eh": 0.0,
     "Abrg_user": 0.0,
+    "washer_d": 0.0,
     "hole_rule": "AISC Tabla 14-2 (maximo recomendado)",
     "install": "Preinstalado (vaciado en sitio)",
     "adh_env": "Interior, concreto seco (Tabla 17.6.5.2.5)",
@@ -69,7 +69,7 @@
     ]
    },
    "lug": {
-    "enabled": true,
+    "enabled": false,
     "ltype": "Placa",
     "label": "W8X31",
     "rotation": 0.0,
@@ -103,13 +103,13 @@
    "welds": {
     "flange": {
      "wtype": "Filete",
-     "size": 0.5,
+     "size": 0.5511811023622047,
      "electrode": "E70XX",
      "both_sides": true
     },
     "web": {
      "wtype": "Filete",
-     "size": 0.3125,
+     "size": 0.3543307086614173,
      "electrode": "E70XX",
      "both_sides": true
     },
@@ -124,20 +124,20 @@
    "conc": {
     "material": "(personalizado)",
     "fc": 4.0,
-    "N2": 48.0,
-    "B2": 48.0,
-    "ha": 48.0,
+    "N2": 40.0,
+    "B2": 40.0,
+    "ha": 23.62204724409449,
     "cracked": true,
     "lam": 1.0,
     "cond_A": false,
     "seismic": false
    },
    "loads": {
-    "Pu": 400.0,
-    "Mux": 1800.0,
-    "Muy": 0.0,
-    "Vux": 30.0,
-    "Vuy": 0.0,
+    "Pu": -224.80894387096183,
+    "Mux": 0,
+    "Muy": 0,
+    "Vux": 0,
+    "Vuy": 0,
     "friction": false,
     "mu_fric": 0.4,
     "tilt_x": 0.0,
@@ -149,10 +149,12 @@
     "ks_manual": 1000.0,
     "ccx_path": "ccx",
     "gmsh_path": "gmsh",
-    "mesh3d": 0.0,
+    "mesh3d": 0.7874015748031495,
     "mesh3d_mode": "Rapida (recomendada, ~30 s)",
     "shear_arm": -1.0,
-    "vm_avg_factor": 1.0
+    "vm_avg_factor": 0.75,
+    "washer_mode": "Distribuida (reparte la carga sin rigidizar la placa)",
+    "weld_model": "Conectores (cordon como resortes entre cuerpos separados)"
    }
   }
  ],

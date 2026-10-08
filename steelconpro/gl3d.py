@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Visor 3D en tiempo real (OpenGL via Qt): rotacion fluida con orden de profundidad exacto (z-buffer por pixel).
 
-Si el equipo no ofrece OpenGL >= 2.1 (o se define PB_NO_GL=1) la aplicacion usa el visor matplotlib de siempre.
+Si el equipo no ofrece OpenGL >= 2.1 (o se define SCP_NO_GL=1) la aplicacion usa el visor matplotlib de siempre.
 Las escenas se construyen con las mismas funciones de geometria que usa la memoria de calculo (view3d)."""
 from __future__ import annotations
 import math
@@ -57,7 +57,7 @@ def available() -> bool:
     if _AVAIL is not None:
         return _AVAIL
     _AVAIL = False
-    if os.environ.get("PB_NO_GL") == "1":
+    if os.environ.get("SCP_NO_GL") == "1":
         return False
     try:
         from PySide6.QtWidgets import QApplication

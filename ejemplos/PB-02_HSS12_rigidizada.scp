@@ -1,10 +1,10 @@
 {
- "formato": "PlacaBasePro-libro",
+ "formato": "SteelConPro-libro",
  "version": 2,
  "conexiones": [
   {
-   "name": "Comparativa de referencia",
-   "element": "COMP-1",
+   "name": "Ejemplo HSS",
+   "element": "PB-02",
    "author": "",
    "date": "",
    "metric": false,
@@ -13,35 +13,35 @@
    "u_stress": "ksi",
    "u_moment": "kip·in",
    "section": {
-    "label": "W14X90",
-    "steel": "ASTM A992",
-    "rotation": 90.0,
+    "label": "HSS12X12X1/2",
+    "steel": "ASTM A500 Gr.C (HSS rect.)",
+    "rotation": 0.0,
     "double": false,
     "gap": 0.375
    },
    "plate": {
     "shape": "Rectangular",
-    "N": 19.68503937007874,
-    "B": 19.68503937007874,
+    "N": 24.0,
+    "B": 24.0,
     "Dp": 26.0,
-    "tp": 0.7874015748031495,
-    "steel": "ASTM A36",
-    "grout": 0.0
+    "tp": 2.0,
+    "steel": "ASTM A572 Gr.50",
+    "grout": 1.5
    },
    "bolts": {
-    "size": "1/2",
-    "steel": "ASTM F1554 Gr.105",
+    "size": "1-1/4",
+    "steel": "ASTM F1554 Gr.55",
     "atype": "Con cabeza (hex pesada)",
+    "force_method": "DG1 (Tu repartida por igual entre los pernos traccionados)",
     "pattern": "Perimetral (4 lados)",
     "n_major": 3,
     "n_minor": 3,
     "n_circ": 8,
-    "ex": 1.574803149606299,
-    "ey": 1.574803149606299,
-    "hef": 11.811023622047244,
+    "ex": 2.5,
+    "ey": 2.5,
+    "hef": 24.0,
     "eh": 0.0,
     "Abrg_user": 0.0,
-    "washer_d": 0.0,
     "hole_rule": "AISC Tabla 14-2 (maximo recomendado)",
     "install": "Preinstalado (vaciado en sitio)",
     "adh_env": "Interior, concreto seco (Tabla 17.6.5.2.5)",
@@ -69,7 +69,7 @@
     ]
    },
    "lug": {
-    "enabled": false,
+    "enabled": true,
     "ltype": "Placa",
     "label": "W8X31",
     "rotation": 0.0,
@@ -82,20 +82,20 @@
     "electrode": "E70XX"
    },
    "stiff": {
-    "enabled": false,
-    "position": "Alas (paralelo a Y)",
+    "enabled": true,
+    "position": "Perimetro HSS (4 caras)",
     "count": 4,
-    "L": 3.5,
+    "L": 4.0,
     "h": 8.0,
-    "t": 0.625,
+    "t": 0.75,
     "steel": "ASTM A572 Gr.50",
-    "weld_size": 0.5,
+    "weld_size": 0.75,
     "electrode": "E70XX",
-    "spacing_mode": "Automatico (repartido)",
+    "spacing_mode": "Separacion fija",
     "spacing": 6.0,
     "offset": 0.0,
     "offset_angle": 0.0,
-    "shape": "Rectangular",
+    "shape": "Triangular",
     "clip_h": 1.5,
     "clip_v": 1.5,
     "clip_root": 0.75
@@ -103,19 +103,19 @@
    "welds": {
     "flange": {
      "wtype": "Filete",
-     "size": 0.5511811023622047,
+     "size": 0.5,
      "electrode": "E70XX",
      "both_sides": true
     },
     "web": {
      "wtype": "Filete",
-     "size": 0.3543307086614173,
+     "size": 0.3125,
      "electrode": "E70XX",
      "both_sides": true
     },
     "perimeter": {
-     "wtype": "Filete",
-     "size": 0.375,
+     "wtype": "CJP (penetracion completa)",
+     "size": 0.0,
      "electrode": "E70XX",
      "both_sides": false
     },
@@ -124,20 +124,20 @@
    "conc": {
     "material": "(personalizado)",
     "fc": 4.0,
-    "N2": 40.0,
-    "B2": 40.0,
-    "ha": 23.62204724409449,
+    "N2": 48.0,
+    "B2": 48.0,
+    "ha": 48.0,
     "cracked": true,
     "lam": 1.0,
     "cond_A": false,
     "seismic": false
    },
    "loads": {
-    "Pu": -224.80894387096183,
-    "Mux": 0,
-    "Muy": 0,
-    "Vux": 0,
-    "Vuy": 0,
+    "Pu": 250,
+    "Mux": 2400,
+    "Muy": 0.0,
+    "Vux": 25,
+    "Vuy": 0.0,
     "friction": false,
     "mu_fric": 0.4,
     "tilt_x": 0.0,
@@ -149,12 +149,10 @@
     "ks_manual": 1000.0,
     "ccx_path": "ccx",
     "gmsh_path": "gmsh",
-    "mesh3d": 0.7874015748031495,
+    "mesh3d": 0.0,
     "mesh3d_mode": "Rapida (recomendada, ~30 s)",
     "shear_arm": -1.0,
-    "vm_avg_factor": 0.75,
-    "washer_mode": "Distribuida (reparte la carga sin rigidizar la placa)",
-    "weld_model": "Conectores (cordon como resortes entre cuerpos separados)"
+    "vm_avg_factor": 1.0
    }
   }
  ],

@@ -1,12 +1,12 @@
-name: Compilar PlacaBasePro (Windows)
+name: Compilar SteelConPro (Windows)
 
 # Genera el .exe portable en un equipo Windows de GitHub y lo deja como artefacto descargable
-# (Actions > esta ejecucion > Artifacts > PlacaBasePro_portable).
+# (Actions > esta ejecucion > Artifacts > SteelConPro_portable).
 on:
   workflow_dispatch:
   push:
     branches: [ "claude/**" ]
-    paths: [ "placabase/**", "placabase.spec", "requirements.txt", "run.py", "selftest.py", ".github/workflows/build-windows.yml" ]
+    paths: [ "steelconpro/**", "steelconpro.spec", "requirements.txt", "run.py", "selftest.py", ".github/workflows/build-windows.yml" ]
 
 jobs:
   build:
@@ -26,11 +26,11 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
       - name: Compilar
-        run: python -m PyInstaller --noconfirm --clean placabase.spec
+        run: python -m PyInstaller --noconfirm --clean steelconpro.spec
       - name: Solvers y comprimir
         run: |
-          python -c "import shutil; shutil.copytree('solvers', r'dist\PlacaBasePro\solvers', dirs_exist_ok=True); shutil.copy('LEEME.md', r'dist\PlacaBasePro'); shutil.make_archive('PlacaBasePro_portable', 'zip', 'dist', 'PlacaBasePro')"
+          python -c "import shutil; shutil.copytree('solvers', r'dist\SteelConPro\solvers', dirs_exist_ok=True); shutil.copy('LEEME.md', r'dist\SteelConPro'); shutil.make_archive('SteelConPro_portable', 'zip', 'dist', 'SteelConPro')"
       - uses: actions/upload-artifact@v4
         with:
-          name: PlacaBasePro_portable
-          path: PlacaBasePro_portable.zip
+          name: SteelConPro_portable
+          path: SteelConPro_portable.zip

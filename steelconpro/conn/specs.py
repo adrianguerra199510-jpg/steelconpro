@@ -8,7 +8,7 @@ que aqui no puede importarse `model` (importacion circular).
 Para agregar una tipologia:
   1. su dataclass aqui y su nombre en CONN_TYPES;
   2. un campo en `Project` (model.py) con ese dataclass;
-  3. un modulo en `placabase/conn/` con `NAME` y `solve(prj, detail) -> Results`,
+  3. un modulo en `steelconpro/conn/` con `NAME` y `solve(prj, detail) -> Results`,
      registrado en `conn/__init__.py`.
 Unidades internas: in, kip, ksi.
 """
@@ -28,7 +28,7 @@ def loads_of(combos, nvals: int, default):
     return out or [(default[0], tuple(default[1]))]
 
 
-# La primera es la placa base (el resto del programa); las demas se calculan en placabase/conn/.
+# La primera es la placa base (el resto del programa); las demas se calculan en steelconpro/conn/.
 CT_BASEPLATE = "Placa base de columna"
 CT_SHEAR_TAB = "Conexion de corte — placa simple (viga a viga / viga a columna)"
 CT_DOUBLE_ANGLE = "Conexion de corte — doble angulo (viga a viga / viga a columna)"
