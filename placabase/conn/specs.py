@@ -31,7 +31,8 @@ def loads_of(combos, nvals: int, default):
 # La primera es la placa base (el resto del programa); las demas se calculan en placabase/conn/.
 CT_BASEPLATE = "Placa base de columna"
 CT_SHEAR_TAB = "Conexion de corte — placa simple (viga a viga / viga a columna)"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB]
+CT_DOUBLE_ANGLE = "Conexion de corte — doble angulo (viga a viga / viga a columna)"
+CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE]
 
 # ---- placa simple de corte (shear tab)
 SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
@@ -79,3 +80,48 @@ class ShearTab:
     def loads(self) -> list:
         """[(nombre, (Vu,))] nunca vacia."""
         return loads_of(self.combos, 1, ("Comb 1", (25.0,)))
+
+
+# ---- doble angulo
+DA_ATTACH = ["Atornillado al soporte", "Soldado al soporte"]
+
+
+@dataclass
+class DoubleAngle:
+    """Viga apoyada con dos angulos en el alma (pernos en doble corte) y atornillados o soldados al soporte."""
+    beam: str = "W16X31"
+    beam_steel: str = "ASTM A992"
+    sup_kind: str = "Alma de viga maestra"
+    sup_label: str = "W24X55"
+    sup_steel: str = "ASTM A992"
+    # --- angulos
+    angle: str = "L4X4X3/8"
+    angle_steel: str = "ASTM A36"
+    long_on_support: bool = True     # en angulos de lados distintos: la pierna larga va contra el soporte
+    L_ang: float = 9.0               # largo (altura) de los angulos, in
+    attach: str = "Atornillado al soporte"
+    # --- pernos
+    bolt_size: str = "3/4"
+    bolt_grade: str = "A325-N"
+    n: int = 3                       # pernos por fila (alma y pierna del soporte)
+    s: float = 3.0
+    gw: float = 2.0                  # del respaldo de la pierna del soporte a la fila de pernos del alma (= a), in
+    gs: float = 2.0                  # del respaldo de la pierna del alma a la fila de pernos del soporte, in
+    # --- soldadura (angulos soldados al soporte)
+    weld_size: float = 0.25
+    electrode: str = "E70XX"
+    weld_dir: bool = True
+    weld_lines: int = 1              # lineas de soldadura por angulo: 1 = solo el borde exterior; 2 = ambos bordes verticales
+    # --- posicion respecto a la viga y cope
+    gap: float = 0.5
+    y_top: float = -1.0
+    cope_top: float = 0.0
+    cope_bot: float = 0.0
+    cope_len: float = 0.0
+    top_flush: bool = False
+    combos: list = field(default_factory=lambda: [["Comb 1", 40.0]])
+    combo_idx: int = 0
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 1, ("Comb 1", (40.0,)))
+

@@ -697,6 +697,113 @@ if "PB-02:" not in _buf2.getvalue():
     FAIL.append("lote: debe calcular el proyecto del archivo (PB-02), no uno por defecto")
 print(f"{'modo por lotes (run.py)':34} libro con 2 conexiones: CUMPLE / NO CUMPLE, codigo de salida {_rc}; ejemplo PB-02 leido del archivo")
 
+
+# ====================================================================================================
+# DOBLE ANGULO (2L4X4X3/8 x 9 in, 3 Ø3/4 A325-N por fila, s = 3, gw = a = 2, Vu = 40 kip), calculado a mano
+# ====================================================================================================
+from placabase.conn.specs import CT_DOUBLE_ANGLE, DA_ATTACH
+
+
+def _da(**mut):
+    q = Project(); q.ctype = CT_DOUBLE_ANGLE
+    for k, v in mut.items():
+        setattr(q.dang, k, v)
+    return q
+
+
+_pd = _da()
+_rd = solve(_pd)
+_kd = {c.key: c for c in _rd.checks}
+print(f"{'doble angulo (atornillado)':34} D/C max = {_rd.max_ratio:.3f}  gobierna: {_rd.governing.title[:48]}")
+
+
+def _C_ref(n, s_, e):                                    # centro instantaneo con un metodo independiente (brentq)
+    ys = _grp(n, s_)
+    def g(x):
+        ds = [math.hypot(x, y) for y in ys]; dm = max(ds)
+        R = [(1 - math.exp(-10 * 0.34 * d / dm)) ** 0.55 for d in ds]
+        return sum(r * d for r, d in zip(R, ds)) - (x + e) * sum(r * x / d for r, d in zip(R, ds))
+    x = _brentq(g, 1e-6, 1e3)
+    ds = [math.hypot(x, y) for y in ys]; dm = max(ds)
+    return sum((1 - math.exp(-10 * 0.34 * d / dm)) ** 0.55 * x / d for d in ds)
+
+
+_rn = 54.0 * math.pi * 0.75 ** 2 / 4
+_near("DA pernos del alma (doble corte)", _kd["bolt_a"].capacity, 0.75 * 2 * _rn * _C_ref(3, 3.0, 2.0), 1e-6)
+_near("DA pernos del soporte", _kd["bolt_b"].demand, 40.0 / 6, 1e-9)
+_near("DA pernos del soporte: capacidad", _kd["bolt_b"].capacity, 0.75 * _rn, 1e-9)                        # 17.89 kip
+_near("DA angulo: fluencia", _kd["ang_vy"].capacity, 0.6 * 36 * 0.375 * 9.0, 1e-9)                         # 72.9 kip
+_near("DA angulo: fluencia, demanda por angulo", _kd["ang_vy"].demand, 20.0, 1e-9)
+_near("DA angulo: rotura", _kd["ang_vr_w"].capacity, 0.75 * 0.6 * 58 * 0.375 * (9 - 3 * 0.875), 1e-9)     # 62.4 kip
+_Lg, _Lt = 1.5 + 6.0, 2.0 - 0.4375
+_near("DA angulo: bloque de cortante", _kd["ang_bs_w"].capacity, 0.75 * min(
+    0.6 * 58 * 0.375 * (_Lg - 2.5 * 0.875) + 58 * 0.375 * _Lt, 0.6 * 36 * 0.375 * _Lg + 58 * 0.375 * _Lt), 1e-9)
+if not _rd.ok or _rd.pending:
+    FAIL.append(f"DA: el caso base debe cumplir (D/C = {_rd.max_ratio:.3f})")
+# soldado: lineas verticales con e = a
+_rw = solve(_da(attach=DA_ATTACH[1], weld_lines=2))
+_kw = {c.key: c for c in _rw.checks}
+_fv, _fh = 40 / (4 * 9.0), 6 * 40 * 2.0 / (4 * 81.0)
+_th = math.atan2(_fh, _fv)
+_near("DA soldado: demanda", _kw["weld"].demand, math.hypot(_fv, _fh), 1e-9)
+_near("DA soldado: capacidad", _kw["weld"].capacity, 0.75 * 0.6 * 70 * (1 + 0.5 * math.sin(_th) ** 1.5) * 0.707 * 0.25, 1e-9)
+if "bolt_b" in _kw:
+    FAIL.append("DA soldado: no debe haber pernos del soporte")
+# mas largo -> menos D/C de los angulos; cope agrega verificaciones; alcance
+if not solve(_da(L_ang=12.0)).checks[0] or not {c.key: c for c in solve(_da(L_ang=12.0)).checks}["ang_vy"].ratio < _kd["ang_vy"].ratio:
+    FAIL.append("DA: angulos mas largos deben bajar el D/C de cortante")
+_rc2 = solve(_da(cope_top=2.0, cope_len=4.5))
+if not {"web_bs", "cope_flex", "cope_lwb", "geo_lev_b"} <= {c.key for c in _rc2.checks} or not any("NO EVALUADO" in w for w in _rc2.warnings):
+    FAIL.append("DA cope: faltan verificaciones o el aviso de pandeo local")
+for _nm, _mut, _txt in (("1 perno", dict(n=1), "2 a 12"), ("angulo corto", dict(L_ang=5.0), "no alcanza"),
+                        ("angulo inexistente", dict(angle="L9X9X9"), "no encontrado")):
+    _rr = solve(_da(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"DA alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'  doble angulo soldado / cope':34} soldadura {_kw['weld'].ratio:.3f}; con cope D/C = {_rc2.max_ratio:.3f}; avisos de alcance OK")
+
+
+# ====================================================================================================
+# FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
+# no debe haber excepciones ni valores no finitos, y cualquier geometria imposible debe dar aviso critico
+# ====================================================================================================
+import random as _rnd, dataclasses as _dc, copy as _cp
+from placabase import conn as _connpkg
+_rnd.seed(20261008)
+for _ct, _mod in _connpkg.modules():
+    _bad, _nfat, _nok = [], 0, 0
+    for _k in range(400):
+        _q = Project(); _q.ctype = _ct
+        _sp = getattr(_q, _mod.ATTR)
+        for _f in _dc.fields(_sp):
+            _v = getattr(_sp, _f.name)
+            if isinstance(_v, bool):
+                if _rnd.random() < 0.3:
+                    setattr(_sp, _f.name, not _v)
+            elif isinstance(_v, int) and _f.name != "combo_idx":
+                setattr(_sp, _f.name, _rnd.choice([0, 1, 2, 3, 4, 6, 8, 12, 14]))
+            elif isinstance(_v, float):
+                setattr(_sp, _f.name, _rnd.choice([0.0, 0.0625, 0.25, 1.0, 2.5, 3.0, 6.0, 12.0, _v * 0.5, _v * 2.0, _v, _v]))
+        _sp.combos = [[f"c{i}"] + [_rnd.choice([0.0, 5.0, 25.0, 80.0, 400.0]) for _ in _mod.LOADS] for i in range(_rnd.randint(1, 3))]
+        try:
+            _r = solve(_q)
+            for _c in _r.checks:
+                for _x in (_c.demand, _c.capacity, _c.ratio):
+                    if not math.isfinite(_x):
+                        _bad.append(f"no finito: {_c.key}")
+                        break
+            _r.rec.to_lines()
+            _nfat += any(w.startswith("**") for w in _r.warnings)
+            _nok += bool(_r.ok)
+            if _k % 40 == 0:
+                from placabase.conn.base import new_figure as _nf
+                _fg = _nf(8, 9.5, 60); _mod.draw(_fg, _q)
+        except Exception as _e:
+            _bad.append(f"{type(_e).__name__}: {_e}")
+    if _bad:
+        FAIL.append(f"fuzz {_mod.NAME[:40]}: {len(_bad)} fallas, p. ej. {_bad[0]}")
+    print(f"{'fuzz ' + _mod.PREFIX:34} 400 casos aleatorios sin excepciones; con aviso critico {_nfat}, cumplen {_nok}")
+
 # ---- archivos: ida y vuelta de un libro con las dos tipologias, y compatibilidad con los ejemplos viejos
 _f = _os.path.join(_tf.mkdtemp(prefix="pbconn_"), "libro.pbase")
 _bp = Project(); _bp.element = "PB-X"

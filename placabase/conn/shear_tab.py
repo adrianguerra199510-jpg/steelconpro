@@ -23,6 +23,7 @@ from ..design import Check
 from ..explain import Recorder
 from ..shapes import CATALOG, W_SHAPE
 from .base import run_combos, add_check
+from . import beamend
 from .formspec import G, N, num, intf, combo, check
 from .common import (PHI_BOLT, PHI_RUPT, PHI_YIELD, PHI_FLEX, FNV, bolt_db, hole_std, hole_net, edge_min,
                      bolt_shear_rn, bearing_rn, block_shear_rn, ic_vertical_line, weld_pair_vertical,
@@ -40,19 +41,8 @@ def geometry(st):
     db = bolt_db(st.bolt_size)
     n = max(int(st.n), 1)
     Lb = (n - 1) * st.s
-    ct, cb = max(st.cope_top, 0.0), max(st.cope_bot, 0.0)
-    g = dict(beam=beam, sup=sup, db=db, dh=hole_std(db), dhn=hole_net(db), n=n, Lb=Lb,
-             Lp=Lb + 2 * st.lev_p, ct=ct, cb=cb, coped=(ct > 0 or cb > 0))
-    if beam is None:
-        return g
-    web_lo, web_hi = ct, beam.d - cb                       # tramo de alma que queda
-    g["h0"] = beam.d - ct - cb
-    g["y_top"] = st.y_top if st.y_top >= 0 else 0.5 * (web_lo + web_hi) - 0.5 * Lb
-    g["lev_t"] = g["y_top"] - web_lo                        # del borde superior del alma al perno superior
-    g["lev_b"] = web_hi - (g["y_top"] + Lb)                 # del perno inferior al borde inferior del alma
-    g["leh_b"] = st.a - st.gap                              # del extremo de la viga a la fila de pernos
-    g["x_cope"] = st.gap + max(st.cope_len, 0.0)            # desde la cara del soporte hasta el fin del cope
-    g["e_cope"] = max(0.0, g["x_cope"] - st.a)              # brazo del momento en la seccion del cope
+    g = dict(beam=beam, sup=sup, db=db, dh=hole_std(db), dhn=hole_net(db), n=n, Lb=Lb, Lp=Lb + 2 * st.lev_p)
+    g.update(beamend.geometry(beam, n, st.s, st.a, st.gap, st.y_top, st.cope_top, st.cope_bot, st.cope_len))
     return g
 
 
@@ -98,17 +88,7 @@ def check_input(st) -> list:
     if st.weld_size < 0.625 * st.tp - 1e-9:
         w.append(f"Filete de {st.weld_size:g} in < 5/8·tp ({0.625 * st.tp:.3f} in): la practica del Manual para que "
                  "la soldadura no gobierne antes que la placa (ductilidad). Se verifica por resistencia igualmente.")
-    if g["coped"]:
-        w.append("NO EVALUADO: pandeo local del alma de la viga por cope (Manual Parte 9). Verifiquelo aparte; "
-                 "la 15a Ed. cambio el procedimiento (Dowswell, EJ 2018).")
-        if st.top_flush and sup is not None and st.sup_kind == SUP_KINDS[0]:
-            c_req = max(0.0, (sup.bf - sup.tw) / 2 + 0.5 - st.gap)
-            d_req = max(beam.tf, sup.tf) + 0.5
-            if st.cope_len < c_req - 1e-9 or st.cope_top < d_req - 1e-9:
-                w.append(f"Cope menor que el recomendado para librar el ala de la viga maestra a ras: "
-                         f"longitud >= {c_req:.2f} in y profundidad >= {d_req:.2f} in (holgura de 1/2 in supuesta).")
-    elif st.top_flush and st.sup_kind == SUP_KINDS[0]:
-        w.append("Tope a ras con la viga maestra pero sin cope: el ala de la viga apoyada choca con el ala del soporte.")
+    w += beamend.cope_warnings(st.gap, st.cope_len, st.top_flush, g, beam, sup, st.sup_kind == SUP_KINDS[0])
     if beam.tw > 0 and beam.d > 0:
         hw = (beam.d - 2 * beam.kdes) / beam.tw if beam.kdes else beam.d / beam.tw
         Fy = M.find(M.SHAPE_STEELS, st.beam_steel).Fy
@@ -244,7 +224,7 @@ def solve_one(prj, name: str, vals, rec: Recorder | None):
     Z = tp * Lp ** 2 / 4.0
     phiMp = PHI_FLEX * pl.Fy * Z
     phiVp = PHI_YIELD * 0.6 * pl.Fy * Agv
-    ratio_vm = Mu / phiMp + (Vu / phiVp) ** 2
+    ratio_vm = Mu / max(phiMp, 1e-9) + (Vu / max(phiVp, 1e-9)) ** 2
     if rec:
         rec.add("Mu", "Vu·a  (en la soldadura)", f"{rec.n('F', Vu)}·{rec.n('L', a)}", Mu, "M", "Manual Parte 10")
         rec.add("φMp", "0.90·Fy·Z", f"0.9·{rec.n('S', pl.Fy)}·{Z / u.fl ** 3:.4g} {u.L}³", phiMp, "M", "AISC F11")
@@ -275,32 +255,7 @@ def solve_one(prj, name: str, vals, rec: Recorder | None):
     _chk(ck, rec, "weld_max", "Tamano maximo del filete en el borde de la placa", st.weld_size, M.max_fillet(tp), "in", "AISC J2.2b")
 
     # ----------------------------------------------------------- viga apoyada
-    h0 = g["h0"]
-    Rwy = PHI_YIELD * 0.6 * bm.Fy * tw * h0
-    Rwr = PHI_RUPT * 0.6 * bm.Fu * tw * (h0 - n * dhn)
-    if rec:
-        rec.section("VIGA APOYADA" + (" — CON COPE" if g["coped"] else ""))
-        rec.add("φRn,fl", "1.00·0.6·Fy·tw·h0", f"0.6·{rec.n('S', bm.Fy)}·{rec.n('L', tw)}·{rec.n('L', h0)}", Rwy, "F", "AISC J4.2(a) / G2.1")
-        rec.add("φRn,rot", "0.75·0.6·Fu·tw·(h0 − n·dh')", f"0.6·{rec.n('S', bm.Fu)}·{rec.n('L', tw)}·({rec.n('L', h0)} − {n}·{rec.n('L', dhn)})",
-                Rwr, "F", "AISC J4.2(b)")
-    _chk(ck, rec, "web_vy", "Alma de la viga — fluencia por cortante" + (" (en el cope)" if g["coped"] else ""),
-         Vu, Rwy, "kip", "AISC J4.2(a) / G2.1")
-    _chk(ck, rec, "web_vr", "Alma de la viga — rotura por cortante neto", Vu, Rwr, "kip", "AISC J4.2(b)")
-    if g["ct"] > 0:
-        Lgv_b = g["lev_t"] + (n - 1) * st.s
-        Lnv_b = Lgv_b - (n - 0.5) * dhn
-        Lnt_b = g["leh_b"] - 0.5 * dhn
-        Rbs_b = PHI_RUPT * block_shear_rn(bm.Fy, bm.Fu, tw, Lgv_b, Lnv_b, Lnt_b)
-        _chk(ck, rec, "web_bs", "Alma de la viga — bloque de cortante (cope superior)", Vu, Rbs_b, "kip", "AISC J4.3",
-             f"Lgv = {u.q('L', Lgv_b)}, Lnv = {u.q('L', Lnv_b)}, Lnt = {u.q('L', Lnt_b)}, Ubs = 1.0 (una fila)")
-    if g["coped"]:
-        cs = coped_section(beam, g["ct"], g["cb"])
-        Mc = Vu * g["e_cope"]
-        phiMc = PHI_FLEX * bm.Fy * cs["S"]
-        _chk(ck, rec, "cope_flex", "Seccion con cope — fluencia por flexion", Mc, phiMc, "kip·in", "AISC F / Manual Parte 9",
-             f"Mu = Vu·e = {u.q('M', Mc)};  Snet = {cs['S'] / u.fl ** 3:.4g} {u.L}³")
-        ck.append(Check("cope_lwb", "Pandeo local del alma por cope — NO EVALUADO", 0.0, 1.0, "-",
-                        "Manual 15a Ed., Parte 9", "No implementado: verifiquelo aparte.", skip=True))
+    beamend.web_checks(ck, rec, u, g, beam, bm, Vu, n, st.s, dhn)
     return ck
 
 

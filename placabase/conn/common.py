@@ -184,3 +184,169 @@ def net_flexure_plate(t: float, L: float, ys, dh_net: float):
     ordenadas `ys` (respecto al centro de la placa): S_net = I_net / (L/2)."""
     I = t * L ** 3 / 12.0 - sum(t * dh_net * y * y + t * dh_net ** 3 / 12.0 for y in ys)
     return I / (L / 2.0), I
+
+
+# ====================================================================== mas utilitarios
+FNT = {"A325-N": 90.0, "A325-X": 90.0, "A490-N": 113.0, "A490-X": 113.0, "A307": 45.0}   # Tabla J3.2, ksi
+E_STEEL = 29000.0
+
+
+def bolt_tension_rn(db: float, grade: str) -> float:
+    """Resistencia nominal a traccion de un perno, Rn = Fnt·Ab (kip), J3.6."""
+    return FNT[grade] * math.pi * db ** 2 / 4.0
+
+
+def bolt_tension_shear(db: float, grade: str, frv: float):
+    """Interaccion traccion-cortante, AISC J3.7 (LRFD): F'nt = 1.3·Fnt − Fnt/(φ·Fnv)·frv ≤ Fnt.
+    Devuelve la resistencia a traccion disponible por perno, φ·F'nt·Ab (kip), con frv el esfuerzo cortante requerido (ksi)."""
+    Ab = math.pi * db ** 2 / 4.0
+    fnt = min(FNT[grade], 1.3 * FNT[grade] - FNT[grade] / (PHI_BOLT * FNV[grade]) * max(frv, 0.0))
+    return PHI_BOLT * max(fnt, 0.0) * Ab
+
+
+def long_joint_factor(L_joint: float) -> float:
+    """Tabla J3.2, nota: conexiones con pernos cargados en los extremos y L > 38 in: Fnv se reduce a 0.833."""
+    return 0.833 if L_joint > 38.0 else 1.0
+
+
+def prying_available(Bc, b, a, p, t, Fu, db, dh):
+    """Traccion disponible por perno de una T equivalente con efecto palanca (AISC Manual, Parte 9, LRFD).
+        b' = b − db/2 ;  a' = min(a, 1.25·b) + db/2 ;  ρ = b'/a' ;  δ = 1 − dh/p
+        tc = √(4.44·Bc·b' / (p·Fu))            (espesor sin palanca)
+        α' = [(tc/t)² − 1] / (δ·ρ)  acotado a [0, 1] ;   Ta = Bc·(t/tc)²·(1 + δ·α')   si t < tc, y Bc si t ≥ tc
+    Bc = φ·Rn del perno a traccion; p = ancho tributario por perno; Fu del ala de la T (la placa).
+    Devuelve (Ta, alpha, tc)."""
+    bp = b - db / 2.0
+    ap = min(a, 1.25 * b) + db / 2.0
+    rho = bp / ap if ap > 0 else 1.0
+    delta = 1.0 - dh / p if p > dh else 0.05
+    tc = math.sqrt(4.44 * Bc * max(bp, 1e-9) / (p * Fu))
+    if t >= tc:
+        return Bc, 0.0, tc
+    alpha = max(0.0, min(1.0, ((tc / t) ** 2 - 1.0) / (delta * rho)))
+    return Bc * (t / tc) ** 2 * (1.0 + delta * alpha), alpha, tc
+
+
+def column_fcr(Fy: float, KL_r: float) -> float:
+    """Esfuerzo critico de pandeo por flexion, AISC E3 (E3-2, E3-3)."""
+    if KL_r <= 0:
+        return Fy
+    Fe = math.pi ** 2 * E_STEEL / KL_r ** 2
+    if KL_r <= 4.71 * math.sqrt(E_STEEL / Fy):
+        return (0.658 ** (Fy / Fe)) * Fy
+    return 0.877 * Fe
+
+
+# ---- fuerzas concentradas sobre alas y almas, AISC 360 J10
+def web_local_yielding(Fyw, tw, k, N, at_end=False):
+    """J10.2 (φ = 1.00): Rn = Fyw·tw·(5k + N)  (2.5k + N si la carga esta a menos de d del extremo)."""
+    return Fyw * tw * ((2.5 if at_end else 5.0) * k + N)
+
+
+def web_crippling(Fyw, tw, tf, d, N, at_end=False):
+    """J10.3 (φ = 0.75), perfiles I (Qf = 1): interior J10-4; extremo J10-5a/b."""
+    r = math.sqrt(E_STEEL * Fyw * tf / tw)
+    ratio = (tw / tf) ** 1.5
+    if not at_end:
+        return 0.80 * tw ** 2 * (1.0 + 3.0 * (N / d) * ratio) * r
+    if N / d <= 0.2:
+        return 0.40 * tw ** 2 * (1.0 + 3.0 * (N / d) * ratio) * r
+    return 0.40 * tw ** 2 * (1.0 + (4.0 * N / d - 0.2) * ratio) * r
+
+
+def flange_local_bending(Fyf, tf):
+    """J10.1 (φ = 0.90): Rn = 6.25·tf²·Fyf."""
+    return 6.25 * tf ** 2 * Fyf
+
+
+def panel_zone_shear(Fy, dc, tw):
+    """J10.6(a) (φ = 0.90), Pr ≤ 0.4·Pc: Rn = 0.60·Fy·dc·tw."""
+    return 0.60 * Fy * dc * tw
+
+
+# ---- grupo de pernos, metodo elastico (cualquier disposicion)
+def elastic_bolt_group(pts, Vx: float, Vy: float, M: float = 0.0):
+    """Fuerza de cada perno de un grupo cualquiera: reparto directo + torsion respecto al centroide.
+    `pts` = [(x, y)] ; (Vx, Vy) = cortante resultante en el centroide ; M = momento torsor sobre el grupo (kip·in).
+    Devuelve [(fx, fy)] por perno.  Metodo elastico: conservador respecto al centro instantaneo."""
+    n = len(pts)
+    xc = sum(p[0] for p in pts) / n
+    yc = sum(p[1] for p in pts) / n
+    J = sum((x - xc) ** 2 + (y - yc) ** 2 for x, y in pts)
+    out = []
+    for x, y in pts:
+        fx, fy = Vx / n, Vy / n
+        if J > 0:
+            fx += -M * (y - yc) / J
+            fy += M * (x - xc) / J
+        out.append((fx, fy))
+    return out
+
+
+# ---- soldadura: lineas verticales paralelas y segmentos cualesquiera
+def weld_lines_vertical(V: float, e: float, L: float, w: float, FEXX: float, nlines: int = 2, directional: bool = True):
+    """`nlines` lineas verticales coincidentes (en planta) de largo L con cortante V a la excentricidad e.
+    fv = V/(n·L) ;  fh = 6·V·e/(n·L²)  (n = 2 reproduce weld_pair_vertical).  Devuelve (f, cap, theta, fv, fh)."""
+    fv = V / (nlines * L)
+    fh = 6.0 * V * e / (nlines * L * L)
+    f = math.hypot(fv, fh)
+    th = math.degrees(math.atan2(fh, fv)) if f > 0 else 0.0
+    kd = (1.0 + 0.5 * math.sin(math.radians(th)) ** 1.5) if directional else 1.0
+    return f, PHI_WELD * 0.60 * FEXX * kd * 0.707 * w, th, fv, fh
+
+
+def weld_segments_elastic(segs, Fx: float, Fy: float, xa: float, ya: float, w: float, FEXX: float,
+                          directional: bool = True, ds: float = 0.25):
+    """Grupo de soldadura plano formado por segmentos rectos [(x1, y1, x2, y2)], cargado en su plano con la fuerza
+    (Fx, Fy) aplicada en (xa, ya).  Metodo elastico: f = (F/L) + torsion respecto al centroide (M/Ip)·r.
+    En cada punto la capacidad por unidad de longitud usa el angulo θ entre el esfuerzo y el eje del segmento
+    (J2-5).  Devuelve dict con el punto critico: ratio, f, cap, theta, L total."""
+    pts = []                                  # (x, y, dL, tx, ty)
+    for x1, y1, x2, y2 in segs:
+        Ls = math.hypot(x2 - x1, y2 - y1)
+        if Ls <= 0:
+            continue
+        m = max(1, int(math.ceil(Ls / ds)))
+        tx, ty = (x2 - x1) / Ls, (y2 - y1) / Ls
+        for i in range(m):
+            u = (i + 0.5) / m
+            pts.append((x1 + u * (x2 - x1), y1 + u * (y2 - y1), Ls / m, tx, ty))
+    L = sum(q[2] for q in pts)
+    xc = sum(q[0] * q[2] for q in pts) / L
+    yc = sum(q[1] * q[2] for q in pts) / L
+    Ip = sum(q[2] * ((q[0] - xc) ** 2 + (q[1] - yc) ** 2) for q in pts)
+    M = (xa - xc) * Fy - (ya - yc) * Fx
+    best = dict(ratio=0.0, f=0.0, cap=0.0, theta=0.0, L=L)
+    ends = []                                  # los extremos de cada segmento tambien se evaluan (alli esta el pico)
+    for x1, y1, x2, y2 in segs:
+        Ls = math.hypot(x2 - x1, y2 - y1)
+        if Ls > 0:
+            ends += [(x1, y1, 0.0, (x2 - x1) / Ls, (y2 - y1) / Ls), (x2, y2, 0.0, (x2 - x1) / Ls, (y2 - y1) / Ls)]
+    for x, y, dL, tx, ty in pts + ends:
+        fx = Fx / L - (M * (y - yc) / Ip if Ip > 0 else 0.0)
+        fy = Fy / L + (M * (x - xc) / Ip if Ip > 0 else 0.0)
+        f = math.hypot(fx, fy)
+        if f <= 0:
+            continue
+        cos_t = abs(fx * tx + fy * ty) / f
+        th = math.degrees(math.acos(min(1.0, cos_t)))          # 0 = a lo largo de la soldadura
+        kd = (1.0 + 0.5 * math.sin(math.radians(th)) ** 1.5) if directional else 1.0
+        cap = PHI_WELD * 0.60 * FEXX * kd * 0.707 * w
+        if f / cap > best["ratio"]:
+            best.update(ratio=f / cap, f=f, cap=cap, theta=th)
+    return best
+
+
+def bearing_group(Fx, Fy, db, t, Fu, Lc_v, Lc_h, phi=PHI_BOLT):
+    """Aplastamiento por perno: la componente vertical y la horizontal se combinan en elipse.
+    `Fx`, `Fy`: fuerza de cada perno sobre la pieza; `Lc_v(i)`: distancia libre en la direccion en que empuja el perno i
+    (vertical); `Lc_h`: {i: distancia libre} de los pernos cuya componente horizontal empuja hacia un borde libre
+    (el resto empuja hacia material continuo).  Devuelve (peor D/C, indice, fuerza del perno critico)."""
+    worst, wi = 0.0, 0
+    for i in range(len(Fx)):
+        rv = phi * bearing_rn(db, t, Fu, Lc_v(i))
+        rh = phi * bearing_rn(db, t, Fu, Lc_h.get(i, 1e9))
+        r = math.hypot(abs(Fy[i]) / rv, abs(Fx[i]) / rh) if rv > 0 and rh > 0 else 99.0
+        if r > worst:
+            worst, wi = r, i
+    return worst, wi, math.hypot(Fx[wi], Fy[wi])
