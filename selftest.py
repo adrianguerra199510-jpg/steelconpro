@@ -764,6 +764,57 @@ print(f"{'  doble angulo soldado / cope':34} soldadura {_kw['weld'].ratio:.3f}; 
 
 
 # ====================================================================================================
+# ASIENTO (L6X6X3/4 x 8 in, W16X31 sobre ala de W14X90, N = 3.5, retranqueo 3/4, R = 25 kip), calculado a mano
+# ====================================================================================================
+from placabase.conn.specs import CT_SEATED, SEAT_TYPES, SEAT_ATTACH
+
+
+def _se(**mut):
+    q = Project(); q.ctype = CT_SEATED
+    for k, v in mut.items():
+        setattr(q.seat, k, v)
+    return q
+
+
+_rs = solve(_se())
+_ks = {c.key: c for c in _rs.checks}
+_bw = CATALOG.get("W16X31"); _an = CATALOG.get("L6X6X3/4")
+print(f"{'asiento sin rigidizar':34} D/C max = {_rs.max_ratio:.3f}  gobierna: {_rs.governing.title[:48]}")
+_near("asiento: fluencia del alma", _ks["web_yield"].capacity, 50.0 * _bw.tw * (2.5 * _bw.kdes + 3.5), 1e-9)
+_Nd = 3.5 / _bw.d                                                             # 0.2201 > 0.2: ecuacion J10-5b
+_cr = 0.75 * 0.40 * _bw.tw ** 2 * (1 + (4 * _Nd - 0.2) * (_bw.tw / _bw.tf) ** 1.5) * math.sqrt(29000 * 50 * _bw.tf / _bw.tw)
+_near("asiento: aplastamiento del alma (J10-5b)", _ks["web_crip"].capacity, _cr, 1e-9)
+_eR = 0.75 + 3.5 / 2
+_near("asiento: momento en el pie del filete", _ks["seat_flex"].demand, 25.0 * (_eR - _an.kdes), 1e-9)
+_near("asiento: φMp de la pierna horizontal", _ks["seat_flex"].capacity, 0.9 * 36 * 8.0 * 0.75 ** 2 / 4, 1e-9)
+_ys = [1.25, 4.25]
+_Tm = 25.0 * _eR * max(_ys) / sum(2 * y * y for y in _ys)
+_near("asiento: traccion del perno superior", _ks["bolt_t"].demand, _Tm, 1e-9)
+_frv = (25.0 / 4) / (math.pi * 0.75 ** 2 / 4)
+_near("asiento: φF'nt·Ab (J3.7)", _ks["bolt_t"].capacity, 0.75 * (1.3 * 90 - 90 / (0.75 * 54) * _frv) * math.pi * 0.75 ** 2 / 4, 1e-9)
+if not _rs.ok:
+    FAIL.append(f"asiento: el caso base debe cumplir (D/C = {_rs.max_ratio:.3f}: {_rs.governing.title})")
+_r2s = solve(_se(angle="L6X6X3/8"))
+if _r2s.ok or {c.key: c for c in _r2s.checks}["seat_flex"].ratio <= _ks["seat_flex"].ratio:
+    FAIL.append("asiento: un angulo mas delgado debe fallar a flexion")
+# soldado en C y rigidizado
+_rsw = solve(_se(attach=SEAT_ATTACH[1]))
+_ksw = {c.key: c for c in _rsw.checks}
+if "weld" not in _ksw or "bolt_t" in _ksw or _ksw["weld"].ratio <= 0:
+    FAIL.append("asiento soldado: debe verificar la soldadura en C y no los pernos")
+_rst = solve(_se(seat_type=SEAT_TYPES[1]))
+_kst = {c.key: c for c in _rst.checks}
+_near("rigidizador: φMp", _kst["st_flex"].capacity, 0.9 * 36 * 0.625 * 8.0 ** 2 / 4, 1e-9)
+_near("rigidizador: momento", _kst["st_flex"].demand, 25.0 * _eR, 1e-9)
+_fv, _fh = 25.0 / (2 * 8.0), 6 * 25.0 * _eR / (2 * 64.0)
+_near("rigidizador: soldadura (demanda)", _kst["weld"].demand, math.hypot(_fv, _fh), 1e-9)
+for _nm, _mut, _txt in (("N no cabe", dict(N=8.0), "no cabe"), ("perfil inexistente", dict(beam="W99X999"), "perfil I")):
+    _rr = solve(_se(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"asiento alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'  asiento soldado / rigidizado':34} soldadura C {_ksw['weld'].ratio:.3f}; rigidizado D/C = {_rst.max_ratio:.3f}; avisos de alcance OK")
+
+# ====================================================================================================
 # FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
 # no debe haber excepciones ni valores no finitos, y cualquier geometria imposible debe dar aviso critico
 # ====================================================================================================

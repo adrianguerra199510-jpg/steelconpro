@@ -350,3 +350,44 @@ def bearing_group(Fx, Fy, db, t, Fu, Lc_v, Lc_h, phi=PHI_BOLT):
         if r > worst:
             worst, wi = r, i
     return worst, wi, math.hypot(Fx[wi], Fy[wi])
+
+
+def weld_segments_oop(segs, Fy: float, Mx: float, w: float, FEXX: float, directional: bool = True, ds: float = 0.25):
+    """Grupo de soldadura plano de segmentos [(z1, y1, z2, y2)] (coordenadas en el plano del soporte, y vertical) con
+    cortante vertical `Fy` en su plano y momento `Mx` FUERA del plano (eje horizontal z).  Metodo elastico:
+        fv = Fy/L  (vertical, en el plano) ;   fn = Mx·(y − yc)/Ix  (normal al plano, perpendicular al eje de toda linea)
+    El angulo θ de la resultante con el eje del segmento sale de la componente a lo largo del eje (fv·|ty|) y de la
+    perpendicular (hipot(fv·|tz|, fn)).  Devuelve dict del punto critico: ratio, f, cap, theta, L."""
+    pts = []
+    for z1, y1, z2, y2 in segs:
+        Ls = math.hypot(z2 - z1, y2 - y1)
+        if Ls <= 0:
+            continue
+        m = max(1, int(math.ceil(Ls / ds)))
+        tz, ty = (z2 - z1) / Ls, (y2 - y1) / Ls
+        for i in range(m):
+            u = (i + 0.5) / m
+            pts.append((y1 + u * (y2 - y1), Ls / m, tz, ty))
+    L = sum(q[1] for q in pts)
+    yc = sum(q[0] * q[1] for q in pts) / L
+    Ix = sum(q[1] * (q[0] - yc) ** 2 for q in pts)
+    ends = []
+    for z1, y1, z2, y2 in segs:
+        Ls = math.hypot(z2 - z1, y2 - y1)
+        if Ls > 0:
+            ends += [(y1, 0.0, (z2 - z1) / Ls, (y2 - y1) / Ls), (y2, 0.0, (z2 - z1) / Ls, (y2 - y1) / Ls)]
+    best = dict(ratio=0.0, f=0.0, cap=0.0, theta=0.0, L=L, Ix=Ix)
+    fv = abs(Fy) / L
+    for y, dL, tz, ty in pts + ends:
+        fn = abs(Mx * (y - yc) / Ix) if Ix > 0 else 0.0
+        along = fv * abs(ty)
+        perp = math.hypot(fv * abs(tz), fn)
+        f = math.hypot(along, perp)
+        if f <= 0:
+            continue
+        th = math.degrees(math.atan2(perp, along))
+        kd = (1.0 + 0.5 * math.sin(math.radians(th)) ** 1.5) if directional else 1.0
+        cap = PHI_WELD * 0.60 * FEXX * kd * 0.707 * w
+        if f / cap > best["ratio"]:
+            best.update(ratio=f / cap, f=f, cap=cap, theta=th)
+    return best

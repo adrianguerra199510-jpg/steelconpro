@@ -6,7 +6,7 @@ import json
 
 from . import materials as M
 from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
-from .conn.specs import CONN_TYPES, CT_BASEPLATE, ShearTab, DoubleAngle
+from .conn.specs import CONN_TYPES, CT_BASEPLATE, ShearTab, DoubleAngle, Seated
 import dataclasses
 
 # --------------------------------------------------------------- catalogos
@@ -420,6 +420,7 @@ class Project:
     ctype: str = CT_BASEPLATE
     stab: ShearTab = field(default_factory=ShearTab)
     dang: DoubleAngle = field(default_factory=DoubleAngle)
+    seat: Seated = field(default_factory=Seated)
 
     section: Section = field(default_factory=Section)
     plate: Plate = field(default_factory=Plate)
@@ -566,13 +567,14 @@ def _used_extras(projects):
     shapes, mats = {}, {"steel": {}, "anchor": {}, "concrete": {}}
     for p in projects:
         for lab in (p.section.label, p.lug.label, p.stab.beam, p.stab.sup_label, p.dang.beam, p.dang.sup_label,
-                    p.dang.angle):
+                    p.dang.angle, p.seat.beam, p.seat.sup_label, p.seat.angle):
             s = CATALOG.get(lab)
             if s and s.source not in ("AISC", "integrado"):
                 shapes[s.label] = asdict(s)
         for name in (p.section.steel, p.plate.steel, p.lug.steel, p.stiff.steel,
                      p.stab.beam_steel, p.stab.sup_steel, p.stab.plate_steel,
-                     p.dang.beam_steel, p.dang.sup_steel, p.dang.angle_steel):
+                     p.dang.beam_steel, p.dang.sup_steel, p.dang.angle_steel,
+                     p.seat.beam_steel, p.seat.sup_steel, p.seat.angle_steel, p.seat.st_steel):
             m = next((x for x in M.PLATE_STEELS + M.SHAPE_STEELS if x.name == name), None)
             if m and m.note in ("usuario", "proyecto"):
                 mats["steel"][name] = {"name": m.name, "Fy": m.Fy, "Fu": m.Fu}

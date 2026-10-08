@@ -32,7 +32,8 @@ def loads_of(combos, nvals: int, default):
 CT_BASEPLATE = "Placa base de columna"
 CT_SHEAR_TAB = "Conexion de corte — placa simple (viga a viga / viga a columna)"
 CT_DOUBLE_ANGLE = "Conexion de corte — doble angulo (viga a viga / viga a columna)"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE]
+CT_SEATED = "Conexion de asiento (seated) — angulo o rigidizado"
+CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED]
 
 # ---- placa simple de corte (shear tab)
 SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
@@ -124,4 +125,50 @@ class DoubleAngle:
 
     def loads(self) -> list:
         return loads_of(self.combos, 1, ("Comb 1", (40.0,)))
+
+
+# ---- asiento
+SEAT_TYPES = ["Sin rigidizar (angulo de asiento)", "Rigidizado (placa de asiento y rigidizador)"]
+SEAT_ATTACH = ["Atornillado al soporte", "Soldado al soporte"]
+
+
+@dataclass
+class Seated:
+    """Viga apoyada sobre un asiento: angulo sin rigidizar o rigidizador de placa, con angulo superior de estabilidad."""
+    beam: str = "W16X31"
+    beam_steel: str = "ASTM A992"
+    sup_kind: str = "Ala de columna"
+    sup_label: str = "W14X90"
+    sup_steel: str = "ASTM A992"
+    seat_type: str = "Sin rigidizar (angulo de asiento)"
+    # --- comunes
+    L_seat: float = 8.0              # ancho del asiento (a lo largo del soporte), in
+    setback: float = 0.75            # del soporte al extremo de la viga, in
+    N: float = 3.5                   # longitud de apoyo de la viga sobre el asiento, in
+    # --- asiento sin rigidizar
+    angle: str = "L6X6X3/4"
+    angle_steel: str = "ASTM A36"
+    long_horizontal: bool = True     # la pierna larga es la horizontal (la que recibe la viga)
+    attach: str = "Atornillado al soporte"
+    bolt_size: str = "3/4"
+    bolt_grade: str = "A325-N"
+    n: int = 2                       # filas de pernos en la pierna vertical (dos columnas por fila)
+    s: float = 3.0
+    yb: float = 1.25                 # del fondo del asiento a la fila inferior de pernos, in
+    gs: float = 4.0                  # separacion entre las dos columnas de pernos, in
+    weld_size: float = 0.3125
+    electrode: str = "E70XX"
+    weld_dir: bool = True
+    # --- asiento rigidizado
+    st_W: float = 5.0                # ancho (proyeccion) del rigidizador, in
+    st_H: float = 8.0                # alto del rigidizador, in
+    st_t: float = 0.625
+    st_steel: str = "ASTM A36"
+    st_weld: float = 0.3125
+    # --- reaccion factorizada
+    combos: list = field(default_factory=lambda: [["Comb 1", 25.0]])
+    combo_idx: int = 0
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 1, ("Comb 1", (25.0,)))
 
