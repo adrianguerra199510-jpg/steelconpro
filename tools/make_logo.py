@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Genera el logo de SteelConPro (logo horizontal con lema, icono cuadrado y .ico).
+"""Genera el logo de SteelConPro (logo horizontal con lema, icono cuadrado y .ico; todos con fondo transparente).
 
     python tools/make_logo.py            -> escribe steelconpro/data/logo.png, logo_dark.png (para el tema oscuro), icon.png y steelconpro.ico
 
@@ -38,30 +38,30 @@ def font(bold: str, size: int):
     return ImageFont.load_default()
 
 
-def mark(size: int, rim: bool = False) -> Image.Image:
-    """Icono cuadrado `size` px: fondo oscuro redondeado con la union viga-columna (`rim`: filete claro para fondos oscuros)."""
+def mark(size: int, dark_bg: bool = False) -> Image.Image:
+    """Icono cuadrado `size` px con fondo TRANSPARENTE: la union viga-columna sin recuadro.
+    Para fondos claros la columna y los pernos van en grises oscuros; con `dark_bg` la columna es clara (para el tema oscuro)."""
     s = size * SS
     im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     u = lambda v: v * s
-    d.rounded_rectangle([0, 0, s - 1, s - 1], radius=u(0.225), fill=(90, 102, 116) if rim else DARK)
-    if rim:
-        d.rounded_rectangle([u(0.012), u(0.012), s - 1 - u(0.012), s - 1 - u(0.012)], radius=u(0.215), fill=DARK)
-    # columna (alas y alma vistas de canto): barra clara con una veta
-    d.rectangle([u(0.115), u(0.115), u(0.305), u(0.885)], fill=STEEL)
-    d.rectangle([u(0.115), u(0.115), u(0.150), u(0.885)], fill=LIGHT)
-    d.rectangle([u(0.270), u(0.115), u(0.305), u(0.885)], fill=LIGHT)
+    col, col_edge = ((STEEL, LIGHT) if dark_bg else (SLATE, (112, 124, 138)))
+    plate, bolt = (LIGHT, DARK) if dark_bg else (STEEL, DARK)
+    # columna (alas y alma vistas de canto): barra con una veta en cada borde
+    d.rectangle([u(0.115), u(0.115), u(0.305), u(0.885)], fill=col)
+    d.rectangle([u(0.115), u(0.115), u(0.150), u(0.885)], fill=col_edge)
+    d.rectangle([u(0.270), u(0.115), u(0.305), u(0.885)], fill=col_edge)
     # viga I en elevacion: alas naranja, alma mas oscura
     x0, x1 = u(0.305), u(0.905)
     d.rectangle([x0, u(0.285), x1, u(0.355)], fill=ORANGE)
     d.rectangle([x0, u(0.645), x1, u(0.715)], fill=ORANGE)
     d.rectangle([x0, u(0.355), x1, u(0.645)], fill=ORANGE_DK)
-    # placa de corte clara y tres pernos
-    d.rounded_rectangle([u(0.305), u(0.385), u(0.545), u(0.615)], radius=u(0.018), fill=LIGHT)
+    # placa de corte y tres pernos
+    d.rounded_rectangle([u(0.305), u(0.385), u(0.545), u(0.615)], radius=u(0.018), fill=plate)
     r = u(0.030)
     for cy in (0.435, 0.500, 0.565):
         cx = 0.455
-        d.ellipse([u(cx) - r, u(cy) - r, u(cx) + r, u(cy) + r], fill=DARK)
+        d.ellipse([u(cx) - r, u(cy) - r, u(cx) + r, u(cy) + r], fill=bolt)
     return im.resize((size, size), Image.LANCZOS)
 
 
@@ -94,7 +94,7 @@ def wordmark(height: int, dark_bg: bool = False) -> Image.Image:
 
 def logo(height: int = 250, dark_bg: bool = False) -> Image.Image:
     """Logo horizontal: marca + palabra."""
-    m = mark(height, rim=dark_bg)
+    m = mark(height, dark_bg=dark_bg)
     w = wordmark(int(height * 0.80), dark_bg)
     w = w.resize((int(w.width / SS), int(w.height / SS)), Image.LANCZOS)
     gap = int(height * 0.14)
