@@ -36,13 +36,15 @@ Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestañ
 | Elemento | Modelo |
 |---|---|
 | Piezas | tetraedros cuadráticos (C3D10), un cuerpo por pieza; acero elasto-plástico perfecto con límite **φ·Fy** (0.9·Fy); RBS: viga con endurecimiento (Ry·Fy → Cpr·Ry·Fy) y columna con Fy |
-| Pernos | el borde de cada agujero (y la corona de cabeza y tuerca) es un cuerpo rígido; entre los de piezas consecutivas actúan resortes de cortante (en las dos direcciones del plano) y, entre cabeza y tuerca, un resorte axial **solo a tracción**. La fuerza del perno sale de los resortes: se compara con φ·Fnv·Ab por plano de corte y con φ·F'nt·Ab (J3.7) |
+| Pernos | el borde de cada agujero (y la corona de cabeza y tuerca) es un cuerpo rígido (ecuaciones lineales de pequeños giros, no el *RIGID BODY* de CalculiX, que hacía divergir el paso plástico); entre los de piezas consecutivas actúan resortes de cortante (en las dos direcciones del plano) y, entre cabeza y tuerca, un resorte axial **solo a tracción**. La fuerza del perno sale de los resortes: se compara con φ·Fnv·Ab por plano de corte y con φ·F'nt·Ab (J3.7) |
 | Cordones de filete | prismas triangulares unidos a las dos piezas; se lee el esfuerzo resultante en el plano de la garganta (nodos libres del cordón) y se compara con φ·0.60·FEXX: **D/C = máx(pico / 1.5, media)** (el cordón es elástico: el pico de los extremos es singular) |
 | Contacto | resortes solo-compresión entre nodos gemelos de las superficies que se tocan (penalización); se resuelve con un **conjunto activo** de problemas lineales (cada iteración es una corrida de CalculiX) |
-| Apoyos y cargas | extremos de columnas, vigas o perfiles empotrados; las fuerzas y momentos de la combinación actúan sobre una cara rígida en el punto de aplicación del cálculo cerrado (p. ej. la reacción en la cara del soporte) |
+| Apoyos y cargas | extremos de columnas, vigas o perfiles empotrados; las fuerzas y momentos de la combinación actúan sobre una cara rígida en el punto de aplicación del cálculo cerrado (p. ej. la reacción en la cara del soporte). En el asiento la viga solo apoya (sin fricción): se fijan el deslizamiento y el giro en planta del extremo cargado para que no quede un modo de cuerpo rígido |
 | Plasticidad | se verifica la **deformación plástica equivalente** promediada (límite del proyecto, 5 %); si el análisis plástico no converge antes de la carga de diseño se informa «capacidad = x % de la carga» con D/C = 1/x |
 
-Tiempo típico por combinación: de 30 s a 4 min según la malla (*Automática* o *Fina*) y el número de contactos.
+Si ninguna pieza se acerca a la fluencia (von Mises promediado < 0.8·φ·Fy) la pasada plástica se omite: el elástico ya es la solución (queda indicado en la pestaña FEM). La malla automática es algo más gruesa que la «Fina»; los cordones se mallan más fino.
+
+Tiempo típico por combinación (4 núcleos, malla *Automática*): HSS ≈ 15 s; placa de corte, doble ángulo, asiento y placa extrema, de 1.5 a 4 min; cartela, empalmes y puente, de 3 a 6 min; RBS (plástica con endurecimiento) ≈ 6 min. Con la malla *Fina* o muchos contactos puede pasar de 10 min.
 
 **Lo que este análisis NO hace** (y por qué conviene leer sus resultados con criterio):
 - **Pernos**: sin plastificación, fractura ni pretensión. Los empalmes de puente con pernos pretensados se analizan como pernos de aplastamiento (el deslizamiento crítico sólo
