@@ -242,7 +242,8 @@ def build_seated(prj, vals) -> Model3D:
         mdl.supports.append(Support(f"Extremo {k + 1}", e))
     xr = g["eR"]
     mdl.loads.append(LoadApp("Reaccion de la viga", FaceSel("Viga", (x_end - 1e-3, x_end + 1e-3, -BIG, BIG, -BIG, BIG), (1, 0, 0)), (xr, 0.0, 0.0),
-                             (0.0, 0.0, -R), (0.0, 0.0, 0.0), show=(x_end, 0.0, 0.0)))
+                             (0.0, 0.0, -R), (0.0, 0.0, 0.0), fix_ref=(1, 2), fix_rot=(3,),
+                             show=(x_end, 0.0, 0.0)))               # la viga solo apoya (sin friccion): se fijan el deslizamiento y el giro en planta
     mdl.zone = (-2.0, st.setback + st.N + 4.0, -max(W, beam.bf) / 2 - 1.0, max(W, beam.bf) / 2 + 1.0, zone_z[0], zone_z[1])
     return mdl
 
