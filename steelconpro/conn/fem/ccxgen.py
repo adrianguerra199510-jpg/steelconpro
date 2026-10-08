@@ -244,6 +244,20 @@ class CcxCase:
         self._build_bc_loads()
         self._write_head()
 
+    def _rigid(self, ids, ref, rot, c):
+        """Cuerpo rigido como ecuaciones lineales (pequenos giros): u_i = u_ref + θ x (x_i - c), con θ = grados 1..3 del nodo `rot`.
+        No se usa *RIGID BODY de CalculiX porque sus ecuaciones no lineales hacen divergir el paso elasto-plastico en algunos modelos
+        (el residuo salta tras la primera iteracion aunque nada plastifique)."""
+        ids = [int(n) for n in ids if int(n) not in (ref, rot)]
+        X = self.mesh.coords(np.asarray(ids)) - np.asarray(c, float)
+        L = ["*EQUATION"]
+        for n, d in zip(ids, X):
+            tm = (((rot, 2, -d[2]), (rot, 3, d[1])), ((rot, 3, -d[0]), (rot, 1, d[2])), ((rot, 1, -d[1]), (rot, 2, d[0])))
+            for k in range(3):
+                terms = [(n, k + 1, 1.0), (ref, k + 1, -1.0)] + [t for t in tm[k] if abs(t[2]) > 1e-12]
+                L += [str(len(terms)), ", ".join(f"{a}, {b}, {v:.10g}" for a, b, v in terms)]
+        return L
+
     # -------------------------------------------------------------------------- pernos
     def _build_bolts(self):
         mdl, mesh = self.mdl, self.mesh
@@ -271,8 +285,7 @@ class CcxCase:
                 ref, rot = self.next_node, self.next_node + 1
                 self.next_node += 2
                 H += ["*NODE", f"{ref}, {c[0]:.6f}, {c[1]:.6f}, {c[2]:.6f}", f"{rot}, {c[0]:.6f}, {c[1]:.6f}, {c[2]:.6f}",
-                      f"*NSET, NSET=RIM_{_san(b.tag)}_{ip}", _wrap(rim_ids),
-                      f"*RIGID BODY, NSET=RIM_{_san(b.tag)}_{ip}, REF NODE={ref}, ROT NODE={rot}"]
+                      f"*NSET, NSET=RIM_{_san(b.tag)}_{ip}", _wrap(rim_ids)] + self._rigid(rim_ids, ref, rot, c)
                 refs.append(ref)
                 rims.append(len(rim_ids))
             Ab = math.pi * b.db ** 2 / 4.0
@@ -333,7 +346,7 @@ class CcxCase:
             self.next_node += 2
             c = ld.ref
             H += ["*NODE", f"{ref}, {c[0]:.6f}, {c[1]:.6f}, {c[2]:.6f}", f"{rot}, {c[0]:.6f}, {c[1]:.6f}, {c[2]:.6f}",
-                  f"*NSET, NSET=LD{i}", _wrap(ns), f"*RIGID BODY, NSET=LD{i}, REF NODE={ref}, ROT NODE={rot}"]
+                  f"*NSET, NSET=LD{i}", _wrap(ns)] + self._rigid(ns, ref, rot, c)
             for d in range(3):
                 if abs(ld.F[d]) > 0:
                     cl.append(f"{ref}, {d + 1}, {ld.F[d]:.6f}")
