@@ -36,7 +36,8 @@ CT_SEATED = "Conexion de asiento (seated) — angulo o rigidizado"
 CT_BEAM_SPLICE = "Empalme de viga — placas de alas y alma atornilladas"
 CT_COL_SPLICE = "Empalme de columna — placas atornilladas (con o sin contacto)"
 CT_ENDPLATE = "Placa extrema a momento — a ras o extendida (viga a columna)"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE]
+CT_GUSSET = "Cartela de arriostramiento — Whitmore y fuerza uniforme (UFM)"
+CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE, CT_GUSSET]
 
 # ---- placa simple de corte (shear tab)
 SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
@@ -271,4 +272,52 @@ class EndPlate:
 
     def loads(self) -> list:
         return loads_of(self.combos, 2, ("Comb 1", (1800.0, 40.0)))
+
+
+# ---- cartela de arriostramiento
+GUS_CONN = ["Arriostramiento atornillado a la cartela", "Arriostramiento soldado a la cartela"]
+
+
+@dataclass
+class Gusset:
+    """Cartela en la esquina viga-columna (arriostramiento diagonal), con las fuerzas de interfaz del metodo de fuerza
+    uniforme (UFM, caso sin momentos en las interfaces). El angulo se mide desde la VERTICAL."""
+    beam: str = "W18X50"
+    beam_steel: str = "ASTM A992"
+    col: str = "W14X90"
+    col_steel: str = "ASTM A992"
+    theta: float = 45.0              # angulo del arriostramiento con la vertical, grados
+    t: float = 0.75
+    steel: str = "ASTM A36"
+    L_b: float = 24.0                # largo de la cartela soldado al ala de la viga
+    L_c: float = 0.0                 # largo soldado a la columna (0 = el que exige el UFM)
+    w_gb: float = 0.375              # filete cartela-viga (a ambos lados)
+    w_gc: float = 0.375              # filete cartela-columna (a ambos lados)
+    electrode: str = "E70XX"
+    weld_dir: bool = True
+    conn: str = "Arriostramiento atornillado a la cartela"
+    # --- union del arriostramiento (pernos)
+    bolt_size: str = "7/8"
+    bolt_grade: str = "A325-N"
+    n_rows: int = 4                  # filas de pernos a lo largo del eje del arriostramiento
+    n_lines: int = 2                 # lineas de pernos transversales al eje
+    s: float = 3.0
+    g_t: float = 3.0                 # separacion transversal entre lineas de pernos (o entre lineas de soldadura)
+    m_planes: int = 2                # planos de corte por perno (2 = cartela entre dos angulos/placas)
+    e_b: float = 0.0                 # excentricidad del arriostramiento respecto al grupo, in
+    t_br: float = 1.0                # espesor total del arriostramiento unido en un plano de apoyo (suma de elementos), in
+    Fu_br: float = 58.0              # Fu del arriostramiento, ksi
+    Le: float = 1.5                  # del extremo del arriostramiento a la primera fila
+    lg_end: float = 1.5              # de la ultima fila al borde libre de la cartela
+    # --- union soldada
+    nlw: int = 2                     # lineas de soldadura (2 o 4)
+    Lw: float = 10.0
+    w_br: float = 0.3125
+    # --- geometria respecto al punto de trabajo
+    D1: float = 14.0                 # del punto de trabajo a la primera fila de pernos (o inicio de la soldadura), in
+    L_avg: float = 0.0               # longitud de pandeo de Thornton, in (0 = automatica)
+    combos: list = field(default_factory=lambda: [["Comb 1", 120.0]])        # [nombre, P (+ traccion, − compresion)]
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 1, ("Comb 1", (120.0,)))
 

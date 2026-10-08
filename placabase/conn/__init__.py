@@ -13,10 +13,10 @@ Se importan al usarse, para que `model.py` pueda importar `conn.specs` sin arras
 from __future__ import annotations
 import importlib
 
-from .specs import CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE
+from .specs import CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE, CT_GUSSET
 
 _MODULES = {CT_SHEAR_TAB: "shear_tab", CT_DOUBLE_ANGLE: "double_angle", CT_SEATED: "seated",
-            CT_BEAM_SPLICE: "splice_beam", CT_COL_SPLICE: "splice_col", CT_ENDPLATE: "endplate"}
+            CT_BEAM_SPLICE: "splice_beam", CT_COL_SPLICE: "splice_col", CT_ENDPLATE: "endplate", CT_GUSSET: "gusset"}
 
 
 def module_for(ctype: str):

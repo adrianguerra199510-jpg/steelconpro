@@ -1000,6 +1000,93 @@ for _nm, _mut, _txt in (("pernos fuera del ala de la columna", dict(g=13.5), "an
 print(f"{'  placa extrema variantes':34} a ras Mcap = {({c.key: c for c in _rf.checks})['ep_M'].capacity:.0f} kip·in; delgada, continuidad, filete, inversion: OK")
 
 # ====================================================================================================
+# FORMULARIOS: sin rutas duplicadas (un campo oculto desactualizado pisaria al editado) y rutas validas
+# ====================================================================================================
+from placabase import conn as _cnf
+for _ct, _mod in _cnf.modules():
+    _paths = [it["path"] for it in _mod.FORM if "path" in it]
+    _dup = {x for x in _paths if _paths.count(x) > 1}
+    if _dup:
+        FAIL.append(f"formulario {_mod.PREFIX}: rutas duplicadas {sorted(_dup)}")
+    _q = Project()
+    for _pth in _paths:
+        try:
+            _o = _q
+            for _a in _pth.split("."):
+                _o = getattr(_o, _a)
+        except AttributeError:
+            FAIL.append(f"formulario {_mod.PREFIX}: ruta inexistente {_pth}")
+print(f"{'formularios':34} {len(_cnf.modules())} tipologias: sin rutas duplicadas ni inexistentes")
+
+# ====================================================================================================
+# CARTELA (W18X50 / W14X90, θ = 45° desde la vertical, L_b = 24, t = 3/4 A36, 4×2 pernos 7/8 A325-N, P = 120 kip)
+# ====================================================================================================
+from placabase.conn.specs import CT_GUSSET, GUS_CONN
+
+
+def _gu(**mut):
+    q = Project(); q.ctype = CT_GUSSET
+    for k, v in mut.items():
+        setattr(q.gus, k, v)
+    return q
+
+
+_rg = solve(_gu())
+_kg = {c.key: c for c in _rg.checks}
+_eb, _ec = CATALOG.get("W18X50").d / 2, CATALOG.get("W14X90").d / 2
+_al = 12.0
+_be = ((_al + _ec) / 1.0 - _eb)                                    # tan 45° = 1 -> β requerido
+_r = math.hypot(_al + _ec, _be + _eb)
+print(f"{'cartela (UFM + Whitmore)':34} D/C max = {_rg.max_ratio:.3f}  gobierna: {_rg.governing.title[:48]};  L_c(UFM) = {2 * _be:.2f} in")
+# equilibrio del UFM: ΣH = P·senθ, ΣV = P·cosθ
+_Hb, _Vb, _Hc, _Vc = _al / _r * 120, _eb / _r * 120, _ec / _r * 120, _be / _r * 120
+if abs(_Hb + _Hc - 120 * math.sin(math.radians(45))) > 1e-9 or abs(_Vb + _Vc - 120 * math.cos(math.radians(45))) > 1e-9:
+    FAIL.append("cartela: las fuerzas del UFM no equilibran a P")
+_near("cartela: Whitmore (fluencia)", _kg["gu_wy"].capacity, 0.9 * 36 * 0.75 * (2 * 9.0 * math.tan(math.radians(30)) + 3.0), 1e-9)
+_near("cartela: Whitmore (rotura)", _kg["gu_wr"].capacity, 0.75 * 58 * 0.75 * (2 * 9.0 * math.tan(math.radians(30)) + 3.0 - 2 * 1.0), 1e-9)
+_Lgv = 2 * (9.0 + 1.5); _Lnv = _Lgv - 2 * 3.5 * 1.0; _Lnt = 3.0 - 1.0
+_near("cartela: bloque de cortante", _kg["gu_bs"].capacity, 0.75 * min(0.6 * 58 * 0.75 * _Lnv + 58 * 0.75 * _Lnt, 0.6 * 36 * 0.75 * _Lgv + 58 * 0.75 * _Lnt), 1e-9)
+_near("cartela: perno del arriostramiento", _kg["br_bolt"].demand, 120.0 / 8, 1e-9)
+_near("cartela: perno (capacidad)", _kg["br_bolt"].capacity, 0.75 * 2 * 54 * math.pi * 0.875 ** 2 / 4, 1e-9)
+_fa, _fn = _Hb / 48.0, _Vb / 48.0
+_near("cartela: soldadura a la viga (demanda)", _kg["gb_weld"].demand, math.hypot(_fa, _fn), 1e-9)
+_near("cartela: soldadura a la viga (capacidad)", _kg["gb_weld"].capacity,
+      0.75 * 0.6 * 70 * (1 + 0.5 * math.sin(math.atan2(_fn, _fa)) ** 1.5) * 0.707 * 0.375, 1e-9)
+_kb2, _kc2 = CATALOG.get("W18X50"), CATALOG.get("W14X90")
+_near("cartela: J10.2 de la viga", _kg["lb_wy"].capacity, 50 * _kb2.tw * (5 * _kb2.kdes + 24.0), 1e-9)
+if not _rg.ok:
+    FAIL.append(f"cartela: caso base debe cumplir (D/C = {_rg.max_ratio:.3f}: {_rg.governing.title})")
+# compresion: pandeo de Thornton en lugar de Whitmore a traccion
+_rgc = solve(_gu(combos=[["c", -120.0]]))
+_kgc = {c.key: c for c in _rgc.checks}
+_s_edge = max(_eb / math.cos(math.radians(45)), _ec / math.sin(math.radians(45)))
+_L2 = 14.0 - _s_edge
+_Fe = math.pi ** 2 * 29000 / (0.65 * _L2 / (0.75 / math.sqrt(12))) ** 2
+_Ww = 2 * 9.0 * math.tan(math.radians(30)) + 3.0
+_Fcr = 0.658 ** (36 / _Fe) * 36
+_near("cartela: pandeo de Thornton", _kgc["gu_buck"].capacity, 0.9 * _Fcr * _Ww * 0.75, 1e-9)
+if _kgc["gu_wy"].demand != 0 or _kgc["gu_buck"].demand != 120.0:
+    FAIL.append("cartela: en compresion solo debe verificar el pandeo (no la fluencia de Whitmore)")
+# condicion del UFM: L_c fijado lejos de la requerida -> aviso critico; cercano -> aviso suave
+_rgm = solve(_gu(L_c=30.0))
+if _rgm.ok or not any(w.startswith("**") and "UFM" in w for w in _rgm.warnings):
+    FAIL.append("cartela: L_c lejos de la condicion del UFM debe dar aviso critico")
+_rgn = solve(_gu(L_c=2 * _be * 1.08))
+if any(w.startswith("**") for w in _rgn.warnings) or not any("se aparta" in w for w in _rgn.warnings):
+    FAIL.append("cartela: L_c cercano al del UFM debe dar solo un aviso suave")
+# soldada: lineas
+_rgw = solve(_gu(conn=GUS_CONN[1]))
+_kgw = {c.key: c for c in _rgw.checks}
+_near("cartela soldada: fuerza por unidad de longitud", _kgw["br_weld"].demand, 120.0 / (2 * 10.0), 1e-9)
+if "br_bolt" in _kgw:
+    FAIL.append("cartela soldada: no debe verificar pernos")
+for _nm, _mut, _txt in (("angulo fuera de rango", dict(theta=95.0), "entre 0"), ("perfil inexistente", dict(beam="W99X999"), "no encontrada")):
+    _rr = solve(_gu(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"cartela alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'  cartela: compresion / soldada':34} Thornton {_kgc['gu_buck'].ratio:.3f}; soldada D/C = {_rgw.max_ratio:.3f}; condicion del UFM y alcance OK")
+
+# ====================================================================================================
 # FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
 # no debe haber excepciones ni valores no finitos, y cualquier geometria imposible debe dar aviso critico
 # ====================================================================================================
