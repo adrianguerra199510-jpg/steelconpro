@@ -2194,6 +2194,14 @@ class MainWindow(QMainWindow):
         if m:
             k = max(m, key=lambda i: max((c.ratio for c in cfem_session.post.fem_checks(m[i].model, m[i], self.prj) if not c.skip), default=0.0))
             self.cfem_idx = k
+            try:                                           # escala de la deformada: el desplazamiento maximo se ve como ~4 % del tamano del modelo
+                import numpy as _np
+                Rk = m[k]
+                ext = float(_np.ptp(_np.array(list(Rk.nodes.values())), axis=0).max())
+                if Rk.umax > 0:
+                    self.sp_sc.setValue(max(1.0, float(f"{min(0.04 * ext / Rk.umax, 5000.0):.1g}")))
+            except Exception:
+                pass
             self._fill_combo_box()
             self.draw_3d()
             self.fill_3d_tables()

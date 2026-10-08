@@ -43,6 +43,33 @@ def _gap_delta(case: CcxCase, disp):
     return out
 
 
+def screen_yield(case: CcxCase, frd: str, radius_min: float = 0.5) -> float:
+    """Mayor relacion (von Mises PROMEDIADO en un radio ~ espesor) / (φ·Fy) entre las piezas, dentro de la zona de la conexion y sin los cuerpos
+    rigidos de los agujeros. Si es bien menor que 1 el paso plastico no puede plastificar nada relevante (los picos puntuales en aristas vivas son
+    singularidades de malla) y se omite. Devuelve 9 si hay una pieza con acero de endurecimiento (RBS: la plastificacion es esperada)."""
+    from scipy.spatial import cKDTree
+    from ...view3d import von_mises
+    mdl, mesh = case.mdl, case.mesh
+    if any(p.hard for p in mdl.parts):
+        return 9.0
+    disp, stress, _f = read_frd(frd)
+    z = mdl.zone
+    worst = 0.0
+    for p in mdl.parts:
+        nodes = [int(n) for n in mesh.part_nodes(p.name) if int(n) not in case.rigid_nodes and int(n) in stress]
+        if z is not None:
+            nodes = [n for n in nodes if z[0] <= mesh.coord(n)[0] <= z[1] and z[2] <= mesh.coord(n)[1] <= z[3] and z[4] <= mesh.coord(n)[2] <= z[5]]
+        if not nodes:
+            continue
+        P = mesh.coords(nodes)
+        vm = np.array([von_mises(*stress[n]) for n in nodes])
+        r = max(min(p.thickness, 1.0), radius_min)
+        tree = cKDTree(P)
+        sm = np.array([vm[ix].mean() for ix in tree.query_ball_point(P, r)])
+        worst = max(worst, float(sm.max()) / (case.phi * p.Fy))
+    return worst
+
+
 def _bolt_summary(case: CcxCase, disp):
     """(cortante maximo por plano, traccion maxima) de los pernos con los desplazamientos `disp` (para seguir la convergencia)."""
     vmax = 0.0
@@ -139,6 +166,15 @@ def solve_case(case: CcxCase, folder: str, stem: str, ccx_path: str = "", cancel
     info["converged"] = (info["iters"] < max_it)
     if not case.opts.get("plastic", True):
         info["frd"] = last_frd
+        return True, "", info
+    try:
+        scr = screen_yield(case, last_frd)
+    except Exception:
+        scr = 9.0
+    info["screen"] = scr
+    if scr < case.opts.get("screen_limit", 0.8):                 # nada plastifica: el elastico ya es la solucion
+        info["frd"] = last_frd
+        info["plastic_skipped"] = True
         return True, "", info
     # ---- paso 2: elasto-plastico con el conjunto activo del elastico (se repite si cambia)
     for it in range(2):

@@ -381,8 +381,8 @@ def build_rbs(prj, vals) -> Model3D:
     bm, cm = g["bm"], g["cm"]
     d, bf, tf, tw = beam.d, beam.bf, beam.tf, beam.tw
     Mpr, sh, Lh = g["Mpr"], g["sh"], g["Lh"]
-    Vrbs = 2 * Mpr / Lh + Vg
-    x_inf = (st.L - col.d) / 2.0                              # punto de inflexion (a mitad de la luz libre) medido desde la cara de la columna
+    Vrbs = 2 * Mpr / Lh                                       # cortante que forma la rotula en el centro de la RBS (el de gravedad queda del lado de la seguridad en el cerrado)
+    x_inf = sh + Lh / 2.0                                     # punto de inflexion (a mitad de la luz libre) medido desde la cara de la columna
     x_e = min(x_inf, sh + max(3.0 * d, 36.0))
     Me = Vrbs * (x_inf - x_e)                                 # momento que sustituye al tramo de viga que se recorta
     mdl = Model3D("Conexion RBS")
@@ -403,7 +403,7 @@ def build_rbs(prj, vals) -> Model3D:
     fl_top = Prism(poly=flange_poly, o=(0.0, 0.0, 0.0), U=(1.0, 0.0, 0.0), V=(0.0, 1.0, 0.0), w0=zt - tf, w1=zt)
     fl_bot = Prism(poly=flange_poly, o=(0.0, 0.0, 0.0), U=(1.0, 0.0, 0.0), V=(0.0, 1.0, 0.0), w0=zb, w1=zb + tf)
     Ryb = g["Ryb"]
-    hard = (Ryb * bm.Fy, g["Cpr"] * Ryb * bm.Fy, 0.08)
+    hard = (Ryb * bm.Fy, 1.03 * g["Cpr"] * Ryb * bm.Fy, 0.04)          # endurecimiento: Mpr se alcanza con ~2 % de deformacion en la fibra extrema
     bFy, bFu = bm.Fy, bm.Fu
     mdl.parts.append(Part("Viga", "beam", f"Viga RBS {st.beam}", bFy, bFu, [web, fl_top, fl_bot], stub=True, t=tw, hard=hard, no_peeq=True))
     half = max(d + 30.0, 36.0)

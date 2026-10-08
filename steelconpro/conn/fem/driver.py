@@ -21,7 +21,7 @@ def mesh_params(mdl, fea, f: float = 1.0) -> dict:
     """Tamanos de elemento (in): finos en las placas y alrededor de los agujeros, mas gruesos en la viga/columna fuera de la zona.
     `f` = factor de reintento (malla mas gruesa)."""
     fine = str(getattr(fea, "mesh3d_mode", "")).startswith("Fina")
-    k = (0.95 if fine else 1.35) * f
+    k = (1.1 if fine else 1.7) * f
     manual = float(getattr(fea, "mesh3d", 0.0) or 0.0)
     part_lc, part_far = {}, {}
     for p in mdl.parts:
@@ -38,7 +38,7 @@ def mesh_params(mdl, fea, f: float = 1.0) -> dict:
         part_lc[p.name] = lc
     lc_near = min(part_lc.values()) if part_lc else 0.6
     wmin = min((w.w for w in mdl.welds), default=0.25)
-    return {"lc_near": lc_near, "lc_far": 3.0, "lc_weld": _clip(0.9 * wmin, 0.18, 0.4) * k, "lc_hole": _clip(0.3 * (min((b.dh for b in mdl.bolts), default=1.0)), 0.18, 0.4) * k,
+    return {"lc_near": lc_near, "lc_far": 3.0, "lc_weld": _clip(0.55 * wmin, 0.1, 0.25) * max(1.0, f), "lc_hole": _clip(0.3 * (min((b.dh for b in mdl.bolts), default=1.0)), 0.18, 0.4) * k,
             "lc_min": 0.08, "transition": 3.0 * max(1.0, f), "part_lc": part_lc, "part_far": part_far}
 
 

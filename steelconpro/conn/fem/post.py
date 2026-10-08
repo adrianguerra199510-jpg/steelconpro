@@ -71,6 +71,8 @@ class FemResult:
     zone: tuple = None
     loads: list = field(default_factory=list)
     rim_nodes: set = field(default_factory=set)
+    screened: bool = False                             # no se corrio el paso plastico: el esfuerzo promedio queda por debajo de 0.8·φFy
+    screen_ratio: float = 0.0
     collapsed: bool = False                            # el analisis plastico no convergio antes de la carga de diseno
     load_frac: float = 1.0
 
@@ -117,6 +119,8 @@ def postprocess(mdl, case, info, frd, lc=0.0, plastic=False, folder="") -> FemRe
     R.iters = info.get("iters", 0)
     R.converged = bool(info.get("converged", True))
     R.rim_nodes = set(case.rigid_nodes)
+    if info.get("plastic_skipped"):
+        R.screened, R.screen_ratio = True, float(info.get("screen", 0.0))
     if info.get("plastic_failed"):
         R.collapsed, R.load_frac = True, float(info.get("load_frac", 0.0))
 
@@ -257,6 +261,13 @@ def fem_checks(mdl, R: FemResult, prj, rec=None) -> list:
                              "deformacion plastica admisible",
                              f"promedio en r = {u.q('L', d['r'])}; pico nodal {d['raw'][0] * 100:.3f} %; maximo en "
                              f"({u.fmt('L', a[1])}, {u.fmt('L', a[2])}, {u.fmt('L', a[3])}) {u.L}"))
+    elif R.screened:
+        for p in mdl.parts:
+            if p.no_peeq or p.hard:
+                continue
+            out.append(Check(f"fem_peeq_{_san(p.name)}", f"FEM 3D — deformacion plastica equivalente: {R.labels.get(p.name, p.name)}", 0.0, lim, "%",
+                             "deformacion plastica admisible",
+                             f"sin plastificacion: el von Mises promediado maximo del conjunto es {100 * R.screen_ratio:.0f} % de φ·Fy (< 80 %), por lo que no se corrio el paso elasto-plastico"))
     else:
         for key, (v, x, y, z) in R.vm_parts.items():
             p = mdl.part(key)
