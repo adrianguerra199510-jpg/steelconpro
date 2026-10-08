@@ -1087,6 +1087,60 @@ for _nm, _mut, _txt in (("angulo fuera de rango", dict(theta=95.0), "entre 0"), 
 print(f"{'  cartela: compresion / soldada':34} Thornton {_kgc['gu_buck'].ratio:.3f}; soldada D/C = {_rgw.max_ratio:.3f}; condicion del UFM y alcance OK")
 
 # ====================================================================================================
+# HSS A HSS (cordon HSS10.000X0.500 A500 Gr.C, diagonal HSS6.625X0.280 a 60°; rectangular HSS8X8X1/2 con HSS4X4X1/4)
+# ====================================================================================================
+from placabase.conn.specs import CT_HSS, HSS_SHAPES, HSS_TYPES
+
+
+def _hs(**mut):
+    q = Project(); q.ctype = CT_HSS
+    for k, v in mut.items():
+        setattr(q.hss, k, v)
+    return q
+
+
+_ch, _b1, _b2 = CATALOG.get("HSS10.000X0.500"), CATALOG.get("HSS6.625X0.280"), CATALOG.get("HSS4.500X0.237")
+_D, _t, _Fy = _ch.d, _ch.tw, 46.0
+_gam = _D / (2 * _t)
+_beta = _b1.d / _D
+_s60 = math.sin(math.radians(60))
+_rh = solve(_hs())
+_kh = {c.key: c for c in _rh.checks}
+print(f"{'HSS a HSS (T redonda)':34} D/C max = {_rh.max_ratio:.3f}  cap = {_kh['jt_cw1'].capacity:.1f} kip")
+_near("HSS T: plastificacion del cordon", _kh["jt_cw1"].capacity, 0.9 * _Fy * _t ** 2 * (3.1 + 15.6 * _beta ** 2) * _gam ** 0.2 / _s60, 1e-9)
+_near("HSS T: punzonamiento", _kh["jt_ps1"].capacity, 0.95 * 0.6 * _Fy * _t * math.pi * _b1.d * (1 + _s60) / (2 * _s60 ** 2), 1e-9)
+# compresion del cordon reduce la resistencia (Qf)
+_U = 200.0 / (_Fy * _ch.A)
+_rhq = solve(_hs(chord_P=200.0))
+_near("HSS T: Qf con el cordon comprimido", {c.key: c for c in _rhq.checks}["jt_cw1"].capacity,
+      _kh["jt_cw1"].capacity * (1 - 0.3 * _U * (1 + _U)), 1e-9)
+_near("HSS T: la traccion del cordon no reduce", {c.key: c for c in solve(_hs(chord_P=-200.0)).checks}["jt_cw1"].capacity, _kh["jt_cw1"].capacity, 1e-12)
+# cruzada
+_rx = {c.key: c for c in solve(_hs(jt=HSS_TYPES[1])).checks}
+_near("HSS X: plastificacion del cordon", _rx["jt_cw1"].capacity, 0.9 * _Fy * _t ** 2 * (5.7 / (1 - 0.81 * _beta)) / _s60, 1e-9)
+# K con separacion: la traccionada hereda Pn·senθ de la comprimida
+_rk = {c.key: c for c in solve(_hs(jt=HSS_TYPES[2], theta2=45.0, gap=1.0)).checks}
+_Qg = _gam ** 0.2 * (1 + 0.024 * _gam ** 1.2 / (math.exp(0.5 * 1.0 / _t - 1.33) + 1))
+_cs = 0.9 * _Fy * _t ** 2 * (2.0 + 11.33 * _b1.d / _D) * _Qg
+_near("HSS K: diagonal comprimida", _rk["jt_cw1"].capacity, _cs / _s60, 1e-9)
+_near("HSS K: la traccionada hereda Pn·senθ", _rk["jt_cw2"].capacity, _cs / math.sin(math.radians(45.0)), 1e-9)
+# rectangular T
+_rr_ = {c.key: c for c in solve(_hs(shape=HSS_SHAPES[1], chord="HSS8X8X1/2", br1="HSS4X4X1/4", chord_steel="ASTM A500 Gr.B (HSS rect.)",
+                                    br1_steel="ASTM A500 Gr.B (HSS rect.)", theta1=90.0)).checks}
+_cr, _br = CATALOG.get("HSS8X8X1/2"), CATALOG.get("HSS4X4X1/4")
+_bt, _et = _br.bf / _cr.bf, _br.d / _cr.bf
+_near("HSS rect. T: plastificacion de la pared", _rr_["jt_cw1"].capacity, 0.9 * 46 * _cr.tw ** 2 * (2 * _et / (1 - _bt) + 4 / math.sqrt(1 - _bt)), 1e-9)
+for _nm, _mut, _txt in (("β muy chica", dict(br1="HSS1.900X0.145"), "0.2 < β"), ("angulo < 30°", dict(theta1=20.0), "30°"),
+                        ("K rectangular", dict(shape=HSS_SHAPES[1], chord="HSS8X8X1/2", br1="HSS4X4X1/4", br2="HSS4X4X1/4", jt=HSS_TYPES[2],
+                                               chord_steel="ASTM A500 Gr.B (HSS rect.)"), "K/N rectangulares"),
+                        ("separacion menor que tb1 + tb2", dict(jt=HSS_TYPES[2], gap=0.1), "Separacion"),
+                        ("perfil de otro tipo", dict(br1="HSS4X4X1/4"), "mismo tipo")):
+    _rr = solve(_hs(**_mut))
+    if _rr.ok or not any(w.startswith("**") and _txt in w for w in _rr.warnings):
+        FAIL.append(f"HSS alcance ({_nm}): debe dar aviso critico y no cumplir")
+print(f"{'  HSS: X / K / rectangular T':34} X {_rx['jt_cw1'].ratio:.3f}; K {_rk['jt_cw1'].ratio:.3f}/{_rk['jt_cw2'].ratio:.3f}; rect. {_rr_['jt_cw1'].ratio:.3f}; alcance OK")
+
+# ====================================================================================================
 # FUZZ GENERICO: todas las tipologias registradas con valores numericos aleatorios (incluidos invalidos):
 # no debe haber excepciones ni valores no finitos, y cualquier geometria imposible debe dar aviso critico
 # ====================================================================================================

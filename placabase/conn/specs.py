@@ -37,7 +37,8 @@ CT_BEAM_SPLICE = "Empalme de viga — placas de alas y alma atornilladas"
 CT_COL_SPLICE = "Empalme de columna — placas atornilladas (con o sin contacto)"
 CT_ENDPLATE = "Placa extrema a momento — a ras o extendida (viga a columna)"
 CT_GUSSET = "Cartela de arriostramiento — Whitmore y fuerza uniforme (UFM)"
-CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE, CT_GUSSET]
+CT_HSS = "HSS a HSS — nudos de celosia (T, Y, X, K con separacion)"
+CONN_TYPES = [CT_BASEPLATE, CT_SHEAR_TAB, CT_DOUBLE_ANGLE, CT_SEATED, CT_BEAM_SPLICE, CT_COL_SPLICE, CT_ENDPLATE, CT_GUSSET, CT_HSS]
 
 # ---- placa simple de corte (shear tab)
 SUP_KINDS = ["Alma de viga maestra", "Alma de columna", "Ala de columna"]
@@ -320,4 +321,30 @@ class Gusset:
 
     def loads(self) -> list:
         return loads_of(self.combos, 1, ("Comb 1", (120.0,)))
+
+
+# ---- HSS a HSS (nudos de celosia, AISC 360 Cap. K)
+HSS_SHAPES = ["Redondo (HSS circular)", "Rectangular / cuadrado"]
+HSS_TYPES = ["T o Y (una diagonal)", "X (dos diagonales opuestas)", "K o N con separacion (dos diagonales)"]
+
+
+@dataclass
+class HSSJoint:
+    """Nudo de celosia HSS a HSS en el plano de la cercha; diagonales soldadas directamente al cordon."""
+    shape: str = "Redondo (HSS circular)"
+    jt: str = "T o Y (una diagonal)"
+    chord: str = "HSS10.000X0.500"
+    chord_steel: str = "ASTM A500 Gr.C (HSS red.)"
+    br1: str = "HSS6.625X0.280"
+    br1_steel: str = "ASTM A500 Gr.C (HSS red.)"
+    theta1: float = 60.0             # angulo agudo entre la diagonal 1 y el cordon, grados
+    br2: str = "HSS4.500X0.237"
+    br2_steel: str = "ASTM A500 Gr.C (HSS red.)"
+    theta2: float = 60.0
+    gap: float = 1.0                 # separacion entre las puntas de las diagonales sobre el cordon (K, N), in
+    chord_P: float = 0.0             # axial del cordon junto al nudo (compresion +), kip
+    combos: list = field(default_factory=lambda: [["Comb 1", 40.0, -40.0]])    # [nombre, P1, P2] axiales de las diagonales (compresion +)
+
+    def loads(self) -> list:
+        return loads_of(self.combos, 2, ("Comb 1", (40.0, -40.0)))
 

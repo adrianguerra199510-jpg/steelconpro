@@ -672,6 +672,8 @@ class MainWindow(QMainWindow):
             k = items[1:]
             fam = {"I": ("W", "M", "S", "HP"), "W": ("W",), "L": ("L",), "HSSR": ("HSS",), "HSSC": ("HSS circular",),
                    "T": ("WT", "MT", "ST")}
+            if k == "HSS_ANY":
+                return CATALOG.by_family("HSS circular") + CATALOG.by_family("HSS")
             if k in fam:
                 return [lb for fm in fam[k] for lb in CATALOG.by_family(fm)]
             return {"steel_shape": [x.name for x in M.SHAPE_STEELS], "steel_plate": [x.name for x in M.PLATE_STEELS],

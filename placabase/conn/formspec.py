@@ -7,7 +7,7 @@ Cada tipologia define `FORM = [ G("Grupo"), num(...), combo(...), ... ]`; `ui.py
 `show=lambda prj: bool` oculta el campo o el grupo cuando no aplica (se evalua al editar).
 En `items`, una cadena que empieza con '@' se resuelve en la UI contra un catalogo:
     @I  perfiles I (W, M, S, HP)      @W  solo W         @L  angulos (L)
-    @HSSR  HSS rectangular/cuadrado   @HSSC  HSS circular   @T  tes (WT, MT, ST)
+    @HSSR  HSS rectangular/cuadrado   @HSSC  HSS circular   @HSS_ANY  ambos   @T  tes (WT, MT, ST)
     @steel_shape  aceros de perfil    @steel_plate  aceros de placa     @electrode  electrodos
 """
 from __future__ import annotations
