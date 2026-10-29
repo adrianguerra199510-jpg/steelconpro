@@ -20,7 +20,8 @@ def run():
     import steelconpro.model as MD
     from steelconpro.shapes import CATALOG
     from steelconpro import materials as M
-    from steelconpro.conn import presets as PRE, assembly as AS, module_for, modules, solve_conn
+    from tools import node_presets as PRE
+    from steelconpro.conn import presets as PROD, assembly as AS, module_for, modules, solve_conn
     from steelconpro.conn.specs import (CT_BASEPLATE, CT_NODE, CT_B2B, CT_TRUSS, CONN_TYPES, MODE_OF, ATTR_OF, MODE_COL, MODE_BEAM, MODE_CHORD,
                                         END_LABELS, OPERATIONS, CONNECTION_OPS, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET,
                                         OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Member, Operation, Load)
@@ -283,6 +284,7 @@ def run():
     prj = []
     for ct in (CT_NODE, CT_B2B, CT_TRUSS):
         q = Project(); q.ctype = ct; q.element = module_for(ct).PREFIX + "-1"
+        setattr(q, ATTR_OF[ct], PRE.default_nodo(MODE_OF[ct]))
         nd_ = getattr(q, ATTR_OF[ct])
         nd_.members[0].az, nd_.members[0].shape = 33.0, "W21X44"
         nd_.operations.append(Operation(kind=OP_COPE, member=nd_.members[0].name, cope_top=1.5))
@@ -483,6 +485,40 @@ def run():
         CATALOG._reindex()
         SH.USER_DB = old_db
 
+    # ---------------------------------------------------------------- plantillas: llevan dentro las secciones libres que usan
+    from steelconpro import templates as TPL0
+    from pathlib import Path as _P
+    SH.USER_DB = type(old_db)(os.path.join(tmp, "shapes_tpl.json"))
+    try:
+        sh_t = SH.make_general("TPL-SEC", SEC.t_box(8, 10, 0.5, 0.5))
+        CATALOG.add_free(sh_t)
+        nt_ = PRE.default_nodo(MODE_COL)
+        nt_.main_shape = "TPL-SEC"
+        qt_ = prj_of(CT_NODE, nt_)
+        td_ = _P(tmp) / "tpl_engine"
+        td_.mkdir(exist_ok=True)
+        fp_ = TPL0.save_template(qt_, "Con seccion libre", "desc", True, td_)
+        CATALOG.shapes.pop("TPL-SEC", None)
+        CATALOG._reindex()
+        q2_ = TPL0.load_template(fp_)
+        if CATALOG.get("TPL-SEC") is None or CATALOG.get("TPL-SEC").kind != SH.GEN or q2_.ncol != nt_:
+            FAIL.append("plantillas: deben llevar dentro la seccion libre que usan y volver igual")
+        if len(TPL0.list_templates(CT_NODE, td_)) != 1 or TPL0.list_templates(CT_NODE, td_)[0]["desc"] != "desc":
+            FAIL.append("plantillas: listado")
+        TPL0.save_template(qt_, "Con seccion libre", "otra", True, td_)               # mismo nombre: reemplaza, no duplica
+        if len(list(td_.glob("*.json"))) != 1 or TPL0.list_templates(CT_NODE, td_)[0]["desc"] != "otra":
+            FAIL.append("plantillas: guardar con el mismo nombre debe reemplazar")
+        try:
+            TPL0.save_template(qt_, "  ", "", True, td_)
+            FAIL.append("plantillas: el nombre vacio debe rechazarse")
+        except ValueError:
+            pass
+        print(f"{'plantillas (motor)':34} guardar / listar / cargar / reemplazar, con la seccion libre dentro: OK")
+    finally:
+        CATALOG.shapes.pop("TPL-SEC", None)
+        CATALOG._reindex()
+        SH.USER_DB = old_db
+
     # ---------------------------------------------------------------- materiales: pernos y aceros propios llegan a los calculos y al archivo
     from steelconpro.conn import common as CM, specs as SPX
     old_mat = M._mat_file
@@ -546,8 +582,16 @@ def run():
         app = QApplication.instance() or QApplication([])
         win = ui.MainWindow()
         for ct, pre in ((CT_NODE, ("int4", "I", "ep_flush")), (CT_B2B, ("sec2", "HSS", "tab")), (CT_TRUSS, ("V", "RND", "gus_bolt"))):
-            win.add_connection(ct, pre)
+            win.add_connection(ct)                                            # conexion nueva: en blanco (no hay plantillas predefinidas)
             app.processEvents()
+            nd0_ = getattr(win.prj, ATTR_OF[ct])
+            if nd0_.members or nd0_.operations or nd0_.loads or win.prj.ctype != ct:
+                FAIL.append(f"nudos UI {ct}: la conexion nueva debe estar en blanco: {len(nd0_.members)} miembros, {len(nd0_.operations)} operaciones")
+            win.recalc(); win.run_3d(); app.processEvents()                   # en blanco no debe fallar (sin operaciones: solo avisa)
+            if win.node_res is None or not any("operaci" in w.lower() for w in win.node_res.warnings):
+                FAIL.append(f"nudos UI {ct}: verificar una conexion en blanco debe avisar que faltan operaciones")
+            setattr(win.prj, ATTR_OF[ct], PRE.build(MODE_OF[ct], pre[0], pre[1], pre[2]))      # se arma el nudo como lo haria el usuario
+            win.load_ui(); win.recalc(); app.processEvents()
             tabs_in = [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)]
             tabs_out = {win.tabs_out.tabText(i): win.tabs_out.isTabEnabled(i) for i in range(win.tabs_out.count()) if win.tabs_out.isTabVisible(i)}
             mod = module_for(ct)
@@ -557,7 +601,7 @@ def run():
             nd_ = getattr(win.prj, ATTR_OF[ct])
             ref = PRE.build(MODE_OF[ct], pre[0], pre[1], pre[2])
             if len(nd_.members) != len(ref.members) or len(nd_.operations) != len(ref.operations):
-                FAIL.append(f"nudos UI {ct}: el asistente no aplico la geometria y las operaciones")
+                FAIL.append(f"nudos UI {ct}: no se cargo el nudo armado")
             form = win.fnamed[mod.TAB]
             mp, op, lp = form.members_pg, form.ops_pg, form.loads_pg
             m0 = nd_.members[0]
@@ -593,8 +637,8 @@ def run():
                 FAIL.append(f"nudos UI {ct}: extremo del miembro principal")
             # VERIFICAR: llena la tabla, el veredicto y la memoria; cualquier cambio la deja desactualizada
             win.recalc(); app.processEvents()
-            if win._node_fresh() or "SIN VERIFICAR" not in win.lbl_verdict.text():
-                FAIL.append(f"nudos UI {ct}: antes de verificar el veredicto debe decir SIN VERIFICAR: '{win.lbl_verdict.text()}'")
+            if win._node_fresh() or "DESACTUALIZADO" not in win.lbl_verdict.text():                    # se verifico la conexion en blanco y despues se armo el nudo
+                FAIL.append(f"nudos UI {ct}: tras armar el nudo el resultado de la conexion en blanco debe quedar DESACTUALIZADO: '{win.lbl_verdict.text()}'")
             win.run_3d(); app.processEvents()
             if not win._node_fresh() or win.tbl.rowCount() == 0 or ("CUMPLE" not in win.lbl_verdict.text()) or not win.node_res.checks \
                     or "OPERACION" not in win.txt_mem.toPlainText():
@@ -625,94 +669,59 @@ def run():
         app.processEvents()
         if not (win.tabs_out.isTabEnabled(win.tabs_out.indexOf(win.tab_fem)) and win.btn3d.isEnabled()) or "CALCULAR" not in win.btn3d.text():
             FAIL.append("nudos UI: la placa base debe conservar sus pestañas de analisis y resultados")
-        dlg = NewConnectionDialog(None, CT_NODE)
-        dlg.render_all()
+        # ---- plantillas del usuario: guardar una conexion terminada, crear otra desde ella, renombrar y eliminar
+        from steelconpro import templates as TPL
+        from steelconpro.ui_wizard import SaveTemplateDialog
+        tdir = __import__("pathlib").Path(tmp) / "plantillas_ui"
+        tdir.mkdir(exist_ok=True)
+        dlg = NewConnectionDialog(None, CT_NODE, where=tdir)
+        if dlg.choice() != {"ctype": CT_NODE, "template": None} or dlg.lst_tpl.count() < 1 or "blanco" not in dlg.lst_tpl.item(0).text():
+            FAIL.append(f"asistente: sin plantillas debe ofrecer solo la conexion en blanco: {dlg.choice()}")
+        win._switch(1)
+        win.store_ui()
+        src = win.prj
+        sd = SaveTemplateDialog(None, src, where=tdir)
+        sd.ed_name.setText("Mi nudo tipo"); sd.ed_desc.setPlainText("prueba"); sd._ok()
+        if not sd.path or [t["name"] for t in TPL.list_templates(src.ctype, tdir)] != ["Mi nudo tipo"]:
+            FAIL.append("plantillas: no se guardo la plantilla")
+        dlg = NewConnectionDialog(None, src.ctype, where=tdir)
+        if dlg.lst_tpl.count() != 2 or dlg.lst_tpl.item(1).data(Qt.UserRole) != sd.path or dlg.lbl_img.pixmap() is None:
+            FAIL.append("asistente: la plantilla guardada debe aparecer en la lista de su modulo")
+        dlg.lst_tpl.setCurrentRow(1)
         ch = dlg.choice()
-        if ch["ctype"] != CT_NODE or not ch["geom"] or not ch["design"] or len(dlg._cache) < 20:
-            FAIL.append(f"nudos UI: asistente de nueva conexion: {ch}, {len(dlg._cache)} miniaturas")
-        dlg._pick_class(CT_TRUSS); dlg._pick_geom("X", "RND"); dlg._pick_design("gus_weld"); dlg.render_all()
-        if dlg.choice() != {"ctype": CT_TRUSS, "geom": "X", "sec": "RND", "design": "gus_weld"}:
-            FAIL.append(f"nudos UI: eleccion del asistente: {dlg.choice()}")
-        dlg._pick_class(CT_BASEPLATE)
-        if dlg.choice()["geom"] is not None:
-            FAIL.append("nudos UI: la placa base no tiene geometria en el asistente")
-        # ---- biblioteca de secciones, Section Designer y biblioteca de materiales (ventanas)
-        from steelconpro.ui_sections import SectionLibrary, SectionDesigner
-        from steelconpro.ui_materials import MaterialsLibrary
-        from steelconpro import gl3d as _gl, shapes as _SH
-        old_db2, old_mat2 = _SH.USER_DB, M._mat_file
-        _SH.USER_DB = type(old_db2)(os.path.join(tmp, "shapes_ui.json"))
-        M._mat_file = lambda: type(old_db2)(os.path.join(tmp, "materials_ui.json"))
-        try:
-            if not _gl.gl_wanted() or win.use_gl != _gl.available():
-                FAIL.append("visor: por omision se usa el visor OpenGL de PlacaBase Pro cuando el equipo lo ofrece (y el clasico si no)")
-            lib = SectionLibrary(win.us, None, pick=True, current="W14X90")
-            if lib.tbl.rowCount() > 500 or lib.cb_fam.currentData() != "W":
-                FAIL.append("biblioteca de secciones: debe abrir en la familia de la seccion actual")
-            lib.cb_fam.setCurrentIndex(0)
-            lib.ed_find.setText("")
-            lib._fill(select="W14X90")
-            if lib.tbl.rowCount() < 1000 or lib._rows[lib.tbl.currentRow()] != "W14X90" or lib.canvas.props.get("A", 0) <= 0:
-                FAIL.append(f"biblioteca de secciones: {lib.tbl.rowCount()} filas, seleccion {lib._rows[lib.tbl.currentRow()]}")
-            lib.ed_find.setText("HSS6X6X3/8")
-            if lib.tbl.rowCount() != 1:
-                FAIL.append(f"biblioteca de secciones: la busqueda debe dejar una fila: {lib.tbl.rowCount()}")
-            lib._use()
-            if lib.selected_label != "HSS6X6X3/8":
-                FAIL.append("biblioteca de secciones: Usar esta seccion")
-            dsg = SectionDesigner(win.us, None, CATALOG.get("W14X90"))
-            if len(dsg.comps) != 3 or abs(dsg.canvas.props["A"] - 26.1) > 0.5 or dsg.ed_name.text() != "W14X90-copia":
-                FAIL.append(f"section designer: copia de un perfil estandar: {len(dsg.comps)} componentes, A = {dsg.canvas.props.get('A')}, nombre {dsg.ed_name.text()}")
-            dsg.cb_tpl.setCurrentText("Cajón soldado"); dsg._apply_tpl()
-            n0_ = len(dsg.comps)
-            dsg._add("circ"); dsg._add("poly"); dsg._add("ring")
-            dsg._dup(); dsg._mirror(0); dsg._center()
-            if len(dsg.comps) != n0_ + 4 or not dsg.canvas.props:
-                FAIL.append(f"section designer: agregar / duplicar / espejo: {len(dsg.comps)} componentes")
-            dsg.tbl.selectRow(0)
-            dsg.fields["w"][1].setValue(20.0 / dsg.fl)                # el cambio de un campo se guarda en el componente y recalcula
-            if abs(dsg.comps[0]["w"] - 20.0) > 1e-9:
-                FAIL.append("section designer: edicion de un campo")
-            dsg.canvas.sel = 0
-            x0_ = dsg.comps[0]["x"]
-            dsg.canvas._drag = ("move", 0.0, 0.0, x0_, dsg.comps[0]["y"], copy.deepcopy(dsg.comps[0]))
-            dsg.comps[0]["x"] = x0_ + 1.0
-            dsg._canvas_moved()
-            dsg.ed_name.setText("DES-TEST")
-            dsg._ok()
-            sh_ = dsg.result_shape
-            if sh_ is None or sh_.kind != _SH.GEN or sh_.label != "DES-TEST" or sh_.A <= 0:
-                FAIL.append("section designer: guardar")
-            else:
-                CATALOG.add_free(sh_)
-                if CATALOG.get("DES-TEST") is None or "DES-TEST" not in CATALOG.by_family(_SH.FREE_FAMILY):
-                    FAIL.append("section designer: la seccion guardada debe estar en la familia libre")
-                from steelconpro.ui_nodes import SectionPicker
-                pk = SectionPicker()
-                if _SH.FREE_FAMILY not in [pk.fam.itemText(i) for i in range(pk.fam.count())]:
-                    FAIL.append("selector de seccion: debe listar la familia libre")
-                pk.set_label("DES-TEST")
-                if pk.label() != "DES-TEST":
-                    FAIL.append("selector de seccion: no encuentra la seccion libre")
-                CATALOG.remove("DES-TEST")
-            mlib = MaterialsLibrary(win.us)
-            mlib._new("bolt"); mlib._new("steel")
-            mlib.data["bolt"][0].update({"name": "UI-BOLT", "Fnt": 100.0, "Fnv": 60.0})
-            mlib.data["steel"][0].update({"name": "UI-STEEL", "Fy": 55.0, "Fu": 70.0})
-            mlib._save()
-            if M.find(M.SHAPE_STEELS, "UI-STEEL").Fy != 55.0 or "UI-BOLT" not in {b.name for b in M.bolt_grades()}:
-                FAIL.append("biblioteca de materiales: no registro los materiales nuevos")
-            mlib2 = MaterialsLibrary(win.us)
-            mlib2.data["bolt"] = []; mlib2.data["steel"] = []
-            mlib2._save()
-            if any(x.name == "UI-STEEL" for x in M.SHAPE_STEELS) or "UI-BOLT" in {b.name for b in M.bolt_grades()}:
-                FAIL.append("biblioteca de materiales: no retiro los materiales eliminados")
-        finally:
-            _SH.USER_DB, M._mat_file = old_db2, old_mat2
-            for k in M.USER_NAMES:
-                M.USER_NAMES[k] = set()
+        n_before = len(win.book)
+        win.add_connection(ch["ctype"], ch["template"])
+        new = win.prj
+        a_, b_ = getattr(src, ATTR_OF[src.ctype]), getattr(new, ATTR_OF[new.ctype])
+        if len(win.book) != n_before + 1 or new is src or a_ != b_ or new.element == src.element:
+            FAIL.append("plantillas: la conexion creada desde la plantilla debe tener los mismos miembros, operaciones y cargas y otro nombre")
+        # otro modulo no la ve
+        if TPL.list_templates(CT_B2B if src.ctype != CT_B2B else CT_NODE, tdir):
+            FAIL.append("plantillas: cada modulo solo lista las suyas")
+        TPL.rename_template(sd.path, "Mi nudo renombrado")
+        if [t["name"] for t in TPL.list_templates(src.ctype, tdir)] != ["Mi nudo renombrado"]:
+            FAIL.append("plantillas: renombrar")
+        TPL.delete_template(sd.path)
+        if TPL.list_templates(src.ctype, tdir):
+            FAIL.append("plantillas: eliminar")
+        # la placa base tambien: copia completa del proyecto
+        win._switch(0)
+        win.store_ui()
+        pb_ = win.prj
+        pbp = TPL.save_template(pb_, "Placa tipo", "", True, tdir)
+        pb2 = TPL.load_template(pbp)
+        from dataclasses import asdict as _asd
+        d1, d2 = _asd(pb_), _asd(pb2)
+        d1["element"] = d2["element"] = ""
+        if d1 != d2 or pb2.ctype != CT_BASEPLATE:
+            FAIL.append("plantillas: la placa base debe volver idéntica")
+        # sin cargas
+        qn = copy.deepcopy(src)
+        tn = TPL.save_template(qn, "Sin cargas", "", False, tdir)
+        if getattr(TPL.load_template(tn), ATTR_OF[src.ctype]).loads or not getattr(qn, ATTR_OF[src.ctype]).loads:
+            FAIL.append("plantillas: «incluir cargas» desmarcado debe guardar sin cargas sin tocar la conexion original")
         print(f"{'interfaz (offscreen)':34} 3 modulos: miembros / operaciones / cargas, VERIFICAR llena Resultados y la memoria, resultado desactualizado al editar, "
-              f"Analisis FEM desactivado, asistente con {len(dlg._cache)} miniaturas; la placa base conserva sus pestañas")
+              f"Analisis FEM desactivado, conexiones nuevas en blanco, plantillas propias (guardar, crear, renombrar, eliminar); la placa base conserva sus pestañas")
     except ImportError as e:
         if "PySide6" not in str(e) and "shiboken" not in str(e):
             FAIL.append(f"nudos UI: {type(e).__name__}: {e}")

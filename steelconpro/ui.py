@@ -227,9 +227,10 @@ class MainWindow(QMainWindow):
         self.lst_con.currentRowChanged.connect(self.on_select_connection)
         cl.addWidget(self.lst_con)
         hb = QHBoxLayout()
-        for txt, fn in (("Nueva", self.con_new), ("Duplicar", self.con_dup),
-                        ("Renombrar", self.con_rename), ("Eliminar", self.con_del)):
-            bt = QPushButton(txt); bt.clicked.connect(fn); hb.addWidget(bt)
+        for txt, fn, tip in (("Nueva", self.con_new, "Conexión nueva: en blanco o desde una plantilla propia."), ("Duplicar", self.con_dup, ""),
+                             ("Renombrar", self.con_rename, ""), ("Eliminar", self.con_del, ""),
+                             ("Plantilla", self.con_template, "Guarda la conexión actual como plantilla para crear conexiones nuevas a partir de ella.")):
+            bt = QPushButton(txt); bt.clicked.connect(fn); bt.setToolTip(tip); hb.addWidget(bt)
         cl.addLayout(hb)
         left.addWidget(cw)
         tw = QWidget(); tl = QVBoxLayout(tw); tl.setContentsMargins(4, 2, 4, 0); tl.setSpacing(4)
@@ -298,6 +299,9 @@ class MainWindow(QMainWindow):
                         (act(m_file, "Guardar", self.save, "Ctrl+S", True), QStyle.SP_DialogSaveButton)):
             a_.setIcon(sty.standardIcon(ic_))
         act(m_file, "Guardar como...", self.save_as, "Ctrl+Shift+S")
+        m_file.addSeparator()
+        act(m_file, "Nueva conexión (en blanco o desde plantilla)...", self.con_new, "Ctrl+Shift+N")
+        act(m_file, "Guardar la conexión como plantilla...", self.con_template)
         m_file.addSeparator()
         act(m_file, "Importar base de datos AISC v14.1...", self.import_aisc)
         m_file.addSeparator()
@@ -1273,26 +1277,33 @@ class MainWindow(QMainWindow):
         self._switch(i)
 
     def con_new(self):
-        """Asistente Clase / Geometria / Diseño con miniaturas 3D."""
+        """Nueva conexion: se elige el modulo y se parte de cero o de una plantilla propia."""
         from .ui_wizard import NewConnectionDialog
         self.store_ui()
         dlg = NewConnectionDialog(self, self.prj.ctype if self.prj.ctype in CONN_TYPES else None)
         if dlg.exec() == dlg.Accepted:
             c = dlg.choice()
-            self.add_connection(c["ctype"], (c["geom"], c["sec"], c["design"]) if c["geom"] else None)
+            self.add_connection(c["ctype"], c["template"])
 
-    def add_connection(self, ctype=CT_BASEPLATE, preset=None):
-        """Agrega una conexion nueva del modulo dado y la deja activa.  preset = (geometria, seccion, diseño) del asistente."""
-        from .conn import presets
-        from .conn.specs import MODE_OF, ATTR_OF
-        p = Project()
+    def con_template(self):
+        """Guarda la conexion actual como plantilla (nombre, descripcion y, en los nudos, si lleva las cargas)."""
+        from .ui_wizard import SaveTemplateDialog
+        self.store_ui()
+        dlg = SaveTemplateDialog(self, self.prj)
+        if dlg.exec() == dlg.Accepted:
+            self.statusBar().showMessage(f"Plantilla guardada: {dlg.path}", 8000)
+
+    def add_connection(self, ctype=CT_BASEPLATE, template=None):
+        """Agrega una conexion nueva del modulo dado (en blanco, o copia de la plantilla indicada) y la deja activa."""
+        from . import templates as TPL
+        p = TPL.load_template(template) if template else Project()
+        if template and p.ctype != ctype:
+            raise ValueError("La plantilla es de otro módulo.")
         p.ctype = ctype
         p.name = self.prj.name
         p.date = datetime.date.today().isoformat()
         p.u_len, p.u_force, p.u_stress, p.u_moment = (self.prj.u_len, self.prj.u_force,
                                                       self.prj.u_stress, self.prj.u_moment)
-        if preset and ctype in MODE_OF:
-            setattr(p, ATTR_OF[ctype], presets.build(MODE_OF[ctype], *preset))
         p.element = f"{'PB' if ctype == CT_BASEPLATE else connpkg.module_for(ctype).PREFIX}-{len(self.book) + 1:02d}"
         self.book.append(p)
         self._switch(len(self.book) - 1)

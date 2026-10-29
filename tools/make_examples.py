@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from steelconpro.model import Project, save_book
-from steelconpro.conn import presets as PRE
+from tools import node_presets as PRE
 from steelconpro.conn.specs import (CT_NODE, CT_B2B, CT_TRUSS, MODE_COL, MODE_BEAM, MODE_CHORD, END_LABELS, Member, Operation, Load,
                                     OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_COPE, OP_CONT)
 

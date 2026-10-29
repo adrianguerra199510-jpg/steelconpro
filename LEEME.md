@@ -32,13 +32,13 @@ Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestañ
 
 ## Módulos de nudo: viga-columna, viga a viga y crucetas
 
-**Nueva conexión** abre un asistente de tres pasos con miniaturas 3D:
+**Nueva conexión** (botón *Nueva*, `Ctrl+Mayús+N`) elige el módulo y el punto de partida. **No hay plantillas predefinidas**: la conexión nueva empieza **en blanco**
+(solo el miembro principal; usted agrega los miembros, las operaciones y las cargas) o desde una **plantilla propia**.
 
-1. **Clase**: nudo viga-columna, viga a viga, crucetas o placa base.
-2. **Geometría**: la configuración inicial del nudo (columna de extremo con una viga, intermedia con dos o cuatro vigas, una o dos secundarias, V, N, cruz…) en
-   perfil I, HSS rectangular o HSS circular.
-3. **Diseño**: las operaciones que se crean para todos los miembros — *momento* (placa extrema a ras o extendida; alas soldadas con alma atornillada y placas de
-   continuidad), *corte* (placa simple, doble ángulo, asiento), *truss* (cartela atornillada o con miembros soldados) o *en blanco*.
+**Plantillas propias.** Con la conexión terminada, el botón **Plantilla** (o *Archivo > Guardar la conexión como plantilla*) la guarda con un nombre, una descripción y, en los
+nudos, con o sin las cargas. Después aparece en *Nueva conexión* dentro de su módulo, con vista previa en 3D, y se puede **renombrar o eliminar** desde ahí. Sirve para cualquier módulo
+(también la placa base). Cada plantilla es un archivo `.json` en `%APPDATA%\SteelConPro\plantillas` con la conexión completa y las secciones y materiales propios que usa; se puede
+copiar a otra PC. Guardar con el mismo nombre la reemplaza.
 
 Después el nudo se edita en cuatro pasos (pestañas dentro del módulo):
 
@@ -104,14 +104,14 @@ etiquetas) cuando el equipo ofrece OpenGL; si no, usan el visor clásico de matp
 o con la variable de entorno `SCP_GL=0`. El programa **arranca maximizado**.
 
 Los herrajes del 3D son representaciones con proporciones razonables (placas, ángulos, pernos con cabeza y tuerca); las verificaciones se hacen con los datos de las operaciones.
-Los archivos de ejemplo `ejemplos/NC-01_nudo_viga_columna.scp`, `VV-01_viga_a_viga.scp` y `CR-01_crucetas.scp` se regeneran con `tools/make_examples.py`.
+Los archivos de ejemplo `ejemplos/NC-01_nudo_viga_columna.scp`, `VV-01_viga_a_viga.scp` y `CR-01_crucetas.scp` son proyectos normales (no plantillas); se regeneran con `tools/make_examples.py`, que usa los nudos de prueba de `tools/node_presets.py`.
 
 **Archivos anteriores.** Los `.scp` que contengan conexiones de las tipologías retiradas se abren, pero esas conexiones se omiten (el programa avisa cuáles); las
 placas base se abren igual que siempre.
 
-**Para modificar o ampliar un módulo**: los datos están en `conn/specs.py` (`Member`, `Nodo`), las configuraciones del asistente en `conn/presets.py`, la geometría
+**Para modificar o ampliar un módulo**: los datos están en `conn/specs.py` (`Member`, `Nodo`), el nudo en blanco y el miembro nuevo en `conn/presets.py`, la geometría
 3D (secciones, recorte de cada miembro contra el principal, herrajes, cartelas) en `conn/assembly.py` y la pestaña de entrada en `ui_nodes.py`; el asistente es
-`ui_wizard.py`. `selftest_nodes.py` prueba la geometría con valores calculados a mano, todas las combinaciones del asistente y 300 nudos al azar.
+`ui_wizard.py`. `selftest_nodes.py` prueba la geometría con valores calculados a mano, 225 nudos de ejemplo de `tools/node_presets.py` y 300 nudos al azar.
 
 ---
 
@@ -423,10 +423,11 @@ steelconpro/
   data/aisc_shapes.json catalogo AISC integrado (1,660 perfiles)
   ui.py, ui_widgets.py  interfaz PySide6
   ui_nodes.py           pestaña de los módulos de nudo: Miembros / Operaciones / Cargas / Análisis
-  ui_wizard.py          asistente Nueva conexión: Clase / Geometría / Diseño con miniaturas
+  ui_wizard.py          asistente Nueva conexión (en blanco o desde plantilla) y guardado de plantillas
+  templates.py          plantillas del usuario (guardar, listar, cargar, renombrar, eliminar)
   conn/specs.py         datos de los módulos de nudo (Member, Operation, Load, Nodo) y sus listas
   conn/checks/          verificaciones por código AISC 360-22 de cada operación (motores de fórmulas cerradas y adaptadores)
-  conn/presets.py       geometrías y diseños del asistente
+  conn/presets.py       nudo en blanco de cada módulo y miembro nuevo
   conn/assembly.py      geometría 3D de los nudos: secciones, recorte contra el principal, herrajes, cartelas
   conn/nodes.py         los tres módulos vistos por la interfaz y su esquema de planta y elevación
   conn/fem/             modelo 3D y escena (visor y miniaturas); malla, CalculiX y resultados quedan sin uso hasta reactivar el análisis
