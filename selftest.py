@@ -496,5 +496,3 @@ if FAIL:
         print("  -", f)
     sys.exit(1)
 print("TODAS LAS PRUEBAS DEL MOTOR PASARON")
-sys.stdout.flush()
-os._exit(0)             # evita el cierre normal del interprete: con ventanas Qt creadas por las pruebas puede terminar en una falla de segmentacion

@@ -708,6 +708,21 @@ def run():
     except Exception as e:
         FAIL.append(f"nudos UI: {type(e).__name__}: {e}")
         traceback.print_exc()
+    # ---------------------------------------------------------------- cierre ordenado de Qt (si no, el interprete puede fallar al destruir las ventanas de las pruebas)
+    try:
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QApplication
+        app_ = QApplication.instance()
+        if app_ is not None:
+            for w_ in list(app_.topLevelWidgets()):
+                w_.close()
+                w_.deleteLater()
+            app_.sendPostedEvents(None, QEvent.DeferredDelete)
+            app_.processEvents()
+            import gc
+            gc.collect()
+    except Exception:
+        pass
     return FAIL
 
 
@@ -725,5 +740,3 @@ if __name__ == "__main__":
             print("  -", f)
         sys.exit(1)
     print("TODAS LAS PRUEBAS DE LOS NUDOS PASARON")
-    sys.stdout.flush()
-    os._exit(0)         # evita el cierre normal del interprete: con ventanas Qt creadas por las pruebas puede terminar en una falla de segmentacion
