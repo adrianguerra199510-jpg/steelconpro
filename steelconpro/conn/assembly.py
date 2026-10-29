@@ -514,6 +514,7 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
         if o.member not in names:
             mdl.notes.append(f"Operación «{o.kind}»: el miembro «{o.member}» no existe.")
     ctxs = []
+    axes = []                                           # (nombre, inicio, fin, punto sobre el eje principal, posicion) de cada miembro conectado, para las cotas
     for i, m in enumerate(nd.members):
         shp = shape_of(m.shape)
         dirv = member_dir(m)
@@ -575,6 +576,51 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
         mdl.notes += c.notes
         end = Q + dirv * (ms + max(m.L, 1.0))
         mdl.tags.append((tuple(map(float, end)), m.name))
+        axes.append((m.name, Q + dirv * ms, end, P0, float(m.pos)))
         ctxs.append(c)
     _build_gussets(ctxs, nd, mdl)
+    _node_dims(mdl, A * (-lneg), A * lpos, axes)
     return mdl
+
+
+_PLANES = {"plan": (0, 1), "front": (0, 2), "side": (1, 2)}
+
+
+def _dim_views(mdl, a, b, value, span, center, k=1.0):
+    """Cota entre a y b en las vistas ortograficas (planta, frontal, lateral) donde el tramo se ve de verdad (no de punta); cada cota va en su plano,
+    desplazada hacia afuera del conjunto.  `value` = valor real (in) que se rotula."""
+    a, b, center = np.asarray(a, float), np.asarray(b, float), np.asarray(center, float)
+    v = b - a
+    n = float(np.linalg.norm(v))
+    if n < 1e-6:
+        return
+    for view, (i, j) in _PLANES.items():
+        pv = np.array([v[i], v[j]])
+        pn = float(np.linalg.norm(pv))
+        if pn < 0.35 * n or pn < 1.0:
+            continue
+        t = pv / pn
+        o2 = np.array([-t[1], t[0]])
+        mid = (a + b) / 2.0
+        if float(o2 @ np.array([mid[i] - center[i], mid[j] - center[j]])) < 0:
+            o2 = -o2
+        off = np.zeros(3)
+        off[i], off[j] = o2[0] * span * 0.07 * k, o2[1] * span * 0.07 * k
+        mdl.dims.append((tuple(a), tuple(b), tuple(off), float(value), [view]))
+
+
+def _node_dims(mdl, m0, m1, axes):
+    """Cotas del nudo para el visor: largos del miembro principal a cada lado del nudo y largo y posicion de cada miembro conectado."""
+    pts = [np.asarray(m0, float), np.asarray(m1, float)] + [np.asarray(q, float) for _n, s_, e_, _p, _pos in axes for q in (s_, e_)]
+    P = np.array(pts)
+    span = float(np.ptp(P, axis=0).max()) or 1.0
+    center = P.mean(axis=0)
+    o = np.zeros(3)
+    for end in (m0, m1):
+        L = float(np.linalg.norm(np.asarray(end, float)))
+        if L > 1.0:
+            _dim_views(mdl, o, end, L, span, center, 1.3)
+    for _name, s_, e_, p0, pos in axes:
+        _dim_views(mdl, s_, e_, float(np.linalg.norm(np.asarray(e_, float) - np.asarray(s_, float))), span, center)
+        if abs(pos) > 1e-6:
+            _dim_views(mdl, o, p0, abs(pos), span, center, 2.2)

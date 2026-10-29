@@ -43,7 +43,7 @@ GRAY = "#a6a6a6"
 
 
 def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label=None, hide=(), bolts: bool = True, gray: bool = False,
-                tags: bool = False):
+                tags: bool = False, dim_fmt=None):
     """Escena de la geometria. `scale` convierte las coordenadas (in) a las unidades mostradas.  gray: todas las piezas en gris (miniaturas de
     geometria); bolts: dibujar los pernos; tags: nombre de cada miembro en su extremo."""
     from .. .gl3d import Scene
@@ -77,6 +77,9 @@ def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label
     if tags:
         for pos, text in getattr(mdl, "tags", []):
             sc.labels.append((tuple(np.asarray(pos, float) * scale), text, "#1f3864", "#ffffffd9", "#1f3864", True))
+    for a, b, off, val, views in (mdl.dims if not gray else []):         # cotas (planta, frontal y lateral) con el interruptor «Cotas» del visor
+        txt = val if isinstance(val, str) else (dim_fmt(val) if dim_fmt else f"{val * scale:.4g}")
+        sc.add_dim(tuple(np.asarray(a, float) * scale), tuple(np.asarray(b, float) * scale), tuple(np.asarray(off, float) * scale), txt, views)
     if loads:
         _add_loads(sc, mdl, scale, load_label)
     return sc

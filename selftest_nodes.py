@@ -177,6 +177,8 @@ def run():
         SC.render_scene_png(sc, p, 24.0, 50.0, size=(420, 320))
         from PIL import Image
         im = np.asarray(Image.open(p).convert("L"))
+        if not sc.dims or any(len(sc.dim_segments(v_, 5.0)[0]) == 0 for v_ in ("plan", "front", "side")):
+            FAIL.append(f"nudos: el visor OpenGL debe recibir cotas en planta, frontal y lateral ({mode})")
         if float((im < 240).mean()) < 0.03 or len(sc.labels) != len(nd_.members):
             FAIL.append(f"nudos: imagen del modelo {mode} casi vacia o sin nombres de miembros")
     print(f"{'vista 3D (z-buffer propio)':34} escena e imagen de los tres modulos, con los nombres de los miembros: OK")

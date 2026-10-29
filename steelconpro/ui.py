@@ -1373,7 +1373,7 @@ class MainWindow(QMainWindow):
             self.tabs_in.setTabVisible(self.tabs_in.indexOf(sw), vis)
         if not self.tabs_in.isTabVisible(self.tabs_in.currentIndex()):
             self.tabs_in.setCurrentWidget(self.tab_widgets["Proyecto"])
-        for wd, vis in ((self.tab_model, True), (self.tab_fem, True), (self.tab_res, True), (self.tab_scheme, conn)):
+        for wd, vis in ((self.tab_model, True), (self.tab_fem, True), (self.tab_res, True), (self.tab_scheme, conn and not self.use_gl)):      # con OpenGL las vistas Planta / Frontal / Lateral y las cotas son del visor
             self.tabs_out.setTabVisible(self.tabs_out.indexOf(wd), vis)
         for wd, nm, off in ((self.tab_fem, "Analisis FEM", fem_off), (self.tab_res, "Resultados", visual)):
             i = self.tabs_out.indexOf(wd)
@@ -1722,7 +1722,7 @@ class MainWindow(QMainWindow):
                 view3d.fit_to_axes(self.cv_3d.ax)
                 self.cv_3d.cv.draw_idle()
                 return
-            sc = cfem_scene.scene_model(mdl, loads=False, scale=1.0 / u.fl, tags=self.chk_loads_geom.isChecked())
+            sc = cfem_scene.scene_model(mdl, loads=False, scale=1.0 / u.fl, tags=self.chk_loads_geom.isChecked(), dim_fmt=lambda v: u.q("L", v))
         except Exception as e:
             log = self._log_error("draw_geom (conexion)", e)
             sc = self._scene_message(f"No se pudo armar el modelo 3D:\n{type(e).__name__}: {str(e)[:160]}\n\nDetalle en: {log}", "#9c0006")

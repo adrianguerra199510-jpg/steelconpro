@@ -90,7 +90,8 @@ exportan e importan (JSON), quedan en todas las listas del programa (los pernos 
 
 ## Visor 3D
 
-Todos los módulos (placa base y nudos) usan el **visor OpenGL de la última versión de PlacaBase Pro** (`gl3d.py`: sombreado plano con aristas vivas, órbita con el ratón,
+Todos los módulos (placa base y nudos) usan el **visor OpenGL de la última versión de PlacaBase Pro** (un solo visor con Iso, Planta, Frontal y Lateral y el interruptor **Cotas**: en los nudos
+acota los largos del miembro principal y de cada miembro conectado y su posición; con OpenGL no hay pestaña «Planta y elevación») (`gl3d.py`: sombreado plano con aristas vivas, órbita con el ratón,
 etiquetas) cuando el equipo ofrece OpenGL; si no, usan el visor clásico de matplotlib. Se puede forzar el clásico con **Ver > Visor 3D OpenGL** (desmarcar; se aplica al reiniciar)
 o con la variable de entorno `SCP_GL=0`. El programa **arranca maximizado**.
 
