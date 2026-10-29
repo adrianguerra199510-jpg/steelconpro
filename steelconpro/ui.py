@@ -1286,7 +1286,7 @@ class MainWindow(QMainWindow):
         from .ui_wizard import NewConnectionDialog
         self.store_ui()
         dlg = NewConnectionDialog(self, self.prj.ctype if self.prj.ctype in CONN_TYPES else None)
-        if dlg.exec() == dlg.Accepted:
+        if dlg.exec():
             c = dlg.choice()
             self.add_connection(c["ctype"], c["template"])
 
@@ -1295,7 +1295,7 @@ class MainWindow(QMainWindow):
         from .ui_wizard import SaveTemplateDialog
         self.store_ui()
         dlg = SaveTemplateDialog(self, self.prj)
-        if dlg.exec() == dlg.Accepted:
+        if dlg.exec():
             self.statusBar().showMessage(f"Plantilla guardada: {dlg.path}", 8000)
 
     def add_connection(self, ctype=CT_BASEPLATE, template=None):
@@ -2719,6 +2719,16 @@ def main():
             pass
     gl3d.set_default_format()
     app = QApplication(sys.argv)
+
+    def _hook(et, ev, tb):                 # un error dentro de un boton ya no pasa en silencio: se muestra y se deja en la consola
+        import traceback
+        txt = "".join(traceback.format_exception(et, ev, tb))
+        sys.stderr.write(txt)
+        try:
+            QMessageBox.critical(None, "SteelConPro", f"Ocurrio un error inesperado:\n\n{ev}\n\n{txt[-1500:]}")
+        except Exception:
+            pass
+    sys.excepthook = _hook
     app.setApplicationName("SteelConPro")
     gl3d.available()                       # sondea OpenGL antes de crear la ventana (ajusta el suavizado si es por software)
     app.setStyle("Fusion")

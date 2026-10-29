@@ -768,6 +768,14 @@ def run():
                 FAIL.append(f"nudos UI {ct}: export_target sin resultados")
             if win.worker is not None and win.worker.isRunning():
                 FAIL.append(f"nudos UI {ct}: VERIFICAR no debe lanzar ningun analisis 3D")
+        # ---- el boton «Nueva» (con el asistente) crea la conexion: se acepta el dialogo con un temporizador
+        from PySide6.QtCore import QTimer
+        n_bk = len(win.book)
+        QTimer.singleShot(300, lambda: (app.activeModalWidget().accept() if app.activeModalWidget() is not None else None))
+        win.con_new()
+        app.processEvents()
+        if len(win.book) != n_bk + 1:
+            FAIL.append(f"asistente: el boton Nueva no creo la conexion ({n_bk} -> {len(win.book)})")
         # ---- designar el miembro principal desde la tabla de miembros
         win.add_connection(CT_NODE)
         win.prj.node = PRE.build(MODE_COL, "int2", "I", "tab")
