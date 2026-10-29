@@ -631,8 +631,8 @@ def run():
         _SH.USER_DB = type(old_db2)(os.path.join(tmp, "shapes_ui.json"))
         M._mat_file = lambda: type(old_db2)(os.path.join(tmp, "materials_ui.json"))
         try:
-            if _gl.gl_wanted() or win.use_gl:
-                FAIL.append("visor: por omision debe usarse el visor clasico de matplotlib (el OpenGL es opcional)")
+            if not _gl.gl_wanted() or win.use_gl != _gl.available():
+                FAIL.append("visor: por omision se usa el visor OpenGL de PlacaBase Pro cuando el equipo lo ofrece (y el clasico si no)")
             lib = SectionLibrary(win.us, None, pick=True, current="W14X90")
             if lib.tbl.rowCount() > 500 or lib.cb_fam.currentData() != "W":
                 FAIL.append("biblioteca de secciones: debe abrir en la familia de la seccion actual")

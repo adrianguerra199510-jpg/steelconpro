@@ -30,22 +30,27 @@ def solve_conn(prj, detail: bool = True):
 
 
 def save_figures(prj, res, folder: str) -> list:
-    """Imagenes del modelo 3D (isometrica y dos vistas) y del esquema de planta y elevacion de un modulo de nudo."""
+    """Imagenes del modelo 3D (isometrica y dos vistas) y del esquema de planta y elevacion de un modulo de nudo.  El 3D se dibuja con el visor clasico
+    de matplotlib, el mismo con que la placa base arma las imagenes de su memoria."""
     from pathlib import Path
     f = Path(folder)
     f.mkdir(parents=True, exist_ok=True)
-    from .assembly import build_model
-    from .fem import scene as S
-    mdl = build_model(prj)
-    sc = S.scene_model(mdl, loads=False, tags=True)
-    out = []
-    for nm, (el, az) in (("modelo3d_iso.png", (24.0, 50.0)), ("modelo3d_planta.png", (89.0, 0.0)), ("modelo3d_frente.png", (0.0, -90.0))):
-        p = str(f / nm)
-        S.render_scene_png(sc, p, el, az, size=(1100, 800), title=f"{prj.element} — {mdl.name}")
-        out.append(p)
-    import matplotlib
-    matplotlib.use("Agg")
     from matplotlib.figure import Figure
+    from .assembly import build_model
+    from .. import view3d
+    mdl = build_model(prj)
+    kl = prj.units().fl
+    out = []
+    for nm, (el, az) in (("modelo3d_iso.png", (24.0, -58.0)), ("modelo3d_planta.png", (90.0, -90.0)), ("modelo3d_frente.png", (0.0, -90.0))):
+        fig = Figure(figsize=(7.0, 5.6), dpi=150)
+        ax = fig.add_axes([0.0, 0.0, 1.0, 0.95], projection="3d")
+        view3d.plot_model(ax, mdl, scale=1.0 / kl, tags=True)
+        ax.view_init(elev=el, azim=az)
+        view3d.fit_to_axes(ax)
+        fig.suptitle(mdl.name, fontsize=9, x=0.02, ha="left", y=0.99)
+        p = str(f / nm)
+        fig.savefig(p)
+        out.append(p)
     fig = Figure(figsize=(8.0, 9.5), dpi=150)
     module_for(prj.ctype).draw(fig, prj)
     p = str(f / "esquema.png")

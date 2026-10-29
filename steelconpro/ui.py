@@ -259,7 +259,7 @@ class MainWindow(QMainWindow):
     def _set_gl_viewer(self, on):
         from PySide6.QtCore import QSettings
         QSettings("SteelConPro", "SteelConPro").setValue("viewer_gl", bool(on))
-        QMessageBox.information(self, "Visor 3D", ("Visor OpenGL activado" if on else "Visor clasico (matplotlib) activado")
+        QMessageBox.information(self, "Visor 3D", ("Visor OpenGL activado (el de PlacaBase Pro)" if on else "Visor clasico (matplotlib) activado")
                                 + ": el cambio se aplica al reiniciar el programa.")
 
     def _build_actions(self):
@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
         act(m_exp, "Imagenes (.png)...", self.export_png)
         m_exp.addSeparator()
         act(m_exp, "Modelo solido 3D (placa base: .geo para Gmsh; otras conexiones: .step)...", self.export_3d)
-        a_gl = QAction("Visor 3D OpenGL (experimental; el clasico es el de matplotlib)", self)
+        a_gl = QAction("Visor 3D OpenGL (si se desmarca se usa el visor clasico de matplotlib)", self)
         a_gl.setCheckable(True)
         a_gl.setChecked(gl3d.gl_wanted())
         a_gl.toggled.connect(self._set_gl_viewer)
@@ -1697,8 +1697,8 @@ class MainWindow(QMainWindow):
         canvas.cv.draw_idle()
 
     def _draw_geom_conn(self):
-        """Modelo 3D de un modulo de nudo: miembros, placas, angulos y pernos; el nombre de cada miembro en su extremo.  Con OpenGL activo usa el
-        visor OpenGL; por omision usa el visor clasico de matplotlib (el mismo de la placa base)."""
+        """Modelo 3D de un modulo de nudo: miembros, placas, angulos y pernos; el nombre de cada miembro en su extremo.  Usa el mismo visor de la placa base:
+        OpenGL (por omision, si el equipo lo ofrece) o, sin OpenGL, el visor clasico de matplotlib."""
         from .conn.fem.builders import build_model
         u = self.us
         try:

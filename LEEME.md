@@ -90,8 +90,9 @@ exportan e importan (JSON), quedan en todas las listas del programa (los pernos 
 
 ## Visor 3D
 
-El visor por omisión es el **clásico de matplotlib** (el de PlacaBase Pro: gira con el ratón, zoom con la rueda, barra de herramientas, encuadre automático). El visor OpenGL es
-opcional: **Ver > Visor 3D OpenGL** (se aplica al reiniciar) o la variable de entorno `SCP_GL=1`. El programa **arranca maximizado**.
+Todos los módulos (placa base y nudos) usan el **visor OpenGL de la última versión de PlacaBase Pro** (`gl3d.py`: sombreado plano con aristas vivas, órbita con el ratón,
+etiquetas) cuando el equipo ofrece OpenGL; si no, usan el visor clásico de matplotlib. Se puede forzar el clásico con **Ver > Visor 3D OpenGL** (desmarcar; se aplica al reiniciar)
+o con la variable de entorno `SCP_GL=0`. El programa **arranca maximizado**.
 
 Los herrajes del 3D son representaciones con proporciones razonables (placas, ángulos, pernos con cabeza y tuerca); las verificaciones se hacen con los datos de las operaciones.
 Los archivos de ejemplo `ejemplos/NC-01_nudo_viga_columna.scp`, `VV-01_viga_a_viga.scp` y `CR-01_crucetas.scp` se regeneran con `tools/make_examples.py`.
