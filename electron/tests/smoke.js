@@ -25,7 +25,11 @@ const os = require('os');
     await page.waitForSelector('.editor', { timeout: 30000 });
     await page.waitForSelector('.tree-item:has-text("Placa base")', { timeout: 30000 });
     check(true, 'el editor abre el proyecto y lista las operaciones');
-    await page.waitForFunction(() => window.__E && window.__E.viewer && window.__E.viewer.parts.length > 3, null, { timeout: 30000 });
+    for (let i = 0; i < 60; i++) {                       // (waitForFunction evalua texto y la politica de seguridad de la aplicacion lo impide)
+      if (await page.evaluate(() => !!(window.__E && window.__E.viewer && window.__E.viewer.parts.length > 3))) break;
+      await page.waitForTimeout(500);
+      if (i === 59) throw new Error('el visor no recibio piezas');
+    }
     check(true, 'el visor 3D recibe las piezas del modelo');
     await page.waitForSelector('.big-chip.ok, .big-chip.bad', { timeout: 60000 });
     check(true, 'se calculan los resultados por operación');

@@ -65,6 +65,15 @@ E.dropSnap = () => { E.undo.pop(); updateUndo(); };
 E.refreshTree = () => renderTree();
 E.renameElement = (old, nw) => { renameRefs(E.conn().node, old, nw); renderTree(); };
 
+// Vuelve al estado anterior a la última acción (sin dejarlo para «rehacer»): se usa al cancelar una ventana de operación nueva.
+function revertSnap() {
+  if (!E.undo.length) return;
+  E.conns = JSON.parse(E.undo.pop());
+  E.idx = Math.min(E.idx, E.conns.length - 1);
+  E.sel = null;
+  applyUnits(); refreshAll(); markDirty(); updateUndo();
+}
+
 function undo() {
   if (!E.undo.length) return;
   E.redo.push(JSON.stringify(E.conns));
@@ -401,12 +410,14 @@ async function createOperation(kind) {
   }
   E.snap();
   try {
+    const before = nd.operations.length;
     const r = await call('add_operation', { connection: E.conn(), kind, params });
     E.replaceConn(r.connection);
     E.sel = `o:${r.index}`;
+    if (E.conn().node.operations.length <= before && kind !== K.BASE) toast(`La nueva operación reemplaza la conexión que ya tenía «${params.member}».`, 'info', 5000);
     E.changed({ structure: true });
     const ok = await openOperation(E, r.index, { isNew: true });
-    if (!ok) { E.dropSnap(); }
+    if (!ok) { revertSnap(); return; }
     E.changed({ structure: true });
     renderTree();
   } catch (e) { E.dropSnap(); errorBox(e); }
@@ -491,7 +502,11 @@ function renderResults(err) {
   const groups = new Map();
   for (const c of r.checks) { const g = c.group || 'Otras verificaciones'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(c); }
   const nd = E.conn().node;
-  for (const [g, list] of groups) {
+  const ordered = [...groups].sort((a, b) => {
+    const ia = /^(\d+)\./.exec(a[0]), ib = /^(\d+)\./.exec(b[0]);
+    return (ia ? parseInt(ia[1], 10) : 1e9) - (ib ? parseInt(ib[1], 10) : 1e9);
+  });
+  for (const [g, list] of ordered) {
     const m = /^(\d+)\./.exec(g);
     const oi = m ? parseInt(m[1], 10) - 1 : -1;
     const o = oi >= 0 ? nd.operations[oi] : null;
