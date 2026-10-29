@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Geometria 3D de los nudos (viga-columna, viga a viga, crucetas): miembro principal + miembros conectados con sus herrajes.
+"""Geometria 3D del nudo: miembro principal (el que designa el usuario) + miembros conectados con sus herrajes.
 
 `build_model(prj) -> Model3D` arma las piezas (union de prismas), los pernos y las advertencias de colocacion.  Solo geometria: no hay
 calculo.  Convenciones (in, grados):
-    · el nudo esta en el origen; el miembro principal pasa por el con su eje a lo largo de Z (columna) o de X (viga, cordon);
-    · cada miembro conectado sale de un punto del eje principal (pos, off) en la direccion (azimut, elevacion) y arranca donde esa recta
+    · el nudo esta en el origen; el miembro principal pasa por el con su eje segun su azimut y su elevacion (vertical = 90°, a lo largo de Z);
+    · cada miembro conectado sale de un punto del eje principal (pos, off, off2) en la direccion (azimut, elevacion) y arranca donde esa recta
       sale de la seccion del principal (mas el retranqueo);
     · los ejes de cada seccion son (sx, sy, eje) con sx×sy = eje: sy es el peralte (d) y sx el ancho (bf) del catalogo.
 """
 from __future__ import annotations
+import copy
 import math
 
 import numpy as np
@@ -17,8 +18,8 @@ from .. import materials as M
 from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN
 from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, unit
-from .specs import (MODE_COL, MODE_BEAM, MODE_CHORD, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
-                    OP_COPE, OP_CONT, GUSSET_OPS, MAIN_NAMES, Operation)
+from .specs import (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
+                    OP_COPE, OP_CONT, GUSSET_OPS, END_LABELS, Operation, Member)
 
 EMBED = 0.35            # las placas entran un poco en el miembro principal para que no quede una rendija en las uniones esviadas
 DIAG_MIN = 10.0         # elevacion (grados) desde la cual un miembro se considera diagonal (color y cartela por omision)
@@ -51,11 +52,21 @@ def frame(A, pref, roll_deg=0.0):
     return A, sx, sy
 
 
+def axis_dir(az, el):
+    a, e = math.radians(az), math.radians(el)
+    return unit([math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e)])
+
+
 def main_frame(nd):
-    if nd.mode == MODE_COL:
-        return frame([0, 0, 1], [1, 0, 0], nd.main_roll)
-    e = math.radians(nd.main_slope)
-    return frame([math.cos(e), 0.0, math.sin(e)], [0, 0, 1], nd.main_roll)
+    """(eje A, sx, sy) del miembro principal: A segun su azimut y elevacion; sy hacia arriba (hacia +X si es vertical) y sx = sy × A."""
+    A = axis_dir(nd.main_az, nd.main_el)
+    return frame(A, [0, 0, 1] if abs(A[2]) < 0.995 else [1, 0, 0], nd.main_roll)
+
+
+def attach_point(nd, m, frm=None):
+    """Punto del eje de `m` donde se mide su llegada al principal, y su desplazamiento (off2, off) en el plano de la seccion del principal."""
+    A, msx, msy = frm or main_frame(nd)
+    return A * m.pos + msx * m.off2 + msy * m.off, (float(m.off2), float(m.off))
 
 
 def member_dir(m):
@@ -474,20 +485,121 @@ def _build_gussets(ctxs, nd, mdl):
 
 
 # ================================================================================================== modelo completo
+def exit_dist(ext, o2, d2):
+    """Distancia desde el punto de llegada hasta la cara del principal que toca el miembro, o None si no lo toca.  Un miembro que sigue el eje del
+    principal (paralelo y sobre el) arranca en el propio punto de llegada: distancia 0."""
+    if math.hypot(d2[0], d2[1]) > 1e-6:
+        return ray_exit(ext, o2, d2)
+    return 0.0 if math.hypot(o2[0], o2[1]) < 1e-6 else None
+
+
 def attach_info(nd, m) -> dict:
     """Como llega un miembro al principal: punto de contacto Q, distancia s_ex desde el eje, cara ('ala' | 'alma' | 'cara') y direccion."""
     mshape = shape_of(nd.main_shape)
     A, msx, msy = main_frame(nd)
     dirv = member_dir(m)
-    P0 = A * m.pos + (msy * m.off if nd.mode != MODE_COL else 0.0)
-    o2 = (0.0, float(m.off) if nd.mode != MODE_COL else 0.0)
+    P0, o2 = attach_point(nd, m, (A, msx, msy))
     d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
-    s_ex = ray_exit(outer_extent(mshape), o2, d2) if math.hypot(*d2) > 1e-6 else None
+    s_ex = exit_dist(outer_extent(mshape), o2, d2)
     face = "cara"
     if s_ex is not None and mshape.kind == W_SHAPE:
         y = o2[1] + s_ex * d2[1]
         face = "ala" if abs(y) >= mshape.d / 2.0 - 1e-6 else "alma"
     return {"Q": P0 + dirv * (s_ex or 0.0), "s": s_ex, "face": face, "dir": dirv, "P0": P0, "main": mshape, "touches": s_ex is not None}
+
+
+def _angles(v):
+    """(azimut, elevacion) en grados de un vector."""
+    v = unit(v)
+    return (math.degrees(math.atan2(v[1], v[0])) % 360.0 if math.hypot(v[0], v[1]) > 1e-9 else 0.0), math.degrees(math.asin(max(-1.0, min(1.0, v[2]))))
+
+
+def set_main(nd, name) -> list:
+    """Designa como principal al miembro `name` (como el miembro de apoyo de IDEA StatiCa): el nudo se mueve al punto donde ese miembro llegaba al
+    principal anterior, el miembro toma el lugar del principal (seccion, acero, eje y giro) y el principal anterior pasa a ser miembro conectado
+    (dos miembros si pasaba por el nudo) con la misma geometria global.  El miembro designado pasa por el nudo y termina en el: queda del lado de
+    donde venia.  Sus operaciones y sus cargas dejan de tener sentido (eran su conexion al principal anterior) y se descartan; las de los demas
+    miembros se conservan.  Devuelve los avisos para el usuario."""
+    m = nd.member_named(name)
+    if m is None:
+        return []
+    notes = []
+    old = copy.copy(nd)
+    A, msx, msy = main_frame(nd)
+    info = attach_info(nd, m)
+    O_old = np.zeros(3)
+    Pnew = info["P0"]
+    s_ex = info["s"] or 0.0
+    if not info["touches"]:
+        notes.append(f"El eje de «{name}» no tocaba al principal anterior: el nudo se coloca en el punto de su posición ({m.pos:g}).")
+    lneg, lpos = old.lengths()
+    # ---- el principal anterior se vuelve miembro (o dos, si pasaba por el nudo)
+    olds = []
+    for sgn, ln in ((1.0, lpos), (-1.0, lneg)):
+        if ln > 1e-6:
+            olds.append((sgn, ln))
+    others = [x for x in nd.members if x is not m]
+    new_members = []
+    # ---- el miembro designado toma el lugar del principal
+    nd.main_name, nd.main_shape, nd.main_steel = m.name, m.shape, m.steel
+    nd.main_az, nd.main_el, nd.main_roll = m.az, m.el, m.roll
+    nd.main_end = END_LABELS[2]
+    nd.main_len_neg, nd.main_len_pos = 0.0, max(s_ex + max(m.gap, 0.0) + m.L, 1.0)
+    A2, msx2, msy2 = main_frame(nd)
+    frm2 = (A2, msx2, msy2)
+
+    def rel(P):
+        D = np.asarray(P, float) - Pnew
+        return float(np.dot(D, A2)), float(np.dot(D, msy2)), float(np.dot(D, msx2))
+
+    mshape2 = shape_of(nd.main_shape)
+    ext2 = outer_extent(mshape2)
+    for k, (sgn, ln) in enumerate(olds):
+        t0 = float(np.dot(Pnew - O_old, A))                   # altura del punto de llegada sobre el eje del principal anterior
+        P0 = O_old + A * t0
+        dirv = sgn * A
+        pos, off, off2 = rel(P0)
+        d2 = (float(np.dot(dirv, msx2)), float(np.dot(dirv, msy2)))
+        s2 = exit_dist(ext2, (off2, off), d2)
+        if s2 is None:
+            notes.append(f"El principal anterior ({old.main_name}) no toca al nuevo principal: no se conserva su lado {'+' if sgn > 0 else '−'}.")
+            continue
+        Lfree = ln - sgn * t0 - s2
+        if Lfree < 1.0:
+            continue
+        az, el = _angles(dirv)
+        nm = old.main_name if len(olds) == 1 else f"{old.main_name}{'+' if sgn > 0 else '−'}"
+        mm = Member(name=nm, shape=old.main_shape, steel=old.main_steel, az=az, el=el, pos=pos, off=off, off2=off2, L=Lfree, roll=old.main_roll, gap=0.0)
+        new_members.append(mm)
+    # ---- los demas miembros conservan su geometria global (nuevo origen y ejes)
+    moved = []
+    for x in others:
+        io = attach_info(old, x)
+        x.pos, x.off, x.off2 = rel(io["P0"])
+        d2 = (float(np.dot(io["dir"], msx2)), float(np.dot(io["dir"], msy2)))
+        s_new = exit_dist(ext2, (x.off2, x.off), d2)
+        gap = (io["s"] or 0.0) + x.gap - (s_new or 0.0)                    # el extremo del miembro queda donde estaba
+        if s_new is None:
+            notes.append(f"«{x.name}» no toca al nuevo principal (su eje no cruza la sección); revise su posición.")
+        if gap > 1e-6 and abs(gap - x.gap) > 1e-6:
+            moved.append(x.name)
+        x.gap = max(gap, 0.0)
+    if moved:
+        notes.append("Quedan separados del nuevo principal (retranqueo) para no cambiar su posición: " + ", ".join(moved)
+                     + ". Acérquelos o cambie sus operaciones.")
+    nd.members = new_members + others
+    # ---- operaciones y cargas
+    for nmx in (m.name,):
+        dropped_ops = [o for o in nd.operations if o.member == nmx]
+        dropped_loads = [x for x in nd.loads if x.member == nmx]
+        nd.operations = [o for o in nd.operations if o.member != nmx]
+        nd.loads = [x for x in nd.loads if x.member != nmx]
+    if dropped_ops or dropped_loads:
+        notes.append(f"Se descartaron {len(dropped_ops)} operación(es) y {len(dropped_loads)} carga(s) de «{m.name}»: eran su conexión al principal anterior; "
+                     f"defínalas de nuevo en los miembros que ahora llegan a él.")
+    if new_members:
+        notes.append("El principal anterior pasa a ser miembro conectado: " + ", ".join(x.name for x in new_members) + " (sin operaciones ni cargas todavía).")
+    return notes
 
 
 def build_model(prj, vals=None) -> Model3D:
@@ -506,7 +618,7 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
     Fy, Fu = _steel(nd.main_steel)
     if lneg + lpos < 1.0:
         lneg = lpos = 24.0
-    mdl.parts.append(Part(MAIN_NAMES[nd.mode], "column", f"{MAIN_NAMES[nd.mode]} {mshape.label}", Fy, Fu,
+    mdl.parts.append(Part(nd.main_name, "column", f"{nd.main_name} {mshape.label}", Fy, Fu,
                           section_prisms(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos), t=mshape.tw, stub=True))
     ext = outer_extent(mshape)
     names = {m.name for m in nd.members}
@@ -519,10 +631,9 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
         shp = shape_of(m.shape)
         dirv = member_dir(m)
         _, sx, sy = member_frame(m)
-        P0 = A * m.pos + (msy * m.off if nd.mode != MODE_COL else 0.0)
-        o2 = (0.0, float(m.off) if nd.mode != MODE_COL else 0.0)
+        P0, o2 = attach_point(nd, m, (A, msx, msy))
         d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
-        s_ex = ray_exit(ext, o2, d2) if math.hypot(*d2) > 1e-6 else None
+        s_ex = exit_dist(ext, o2, d2)
         if s_ex is None:
             mdl.notes.append(f"{m.name}: su eje no toca al miembro principal (revise el azimut, la elevación o la posición).")
             s_ex = 0.0

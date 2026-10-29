@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Memoria de calculo (PDF y Word) de los modulos de nudo (viga-columna, viga a viga, crucetas).
+"""Memoria de calculo (PDF y Word) de la conexion de nudo.
 
 `report.py` delega aqui cuando `prj.ctype` no es la placa base.  Misma estructura que la memoria de la placa base:
 datos, casos de carga, verificaciones por operacion, veredicto, avisos, anexo de ecuaciones y dibujos.

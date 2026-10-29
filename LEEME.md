@@ -2,19 +2,17 @@
 
 # SteelConPro 1.1
 
-Diseño y verificación de **conexiones de acero** en cuatro módulos:
+Diseño y verificación de **conexiones de acero** en dos módulos:
 
 | Módulo | Qué es | Estado |
 |---|---|---|
 | **Placa base** | placas base de columna (perfiles **W, HSS cuadrado/rectangular, HSS circular y Pipe**), anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis de elementos finitos sólido (Gmsh + CalculiX) | terminado |
-| **Nudo viga-columna** | cualquier columna, de extremo o intermedia, con vigas en cualquier ubicación y ángulo (y diagonales con cartela) | flujo por operaciones, verificación por código (AISC 360-22) y vista 3D; el análisis 3D por elementos finitos llega después |
-| **Viga a viga** | cualquier viga principal con vigas secundarias ubicadas respecto del nudo, a corte o a momento | ídem |
-| **Crucetas** | cordón (o viga) con diagonales y montantes en cualquier ángulo, con cartela | ídem |
+| **Conexión de nudo** | un nudo con **cualquier número de miembros** (columnas, vigas, diagonales; cualquier sección y ángulo) y **un miembro principal que usted designa** (el que recibe a los demás, como el miembro de apoyo de IDEA StatiCa) | flujo por operaciones, verificación por código (AISC 360-22) y vista 3D; el análisis 3D por elementos finitos llega después |
 
-Los módulos de nudo se arman **por operaciones**, como en IDEA StatiCa Connection (*Miembros → Operaciones → Cargas → Análisis → Informe*), y se verifican
-**por código** con tablas de D/C por operación y memoria de cálculo, como en RAM Connection. Su pestaña *Análisis FEM* sigue desactivada hasta la etapa del análisis
+No hay «tipologías» de nudo (viga-columna, viga a viga, crucetas): el tipo de nudo lo define lo que usted arma. El nudo se arma **por operaciones**, como en IDEA StatiCa Connection (*Miembros → Operaciones → Cargas → Análisis → Informe*), y se verifican
+**por código** con tablas de D/C por operación y memoria de cálculo, como en RAM Connection. La pestaña *Análisis FEM* del nudo sigue desactivada hasta la etapa del análisis
 por elementos finitos. Las tipologías anteriores (placa de corte, doble ángulo, asiento, empalmes, placa extrema, cartela, HSS, RBS y puente) se retiraron como
-módulos independientes: ahora son operaciones de estos tres módulos.
+módulos independientes: ahora son operaciones de la conexión de nudo.
 
 Normas de la placa base: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**.
 
@@ -30,7 +28,7 @@ que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
 Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
 
 
-## Módulos de nudo: viga-columna, viga a viga y crucetas
+## Conexión de nudo y miembro principal
 
 **Nueva conexión** (botón *Nueva*, `Ctrl+Mayús+N`) elige el módulo y el punto de partida. **No hay plantillas predefinidas**: la conexión nueva empieza **en blanco**
 (solo el miembro principal; usted agrega los miembros, las operaciones y las cargas) o desde una **plantilla propia**.
@@ -42,9 +40,16 @@ copiar a otra PC. Guardar con el mismo nombre la reemplaza.
 
 Después el nudo se edita en cuatro pasos (pestañas dentro del módulo):
 
-1. **Miembros**: el **miembro principal** (columna, viga principal o cordón: **cualquier sección** del catálogo AISC, de la biblioteca de secciones o dibujada en el
-   Section Designer; acero, giro, inclinación del eje, extremo o intermedio y largos) y la tabla de **miembros conectados** (Agregar, Duplicar, Quitar) con su sección y
-   acero, **azimut**, **elevación**, **posición** respecto del nudo, desnivel, largo, giro y retranqueo. El miembro arranca donde su eje sale de la sección del principal.
+1. **Miembros**: la tabla lista **todos los miembros del nudo**; el **principal lleva ★** en la primera fila. Al seleccionar una fila se edita ese miembro (*Agregar*,
+   *Duplicar*, *Quitar*), con **cualquier sección** del catálogo AISC, de la biblioteca de secciones o dibujada en el Section Designer.
+   - **Miembro principal**: nombre, sección, acero, **azimut y elevación de su eje** (90° = vertical, como una columna; 0° = horizontal, como una viga o un cordón; cualquier
+     valor intermedio = inclinado), giro, extremo (*continuo* o *termina en el nudo* por el lado + o −) y largos de cada lado.
+   - **Miembros conectados**: sección y acero, **azimut**, **elevación**, **posición** sobre el eje del principal (medida desde el nudo), desplazamiento lateral en los dos
+     sentidos de la sección del principal, largo, giro y retranqueo. El miembro arranca donde su eje sale de la sección del principal.
+   - **★ Designar como principal**: con un miembro conectado seleccionado, ese miembro pasa a ser el principal (sección, acero, eje y giro) y el principal anterior queda como
+     miembro conectado (como dos miembros si pasaba por el nudo). **La geometría del nudo no se mueve**: el origen se traslada al punto donde el miembro llegaba y los demás
+     miembros conservan su posición (si ya no tocan al nuevo principal, quedan con un retranqueo). Las operaciones y las cargas del miembro designado se descartan, porque eran su
+     conexión al principal anterior; el programa lo avisa antes de hacerlo y hay que definirlas de nuevo en los miembros que ahora llegan al principal.
 2. **Operaciones**: una lista ordenada que se aplica a los miembros (*Agregar operación*): **placa simple, doble ángulo, asiento, placa extrema a ras o extendida, alas
    soldadas con alma atornillada, cartela atornillada o con miembro soldado, corte del extremo (cope) y placas de continuidad**. Cada operación tiene sus parámetros
    (pernos: diámetro, calidad, número y separación; placas: espesor y acero; filetes; profundidades del corte). A lo sumo una operación de conexión por miembro; el 3D se
@@ -104,10 +109,12 @@ etiquetas) cuando el equipo ofrece OpenGL; si no, usan el visor clásico de matp
 o con la variable de entorno `SCP_GL=0`. El programa **arranca maximizado**.
 
 Los herrajes del 3D son representaciones con proporciones razonables (placas, ángulos, pernos con cabeza y tuerca); las verificaciones se hacen con los datos de las operaciones.
-Los archivos de ejemplo `ejemplos/NC-01_nudo_viga_columna.scp`, `VV-01_viga_a_viga.scp` y `CR-01_crucetas.scp` son proyectos normales (no plantillas); se regeneran con `tools/make_examples.py`, que usa los nudos de prueba de `tools/node_presets.py`.
+Los archivos de ejemplo `ejemplos/CN-01_columna_con_vigas.scp`, `CN-02_viga_con_secundarias.scp` y `CN-03_cordon_con_diagonales.scp` son proyectos normales (no plantillas); se regeneran con `tools/make_examples.py`, que usa los nudos de prueba de `tools/node_presets.py`.
 
-**Archivos anteriores.** Los `.scp` que contengan conexiones de las tipologías retiradas se abren, pero esas conexiones se omiten (el programa avisa cuáles); las
-placas base se abren igual que siempre.
+**Archivos anteriores.** Los `.scp` con nudos de la versión con tipologías (*Nudo viga-columna*, *Viga a viga*, *Crucetas*) y las plantillas que se guardaron con ellas se abren como
+conexión de nudo: el principal queda orientado como estaba (vertical en el nudo viga-columna, horizontal en los otros dos), con la misma geometría y los mismos resultados. Los
+`.scp` con conexiones de las tipologías retiradas antes (placa de corte, doble ángulo, asiento...) se abren, pero esas conexiones se omiten (el programa avisa cuáles); las placas
+base se abren igual que siempre.
 
 **Para modificar o ampliar un módulo**: los datos están en `conn/specs.py` (`Member`, `Nodo`), el nudo en blanco y el miembro nuevo en `conn/presets.py`, la geometría
 3D (secciones, recorte de cada miembro contra el principal, herrajes, cartelas) en `conn/assembly.py` y la pestaña de entrada en `ui_nodes.py`; el asistente es
@@ -449,9 +456,9 @@ completo por lotes.
 | `PB-01_W14X90.scp` | W14X90, 22×22×2", 8 pernos Ø1¼", llave de corte | 0.750 | distancia al borde |
 | `PB-02_HSS12_rigidizada.scp` | HSS12X12X½, 24×24×2", rigidizadores perimetrales, soldadura CJP | 0.949 | esbeltez del rigidizador |
 | `PB-03_poste_circular.scp` | Pipe/HSS16 sobre placa circular Ø30", 12 pernos Ø1½" con gancho en J | 1.000 | aplastamiento del concreto |
-| `NC-01_nudo_viga_columna.scp` | columna W14X90 intermedia con cuatro vigas (placa extrema extendida, doble ángulo, placa simple, alas soldadas) y una diagonal con cartela | — | verificación por código |
-| `VV-01_viga_a_viga.scp` | viga principal W24X55 con tres secundarias (placa extrema a ras, placa simple, doble ángulo esviada 60°) | — | verificación por código |
-| `CR-01_crucetas.scp` | cordón HSS10X10 con dos diagonales en V y un montante, cartela atornillada | — | verificación por código |
+| `CN-01_columna_con_vigas.scp` | columna W14X90 intermedia con cuatro vigas (placa extrema extendida, doble ángulo, placa simple, alas soldadas) y una diagonal con cartela | — | verificación por código |
+| `CN-02_viga_con_secundarias.scp` | viga principal W24X55 con tres secundarias (placa extrema a ras, placa simple, doble ángulo esviada 60°) | — | verificación por código |
+| `CN-03_cordon_con_diagonales.scp` | cordón HSS10X10 con dos diagonales en V y un montante, cartela atornillada | — | verificación por código |
 
 ---
 

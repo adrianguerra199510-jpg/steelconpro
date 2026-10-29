@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Los tres modulos de nudo (viga-columna, viga a viga, crucetas) vistos por la interfaz: identidad, texto de la lista y esquema (planta y elevacion).
+"""El modulo de nudo vista por la interfaz: identidad, texto de la lista y esquema (planta y elevacion).
 
 `solve` corre las verificaciones por codigo (conn/checks); el analisis 3D por elementos finitos se agrega despues.
 """
@@ -8,17 +8,16 @@ import math
 
 import numpy as np
 
-from .specs import (CT_NODE, CT_B2B, CT_TRUSS, MODE_COL, MODE_BEAM, MODE_CHORD, MAIN_NAMES, MEMBER_NAMES, ATTR_OF)
+from .specs import CT_NODE, ATTR_OF
 
 
 class NodeModule:
     VISUAL = False                                 # tiene verificaciones por codigo (ver conn/checks); el analisis 3D llega despues
     NORMS = "AISC 360-22 (Especificacion), AISC Steel Construction Manual 15a ed., AISC 341/358 donde aplique"
 
-    def __init__(self, ctype, mode, tab, prefix, noun, plural):
-        self.NAME, self.MODE, self.ATTR, self.TAB, self.PREFIX = ctype, mode, ATTR_OF[ctype], tab, prefix
+    def __init__(self, ctype, tab, prefix):
+        self.NAME, self.ATTR, self.TAB, self.PREFIX = ctype, ATTR_OF[ctype], tab, prefix
         self.TITLE = tab
-        self.noun, self.plural = noun, plural      # "viga" / "vigas", "diagonal" / "diagonales"...
 
     def spec(self, prj):
         return getattr(prj, self.ATTR)
@@ -26,7 +25,7 @@ class NodeModule:
     def label(self, prj) -> str:
         nd = self.spec(prj)
         n = len(nd.members)
-        return f"{nd.main_shape}  ·  {n} {self.noun if n == 1 else self.plural}  ·  {len(nd.operations)} op."
+        return f"principal {nd.main_name} {nd.main_shape}  ·  {n} miembro{'' if n == 1 else 's'} conectado{'' if n == 1 else 's'}  ·  {len(nd.operations)} op."
 
     def signature(self, prj) -> str:
         """Huella de todo lo que cambia el resultado (miembros, operaciones, cargas y unidades): detecta resultados desactualizados."""
@@ -43,7 +42,7 @@ class NodeModule:
     def input_rows(self, prj, us):
         from .assembly import shape_of
         nd = self.spec(prj)
-        rows = [(MAIN_NAMES[nd.mode], f"{nd.main_shape}, {nd.main_steel}; {nd.main_end}")]
+        rows = [(f"{nd.main_name} (principal)", f"{nd.main_shape}, {nd.main_steel}; eje: azimut {nd.main_az:g}°, elevación {nd.main_el:g}°; {nd.main_end}")]
         for m in nd.members:
             ops = "; ".join(o.kind for o in nd.ops_of(m.name)) or "sin operaciones"
             rows.append((m.name, f"{m.shape} ({m.steel}), azimut {m.az:g}°, elevación {m.el:g}°, posición {us.q('L', m.pos)}: {ops}"))
@@ -65,9 +64,7 @@ class NodeModule:
         draw_scheme(fig, self.spec(prj), self.TAB, prj.units())
 
 
-MODULES = {CT_NODE: NodeModule(CT_NODE, MODE_COL, "Nudo viga-columna", "NC", "viga", "vigas"),
-           CT_B2B: NodeModule(CT_B2B, MODE_BEAM, "Viga a viga", "VV", "viga secundaria", "vigas secundarias"),
-           CT_TRUSS: NodeModule(CT_TRUSS, MODE_CHORD, "Crucetas", "CR", "diagonal", "diagonales")}
+MODULES = {CT_NODE: NodeModule(CT_NODE, "Conexión de nudo", "CN")}
 
 
 # ================================================================================================== esquema (planta y elevacion)
@@ -103,15 +100,15 @@ def draw_scheme(fig, nd, title="", us=None):
     lneg, lpos = nd.lengths()
     if lneg + lpos < 1.0:
         lneg = lpos = 24.0
-    items = [(MAIN_NAMES[nd.mode], _silhouette(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos), "#bdd7ee", "#1f3864", True)]
+    items = [(nd.main_name, _silhouette(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos), "#bdd7ee", "#1f3864", True)]
     ext = AS.outer_extent(mshape)
     for m in nd.members:
         shp = AS.shape_of(m.shape)
         dv = AS.member_dir(m)
         _, sx, sy = AS.member_frame(m)
-        P0 = A * m.pos + (msy * m.off if nd.mode != MODE_COL else 0.0)
+        P0, o2 = AS.attach_point(nd, m, (A, msx, msy))
         d2 = (float(np.dot(dv, msx)), float(np.dot(dv, msy)))
-        s_ex = AS.ray_exit(ext, (0.0, m.off if nd.mode != MODE_COL else 0.0), d2) if math.hypot(*d2) > 1e-6 else None
+        s_ex = AS.exit_dist(ext, o2, d2)
         Q = P0 + dv * (s_ex or 0.0)
         items.append((m.name, _silhouette(shp, Q + dv * max(m.gap, 0.0), sx, sy, dv, 0.0, max(m.L, 1.0)), "#9dc3e6", "#1f3864", False))
     allp = np.vstack([it[1] for it in items])

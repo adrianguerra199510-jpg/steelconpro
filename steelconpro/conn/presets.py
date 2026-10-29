@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Nudo en blanco de cada modulo y miembro nuevo.
+"""Nudo en blanco y miembro nuevo.
 
-El programa no trae plantillas predefinidas: una conexion nueva parte de cero (solo el miembro principal) o de una plantilla del usuario
+El programa no trae plantillas predefinidas: una conexion nueva parte de cero (solo el miembro principal, que luego se puede designar entre los miembros) o de una plantilla del usuario
 (ver `templates.py`).  Despues se agregan los miembros, las operaciones y las cargas.
 """
 from __future__ import annotations
 import copy
 
 from ..shapes import CATALOG
-from .specs import Nodo, Member, MODE_COL, MODE_BEAM, MODE_CHORD, END_LABELS, MEMBER_NAMES
+from .specs import Nodo, Member, END_LABELS, MAIN_NAME
 
-MAIN_SHAPES = {MODE_COL: "W14X90", MODE_BEAM: "W24X55", MODE_CHORD: "W14X61"}
-MEMBER_SHAPES = {MODE_COL: "W16X31", MODE_BEAM: "W16X31", MODE_CHORD: "HSS4X4X1/4"}
+MAIN_SHAPE = "W14X90"
+MEMBER_SHAPE = "W16X31"
 STEEL = "ASTM A992"
 HSS_STEEL = "ASTM A500 Gr.C (HSS rect.)"
 
@@ -25,27 +25,33 @@ def _steel(label: str) -> str:
     return want if want in names else (STEEL if STEEL in names else names[0])
 
 
-def blank_nodo(mode: str) -> Nodo:
-    """Nudo sin miembros conectados, sin operaciones y sin cargas: solo el miembro principal (intermedio, continuo a los dos lados)."""
-    lab = MAIN_SHAPES[mode]
-    return Nodo(mode=mode, main_shape=lab, main_steel=_steel(lab), main_end=END_LABELS[mode][0])
+def blank_nodo() -> Nodo:
+    """Nudo sin miembros conectados, sin operaciones y sin cargas: solo el miembro principal (vertical, continuo a los dos lados)."""
+    return Nodo(main_name=MAIN_NAME, main_shape=MAIN_SHAPE, main_steel=_steel(MAIN_SHAPE), main_end=END_LABELS[0])
 
 
-def default_nodo(mode: str) -> Nodo:
-    return blank_nodo(mode)
+def default_nodo() -> Nodo:
+    return blank_nodo()
+
+
+def unique_name(nd: Nodo, base: str) -> str:
+    """Nombre que no usa ningun miembro del nudo (principal incluido): `base`, o `base` con un numero."""
+    used = set(nd.names())
+    if base not in used:
+        return base
+    k = 2
+    while f"{base}{k}" in used:
+        k += 1
+    return f"{base}{k}"
 
 
 def new_member(nd: Nodo) -> Member:
-    """Miembro nuevo para el boton Agregar: copia el ultimo y lo gira para no quedar encima; el primero lleva valores tipicos del modulo."""
-    n = len(nd.members) + 1
-    pre = "S" if nd.mode == MODE_BEAM else ("D" if nd.mode == MODE_CHORD else "V")
+    """Miembro nuevo para el boton Agregar: copia el ultimo y lo gira para no quedar encima; el primero es una viga que llega por el lado +X."""
+    n = len(nd.members) + 2
+    name = unique_name(nd, f"M{n}")
     if nd.members:
         m = copy.deepcopy(nd.members[-1])
-        m.name = f"{pre}{n}"
-        if nd.mode == MODE_COL:
-            m.az = (m.az + 90.0) % 360.0
-        else:
-            m.az = (m.az + 180.0) % 360.0
+        m.name = name
+        m.az = (m.az + (90.0 if nd.vertical else 180.0)) % 360.0
         return m
-    lab = MEMBER_SHAPES[nd.mode]
-    return Member(name=f"{pre}{n}", shape=lab, steel=_steel(lab), az=0.0 if nd.mode != MODE_BEAM else 90.0, el=-45.0 if nd.mode == MODE_CHORD else 0.0, L=60.0 if nd.mode == MODE_CHORD else 48.0)
+    return Member(name=name, shape=MEMBER_SHAPE, steel=_steel(MEMBER_SHAPE), az=0.0 if nd.vertical else 90.0, el=0.0, L=48.0)

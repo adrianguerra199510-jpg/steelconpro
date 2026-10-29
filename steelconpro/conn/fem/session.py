@@ -8,7 +8,7 @@ from . import post
 
 
 def conn_sig(prj) -> str:
-    """Firma de lo que define el modelo 3D de la conexion: la tipologia, sus datos (con las combinaciones) y las opciones del FEM."""
+    """Firma de lo que define el modelo 3D de la conexion: el tipo de conexion, sus datos (con las combinaciones) y las opciones del FEM."""
     from ..specs import ATTR_OF
     d = {"ctype": prj.ctype, "spec": asdict(getattr(prj, ATTR_OF[prj.ctype]))}
     fea = asdict(prj.fea)

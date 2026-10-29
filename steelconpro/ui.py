@@ -370,8 +370,13 @@ class MainWindow(QMainWindow):
         f.text("Elemento", "element")
         f.text("Calculo", "author")
         f.text("Fecha", "date")
-        f.group("Tipologia de la conexion")
-        f.combo("Tipologia", "ctype", CONN_TYPES, help="Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Nudo viga-columna, viga a viga y crucetas: se arman por operaciones (miembros, operaciones, cargas) y se verifican por codigo (AISC 360-22). Cada conexion del proyecto tiene su propio modulo: se elige al crearla (boton Nueva).")
+        f.group("Tipo de conexion")
+        self.lbl_ctype = QLabel("")
+        self.lbl_ctype.setWordWrap(True)
+        f._lay.addRow("Modulo", self.lbl_ctype)
+        f.note("Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Conexion de nudo: se arma por "
+               "operaciones (miembros —uno de ellos se designa como principal—, operaciones y cargas) y se verifica por codigo (AISC 360-22). "
+               "Cada conexion del proyecto tiene su propio modulo: se elige al crearla (boton Nueva).")
         f.group("Unidades de trabajo")
         self.cb_preset = QComboBox()
         self.cb_preset.addItem("(personalizado)")
@@ -683,7 +688,7 @@ class MainWindow(QMainWindow):
                "correr_3d.py que lo malla con Gmsh, arma el .inp y lo resuelve con CalculiX.")
         f.finish()
 
-        # ---- modulos de nudo (viga-columna, viga a viga, crucetas): miembro principal + miembros conectados
+        # ---- conexion de nudo: miembro principal (designable) + miembros conectados
         for _ct, mod in connpkg.modules():
             f = NodeForm(mod, self)
             f.changed.connect(self.on_change)
@@ -1454,6 +1459,7 @@ class MainWindow(QMainWindow):
     def _update_visibility(self):
         """Cada pestaña muestra solo los campos que aplican a lo seleccionado."""
         self._apply_ctype()
+        self.lbl_ctype.setText(self.prj.ctype)
         prj, F = self.prj, self.fnamed
         # ---- placa
         fp, pl = F["Placa"], prj.plate
@@ -2480,8 +2486,8 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"SteelConPro {__version__} — {Path(fn).name}")
             from .model import LAST_SKIPPED
             if LAST_SKIPPED:
-                QMessageBox.information(self, "Abrir", "Se omitieron conexiones de tipologias que ya no existen en el programa (todo se hace ahora con los modulos "
-                                        "Nudo viga-columna, Viga a viga y Crucetas):\n\n" + "\n".join(f"  {el or '(sin nombre)'}" for el, _t in LAST_SKIPPED))
+                QMessageBox.information(self, "Abrir", "Se omitieron conexiones de tipologias que ya no existen en el programa (todo se hace ahora con la conexion de nudo, "
+                                        "donde se designa el miembro principal):\n\n" + "\n".join(f"  {el or '(sin nombre)'}" for el, _t in LAST_SKIPPED))
         except Exception as e:
             QMessageBox.critical(self, "Abrir", f"No se pudo abrir el archivo:\n{e}")
 
@@ -2640,7 +2646,7 @@ class MainWindow(QMainWindow):
             mb.setIconPixmap(pm.scaledToWidth(360, Qt.SmoothTransformation))
         mb.setText(
             f"<b>SteelConPro {__version__}</b><br>"
-            "Diseno y verificacion de conexiones de acero: placas base (completo) y modulos de nudo viga-columna, viga a viga y crucetas "
+            "Diseno y verificacion de conexiones de acero: placas base (completo) y conexion de nudo con miembro principal designable "
             "(verificacion por codigo AISC 360-22 y vista 3D).<br><br>"
             "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · AISC Manual 15a Ed. · AISC 358/341 · AASHTO LRFD · ACI 318-19 Cap. 17<br>"
             "Modelo solido 3D (Gmsh + CalculiX) "

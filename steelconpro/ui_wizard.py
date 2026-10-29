@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Asistente «Nueva conexion» y guardado de plantillas.
 
-No hay plantillas predefinidas: se elige el modulo (nudo viga-columna, viga a viga, crucetas, placa base) y se parte de una conexion en blanco o de una
+No hay plantillas predefinidas: se elige el modulo (conexion de nudo o placa base) y se parte de una conexion en blanco o de una
 plantilla propia (una conexion terminada que se guardo antes con «Guardar como plantilla»).  `NewConnectionDialog.choice()` devuelve el modulo y la
 ruta de la plantilla (None = en blanco).  `SaveTemplateDialog` pide el nombre y la descripcion de una plantilla nueva.
 """
@@ -12,12 +12,10 @@ from PySide6.QtGui import QColor, QPixmap, QImage
 from PySide6.QtCore import Qt
 
 from . import templates as TPL
-from .conn.specs import CT_BASEPLATE, CT_NODE, CT_B2B, CT_TRUSS
+from .conn.specs import CT_BASEPLATE, CT_NODE
 
-CLASSES = [(CT_NODE, "Nudo viga-columna"), (CT_B2B, "Viga a viga"), (CT_TRUSS, "Crucetas (celosía y diagonales)"), (CT_BASEPLATE, "Placa base de columna")]
-BLANK_TEXT = {CT_NODE: "Una columna sola: agregue después las vigas y diagonales (azimut, elevación, posición), las operaciones y las cargas.",
-              CT_B2B: "Una viga principal sola: agregue después las vigas secundarias, las operaciones y las cargas.",
-              CT_TRUSS: "Un cordón solo: agregue después las diagonales y montantes, las operaciones y las cargas.",
+CLASSES = [(CT_NODE, "Conexión de nudo"), (CT_BASEPLATE, "Placa base de columna")]
+BLANK_TEXT = {CT_NODE: "Un miembro principal solo: agregue después los demás miembros, designe cuál es el principal, y defina las operaciones y las cargas.",
               CT_BASEPLATE: "Una placa base con los valores iniciales del programa."}
 
 

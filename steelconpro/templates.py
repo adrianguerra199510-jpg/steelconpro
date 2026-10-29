@@ -14,6 +14,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .appdata import data_dir
+from .conn.specs import CT_NODE, LEGACY_NODES
 
 TAG = "steelconpro-plantilla"
 
@@ -39,9 +40,10 @@ def list_templates(ctype: str | None = None, where: Path | None = None) -> list:
             continue
         if not isinstance(d, dict) or d.get("formato") != TAG:
             continue
-        if ctype is not None and d.get("ctype") != ctype:
+        ct = CT_NODE if d.get("ctype") in LEGACY_NODES else d.get("ctype", "")      # plantillas de las tipologias retiradas: ahora son nudos
+        if ctype is not None and ct != ctype:
             continue
-        out.append({"name": str(d.get("nombre", f.stem)), "ctype": d.get("ctype", ""), "desc": str(d.get("descripcion", "")), "date": str(d.get("fecha", "")),
+        out.append({"name": str(d.get("nombre", f.stem)), "ctype": ct, "desc": str(d.get("descripcion", "")), "date": str(d.get("fecha", "")),
                     "file": str(f)})
     out.sort(key=lambda t: t["name"].lower())
     return out
@@ -103,7 +105,8 @@ def rename_template(path: str, new_name: str):
         raise ValueError("La plantilla necesita un nombre.")
     p = Path(path)
     d = json.loads(p.read_text(encoding="utf-8"))
-    if find(new_name, d.get("ctype", ""), p.parent) not in (None,) and find(new_name, d.get("ctype", ""), p.parent)["file"] != str(p):
+    dup = find(new_name, CT_NODE if d.get("ctype") in LEGACY_NODES else d.get("ctype", ""), p.parent)
+    if dup is not None and dup["file"] != str(p):
         raise ValueError(f"Ya existe una plantilla «{new_name}» de este módulo.")
     d["nombre"] = new_name
     p.write_text(json.dumps(d, indent=1, ensure_ascii=False), encoding="utf-8")

@@ -14,8 +14,17 @@ from __future__ import annotations
 import copy
 
 from steelconpro.shapes import CATALOG
-from steelconpro.conn.specs import (Nodo, Member, Operation, Load, MODE_COL, MODE_BEAM, MODE_CHORD, END_LABELS, MEMBER_NAMES,
+from steelconpro.conn.specs import (Nodo, Member, Operation, Load, MODE_COL, MODE_BEAM, MODE_CHORD, END_LABELS, LEGACY_MAIN_NAMES,
                     OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_CONT)
+
+MEMBER_NAMES = {MODE_COL: "Viga", MODE_BEAM: "Viga secundaria", MODE_CHORD: "Diagonal"}
+_MODE_OF_NAME = {v: k for k, v in LEGACY_MAIN_NAMES.items()}
+
+
+def _mode(nd) -> str:
+    """Con que geometria de ejemplo se armo el nudo (lo dice el nombre del principal: Columna, Viga principal o Cordón)."""
+    return _MODE_OF_NAME.get(nd.main_name, MODE_COL if nd.vertical else MODE_BEAM)
+
 
 SECTION_KEYS = [("I", "Perfil I (W)"), ("HSS", "HSS rectangular"), ("RND", "HSS circular")]
 DIAG_MIN = 10.0
@@ -57,13 +66,13 @@ def _member(mode, sec, idx, az=0.0, el=0.0, pos=0.0, off=0.0, L=48.0):
 
 def _main(mode, sec, **kw):
     lab = MAIN_SHAPES[mode][sec]
-    return Nodo(mode=mode, main_shape=lab, main_steel=_steel_for(lab, sec), **kw)
+    return Nodo(main_name=LEGACY_MAIN_NAMES[mode], main_shape=lab, main_steel=_steel_for(lab, sec), main_el=90.0 if mode == MODE_COL else 0.0, **kw)
 
 
 # ---------------------------------------------------------------------------------------------- nudo viga-columna
 def _col(ends, azs, sec, flush=True):
     nd = _main(MODE_COL, sec)
-    nd.main_end = END_LABELS[MODE_COL][ends]
+    nd.main_end = END_LABELS[ends]
     ds = _depth(MEMBER_SHAPES[MODE_COL][sec])
     nd.members = [_member(MODE_COL, sec, i + 1, az=a, pos=(-ds / 2.0 if (ends == 1 and flush) else 0.0)) for i, a in enumerate(azs)]
     return nd
@@ -132,17 +141,17 @@ def design_kind(mode, key):
 def apply_design(nd: Nodo, design_key: str) -> Nodo:
     """Agrega a cada miembro la operacion de conexion elegida; las diagonales llevan cartela (salvo «en blanco»), y la conexion soldada
     en una columna I agrega las placas de continuidad."""
-    ck = design_kind(nd.mode, design_key)
+    ck = design_kind(_mode(nd), design_key)
     nd.operations = []
     if ck is None:
         return nd
     for m in nd.members:
-        if abs(m.el) >= DIAG_MIN or nd.mode == MODE_CHORD:
+        if abs(m.el) >= DIAG_MIN or _mode(nd) == MODE_CHORD:
             kind = OP_GUSSET_W if ck == OP_GUSSET_W else OP_GUSSET
             nd.operations.append(Operation(kind=kind, member=m.name, plate_t=0.5))
         else:
             nd.operations.append(Operation(kind=ck, member=m.name))
-        if ck == OP_WELD and nd.mode == MODE_COL:
+        if ck == OP_WELD and _mode(nd) == MODE_COL:
             nd.operations.append(Operation(kind=OP_CONT, member=m.name, cont_t=0.5))
     return nd
 
@@ -165,13 +174,13 @@ def new_member(nd: Nodo) -> Member:
     n = len(nd.members) + 1
     if nd.members:
         m = copy.deepcopy(nd.members[-1])
-        m.az = (m.az + 90.0) % 360.0 if nd.mode == MODE_COL else m.az
-        m.name = f"{MEMBER_NAMES[nd.mode][0] if nd.mode != MODE_BEAM else 'S'}{n}"
-        if nd.mode == MODE_CHORD:
+        m.az = (m.az + 90.0) % 360.0 if _mode(nd) == MODE_COL else m.az
+        m.name = f"{MEMBER_NAMES[_mode(nd)][0] if _mode(nd) != MODE_BEAM else 'S'}{n}"
+        if _mode(nd) == MODE_CHORD:
             m.name = f"D{n}"
             m.az = (m.az + 180.0) % 360.0
-        if nd.mode == MODE_BEAM:
+        if _mode(nd) == MODE_BEAM:
             m.az = (m.az + 180.0) % 360.0
         return m
     sec = "I"
-    return _member(nd.mode, sec, n, az=0.0 if nd.mode != MODE_BEAM else 90.0, el=-45.0 if nd.mode == MODE_CHORD else 0.0)
+    return _member(_mode(nd), sec, n, az=0.0 if _mode(nd) != MODE_BEAM else 90.0, el=-45.0 if _mode(nd) == MODE_CHORD else 0.0)

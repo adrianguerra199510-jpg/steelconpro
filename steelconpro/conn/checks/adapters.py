@@ -17,7 +17,7 @@ from ...design import Check
 from ...explain import Recorder
 from ...shapes import CATALOG, W_SHAPE
 from ..assembly import attach_info
-from ..specs import (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, MODE_COL, Nodo, Operation, Member)
+from ..specs import (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Operation, Member)
 from .specs import ShearTab, DoubleAngle, Seated, EndPlate, SUP_KINDS
 from . import shear_tab, double_angle, seated, endplate, generic
 
@@ -33,7 +33,7 @@ def support_kind(nd: Nodo, info: dict) -> str:
     if info["face"] == "ala":
         return SUP_KINDS[2]                                 # ala de columna
     if info["face"] == "alma":
-        return SUP_KINDS[1] if nd.mode == MODE_COL else SUP_KINDS[0]
+        return SUP_KINDS[1] if nd.vertical else SUP_KINDS[0]
     return SUP_KINDS[1]                                      # perfil hueco: se usa el espesor de pared (tw)
 
 

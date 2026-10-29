@@ -6,7 +6,7 @@ import json
 
 from . import materials as M
 from .shapes import CATALOG, Shape, W_SHAPE, GENERIC_KINDS, rect_props
-from .conn.specs import CONN_TYPES, CT_BASEPLATE, Nodo, MODE_COL, MODE_BEAM, MODE_CHORD
+from .conn.specs import CONN_TYPES, CT_BASEPLATE, CT_NODE, LEGACY_NODES, Nodo, migrate_nodo
 import dataclasses
 from .appdata import LEGACY_BOOK_TAGS
 
@@ -411,9 +411,9 @@ class LegacyConnection(ValueError):
     """La conexion es de una tipologia retirada del programa (placa de corte, doble angulo, asiento, empalmes, placa extrema, cartela, HSS, RBS, puente)."""
 
 
-def _default_nodo(mode):
+def _default_nodo():
     from .conn.presets import default_nodo
-    return default_nodo(mode)
+    return default_nodo()
 
 
 @dataclass
@@ -430,9 +430,7 @@ class Project:
 
     # tipologia de la conexion: la placa base usa section/plate/bolts/... ; las demas, su propio bloque (ver conn/)
     ctype: str = CT_BASEPLATE
-    ncol: Nodo = field(default_factory=lambda: _default_nodo(MODE_COL))       # nudo viga-columna
-    nbb: Nodo = field(default_factory=lambda: _default_nodo(MODE_BEAM))       # viga a viga
-    ntr: Nodo = field(default_factory=lambda: _default_nodo(MODE_CHORD))      # crucetas
+    node: Nodo = field(default_factory=_default_nodo)                          # conexion de nudo (miembro principal designado + miembros + operaciones + cargas)
 
     section: Section = field(default_factory=Section)
     plate: Plate = field(default_factory=Plate)
@@ -536,6 +534,14 @@ class Project:
             ok = getattr(cls, "__dataclass_fields__", {})
             return cls(**{k: v for k, v in dd.items() if k in ok})
         d = json.loads(txt)
+        old = LEGACY_NODES.get(d.get("ctype"))
+        if old is not None:                      # version con tipologias (nudo viga-columna, viga a viga, crucetas): ahora es un nudo generico
+            attr, mode = old
+            d = dict(d)
+            d["node"] = migrate_nodo(d.get(attr) or {}, mode)
+            d["ctype"] = CT_NODE
+        for k in ("ncol", "nbb", "ntr"):
+            d.pop(k, None)
         if d.get("ctype", CT_BASEPLATE) not in CONN_TYPES:
             raise LegacyConnection(str(d.get("ctype")))
         p = Project()
@@ -580,7 +586,7 @@ def _used_extras(projects):
     para guardarlos dentro del archivo."""
     shapes, mats = {}, {"steel": {}, "bolt": {}, "electrode": {}, "anchor": {}, "concrete": {}}
     for p in projects:
-        nodos = [p.ncol, p.nbb, p.ntr]
+        nodos = [p.node]
         labs = [p.section.label, p.lug.label] + [nd.main_shape for nd in nodos] + [m.shape for nd in nodos for m in nd.members]
         for lab in labs:
             s = CATALOG.get(lab)

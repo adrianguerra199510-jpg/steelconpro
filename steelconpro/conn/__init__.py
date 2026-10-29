@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Modulos de conexion distintos de la placa base: nudo viga-columna, viga a viga y crucetas.
+"""Modulo de conexion de nudo (todo lo que no es placa base): un nudo generico con el miembro principal que designa el usuario.
 
-Cada modulo es una instancia de `nodes.NodeModule` (identidad, esquema y texto de la lista) sobre un `specs.Nodo`; el modelo 3D lo arma
+El modulo es una instancia de `nodes.NodeModule` (identidad, esquema y texto de la lista) sobre un `specs.Nodo`; el modelo 3D lo arma
 `assembly.build_model`.  Se arman por operaciones (miembros, operaciones, cargas) y se verifican por codigo (conn/checks); el analisis 3D por elementos finitos es la etapa siguiente.
 Se importan al usarse, para que `model.py` pueda importar `conn.specs` sin arrastrar el resto (importacion circular).
 """
 from __future__ import annotations
 
-from .specs import CT_NODE, CT_B2B, CT_TRUSS
+from .specs import CT_NODE
 
-_ORDER = (CT_NODE, CT_B2B, CT_TRUSS)
+_ORDER = (CT_NODE,)
 
 
 def module_for(ctype: str):

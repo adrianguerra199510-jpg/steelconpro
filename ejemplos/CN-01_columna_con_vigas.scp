@@ -3,8 +3,8 @@
  "version": 2,
  "conexiones": [
   {
-   "name": "Ejemplo de nudo viga-columna",
-   "element": "NC-01",
+   "name": "Ejemplo: columna principal con vigas y una diagonal",
+   "element": "CN-01",
    "author": "",
    "date": "",
    "metric": false,
@@ -12,14 +12,15 @@
    "u_force": "kN",
    "u_stress": "MPa",
    "u_moment": "kN·m",
-   "ctype": "Nudo viga-columna",
-   "ncol": {
-    "mode": "col",
+   "ctype": "Conexión de nudo",
+   "node": {
+    "main_name": "Columna",
     "main_shape": "W14X90",
     "main_steel": "ASTM A992",
+    "main_az": 0.0,
+    "main_el": 90.0,
     "main_roll": 0.0,
-    "main_slope": 0.0,
-    "main_end": "Intermedia (continúa arriba y abajo)",
+    "main_end": "Continuo (pasa por el nudo)",
     "main_len_neg": 60.0,
     "main_len_pos": 60.0,
     "members": [
@@ -31,6 +32,7 @@
       "el": 0.0,
       "pos": 0.0,
       "off": 0.0,
+      "off2": 0.0,
       "L": 48.0,
       "roll": 0.0,
       "gap": 0.5
@@ -43,6 +45,7 @@
       "el": 0.0,
       "pos": 0.0,
       "off": 0.0,
+      "off2": 0.0,
       "L": 48.0,
       "roll": 0.0,
       "gap": 0.5
@@ -55,6 +58,7 @@
       "el": 0.0,
       "pos": 0.0,
       "off": 0.0,
+      "off2": 0.0,
       "L": 48.0,
       "roll": 0.0,
       "gap": 0.5
@@ -67,6 +71,7 @@
       "el": 0.0,
       "pos": 0.0,
       "off": 0.0,
+      "off2": 0.0,
       "L": 48.0,
       "roll": 0.0,
       "gap": 0.5
@@ -79,6 +84,7 @@
       "el": -40.0,
       "pos": -12.0,
       "off": 0.0,
+      "off2": 0.0,
       "L": 72.0,
       "roll": 0.0,
       "gap": 0.5
@@ -234,34 +240,6 @@
       "Mz": 0.0
      }
     ],
-    "show_hw": true
-   },
-   "nbb": {
-    "mode": "viga",
-    "main_shape": "W24X55",
-    "main_steel": "ASTM A992",
-    "main_roll": 0.0,
-    "main_slope": 0.0,
-    "main_end": "Continua (a ambos lados del nudo)",
-    "main_len_neg": 60.0,
-    "main_len_pos": 60.0,
-    "members": [],
-    "operations": [],
-    "loads": [],
-    "show_hw": true
-   },
-   "ntr": {
-    "mode": "cordon",
-    "main_shape": "W14X61",
-    "main_steel": "ASTM A992",
-    "main_roll": 0.0,
-    "main_slope": 0.0,
-    "main_end": "Cordón continuo",
-    "main_len_neg": 60.0,
-    "main_len_pos": 60.0,
-    "members": [],
-    "operations": [],
-    "loads": [],
     "show_hw": true
    },
    "section": {

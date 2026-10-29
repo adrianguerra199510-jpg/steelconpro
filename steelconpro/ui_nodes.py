@@ -12,7 +12,8 @@ from __future__ import annotations
 import copy
 from types import SimpleNamespace
 
-from PySide6.QtWidgets import (QWidget, QComboBox, QSizePolicy, QHBoxLayout, QVBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLabel,
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QMessageBox, QWidget, QComboBox, QSizePolicy, QHBoxLayout, QVBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QLabel,
                                QAbstractItemView, QTabWidget, QToolButton, QMenu)
 from PySide6.QtCore import Qt, Signal
 
@@ -20,7 +21,7 @@ from . import materials as M
 from .shapes import CATALOG
 from .ui_widgets import Form
 from .conn import presets as PRE
-from .conn.specs import (MODE_COL, MODE_BEAM, MODE_CHORD, END_LABELS, MAIN_NAMES, MEMBER_NAMES, POS_LABELS, OFF_LABELS, BOLT_GRADES,
+from .conn.specs import (END_LABELS, POS_LABEL, OFF_LABEL, OFF2_LABEL, BOLT_GRADES,
                          SHEAR_BOLT_SIZES, OPERATIONS, OP_GROUPS, Operation, Load, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET,
                          OP_GUSSET_W, OP_COPE, OP_CONT, CONNECTION_OPS, GUSSET_OPS)
 
@@ -163,43 +164,54 @@ def _buttons(layout_owner, items):
 
 # ====================================================================================================== 1. miembros
 class MembersPage(Form):
-    """Miembro principal + tabla de miembros conectados y su editor (solo geometria: la conexion se define en Operaciones)."""
+    """Tabla con todos los miembros del nudo (el principal lleva ★) y su editor.  El principal se designa entre los miembros, como en IDEA StatiCa;
+    solo es geometria: la conexion se define en Operaciones."""
     renamed = Signal(str, str)               # nombre anterior, nombre nuevo
     removed = Signal(str)
     duplicated = Signal(str, str)
+    designated = Signal(str)                 # nombre del miembro que paso a ser el principal
 
     def __init__(self, mod):
         self._us = None
         super().__init__()
         self.mod = mod
-        mode, attr = mod.MODE, mod.ATTR
-        self.mode, self.attr = mode, attr
-        self._sel, self._busy, self._old = 0, False, ""
+        attr = mod.ATTR
+        self.attr = attr
+        self._sel, self._busy, self._old = -1, False, ""        # _sel: indice del miembro conectado seleccionado; -1 = el principal
+        self._old_main = ""
         self._hold = SimpleNamespace(m=None)
+        self._main_name_box = None
 
-        self.group(MAIN_NAMES[mode])
+        self.group("Miembros del nudo")
+        self.tbl = _table(["", "Nombre", "Sección", "Azimut", "Elevación", "Posición"], (22, 70, 84, 52, 62, 70), height=(110, 190))
+        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl.itemSelectionChanged.connect(self._row_selected)
+        self._lay.addRow(self.tbl)
+        self.bt_add, self.bt_dup, self.bt_del = _buttons(self, (("Agregar", self._add), ("Duplicar", self._dup), ("Quitar", self._del)))
+        (self.bt_main,) = _buttons(self, (("★  Designar como principal", self._designate_clicked),))
+        self.bt_main.setToolTip("El miembro principal es el que recibe a los demás (como el miembro de apoyo de IDEA StatiCa): sus caras son las "
+                                "que se conectan. Designe como principal al miembro seleccionado; el principal actual pasa a ser un miembro conectado.")
+        self.note("★ = miembro principal: pasa por el nudo y los demás llegan a él con su azimut (ángulo en planta, desde +X hacia +Y) y su elevación "
+                  "(inclinación sobre la horizontal; una diagonal lleva cartela). La conexión se define en el paso 2 (Operaciones).")
+
+        self.group("Miembro principal")
+        self.text("Nombre", f"{attr}.main_name")
         self.main_pick = SectionPicker()
         self.main_pick.changed.connect(self._emit)
         self._lay.addRow("Sección", self.main_pick)
         self.combo("Acero", f"{attr}.main_steel", _steel_names())
-        self.combo("Extremo", f"{attr}.main_end", END_LABELS[mode],
-                   help="Intermedio: el miembro continúa a los dos lados del nudo. Extremo: termina en el nudo (por ejemplo la columna del último piso).")
-        self.num("Largo hacia abajo (bajo el nudo)" if mode == MODE_COL else "Largo hacia −X", f"{attr}.main_len_neg", 1.0, 5000.0, uk="L")
-        self.num("Largo hacia arriba (sobre el nudo)" if mode == MODE_COL else "Largo hacia +X", f"{attr}.main_len_pos", 1.0, 5000.0, uk="L")
-        self.num("Giro de la sección sobre su eje", f"{attr}.main_roll", -180.0, 180.0, step=15.0, dec=1, suffix="°",
-                 help="0° = alma en el plano de las vigas que llegan por la cara del ala (eje fuerte).")
-        if mode != MODE_COL:
-            self.num("Inclinación del eje", f"{attr}.main_slope", -80.0, 80.0, step=5.0, dec=1, suffix="°")
+        self.num("Azimut del eje", f"{attr}.main_az", -360.0, 360.0, step=5.0, dec=1, suffix="°",
+                 help="Ángulo en planta del eje del principal, desde +X hacia +Y visto desde arriba. No importa si el principal es vertical.")
+        self.num("Elevación del eje", f"{attr}.main_el", -90.0, 90.0, step=5.0, dec=1, suffix="°",
+                 help="Inclinación del eje sobre la horizontal: 90° = vertical (columna), 0° = horizontal (viga o cordón), valores intermedios = inclinado.")
+        self.num("Giro de la sección", f"{attr}.main_roll", -180.0, 180.0, step=15.0, dec=1, suffix="°",
+                 help="0° = alma en el plano de los miembros que llegan por la cara del ala (eje fuerte).")
+        self.combo("Extremo", f"{attr}.main_end", END_LABELS,
+                   help="Continuo: el miembro pasa por el nudo y sigue a los dos lados. Termina en el nudo: queda de un solo lado (por ejemplo la columna del último piso). "
+                        "El lado + es el sentido del eje (arriba si es vertical).")
+        self.num("Largo del lado −", f"{attr}.main_len_neg", 0.0, 5000.0, uk="L", help="Largo del principal del lado − del nudo (hacia abajo si es vertical).")
+        self.num("Largo del lado +", f"{attr}.main_len_pos", 0.0, 5000.0, uk="L", help="Largo del principal del lado + del nudo (hacia arriba si es vertical).")
         self.check("Dibujar los herrajes", f"{attr}.show_hw", help="Placas, ángulos y pernos de las operaciones.")
-
-        self.group("Miembros conectados")
-        self.tbl = _table(["Nombre", "Sección", "Azimut", "Elevación", "Posición"], (50, 90, 60, 70, 80))
-        self.tbl.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl.itemSelectionChanged.connect(self._row_selected)
-        self._lay.addRow(self.tbl)
-        _buttons(self, (("Agregar", self._add), ("Duplicar", self._dup), ("Quitar", self._del)))
-        self.note("Cada miembro llega al principal con su azimut (ángulo en planta, desde +X hacia +Y) y su elevación (inclinación sobre la horizontal; "
-                  "una diagonal lleva cartela). La posición se mide desde el nudo a lo largo del miembro principal. La conexión se define en el paso 2 (Operaciones).")
 
         self.mf = Form()
         self.mf.changed.connect(self._member_changed)
@@ -213,14 +225,14 @@ class MembersPage(Form):
         mf.combo("Acero", "m.steel", _steel_names())
         mf.num("Azimut (planta)", "m.az", -360.0, 360.0, step=5.0, dec=1, suffix="°", help="Ángulo en planta desde +X hacia +Y, visto desde arriba.")
         mf.num("Elevación", "m.el", -90.0, 90.0, step=5.0, dec=1, suffix="°", help="Inclinación sobre la horizontal: 0° viga, ±45° diagonal, ±90° montante.")
-        mf.num(POS_LABELS[mode], "m.pos", -5000.0, 5000.0, uk="L", help="Medida desde el nudo (origen) a lo largo del eje del miembro principal.")
-        if OFF_LABELS[mode]:
-            mf.num(OFF_LABELS[mode], "m.off", -500.0, 500.0, uk="L")
+        mf.num(POS_LABEL, "m.pos", -5000.0, 5000.0, uk="L", help="Medida desde el nudo (origen) a lo largo del eje del miembro principal: por ejemplo la altura de la viga sobre el nudo de una columna.")
+        mf.num(OFF_LABEL, "m.off", -500.0, 500.0, uk="L", help="Desplazamiento lateral del eje del miembro respecto del eje del principal, en el sentido del peralte del principal "
+                                                              "(por ejemplo el desnivel entre dos vigas).")
+        mf.num(OFF2_LABEL, "m.off2", -500.0, 500.0, uk="L", help="Idem, en el sentido del ancho del principal.")
         mf.num("Largo del miembro", "m.L", 1.0, 5000.0, uk="L")
         mf.num("Giro sobre su eje", "m.roll", -180.0, 180.0, step=15.0, dec=1, suffix="°")
         mf.num("Retranqueo del extremo", "m.gap", 0.0, 24.0, uk="L", help="Separación entre el extremo del miembro y la cara del miembro principal.")
         self.outer.addWidget(mf)
-        self.mf.setEnabled(False)
         _compact(self)
 
     @property
@@ -243,7 +255,8 @@ class MembersPage(Form):
         super().load(prj)
         self._busy = True
         self.main_pick.set_label(nd.main_shape)
-        self._sel = max(0, min(self._sel, len(nd.members) - 1))
+        self._old_main = nd.main_name
+        self._sel = max(-1, min(self._sel, len(nd.members) - 1))
         self._fill_table()
         self._busy = False
         self._load_member()
@@ -251,39 +264,68 @@ class MembersPage(Form):
     def store(self, prj):
         self._prj = prj
         super().store(prj)
-        getattr(prj, self.attr).main_shape = self.main_pick.label()
+        nd = getattr(prj, self.attr)
+        nd.main_shape = self.main_pick.label()
+        new = nd.main_name.strip()
+        if not new or new in {m.name for m in nd.members}:      # el nombre del principal no puede estar vacio ni repetir el de un miembro
+            new = self._old_main or "M1"
+        nd.main_name = new
+        self._old_main = new
+        wn = self.w(f"{self.attr}.main_name")
+        if wn.text() != new:
+            wn.blockSignals(True)
+            wn.setText(new)
+            wn.blockSignals(False)
         self._store_member(prj)
 
+    # ------------------------------------------------------------------ tabla
     def _fill_table(self):
         nd = self._nodo()
         u = self.us
-        self.tbl.blockSignals(True)
-        self.tbl.setRowCount(len(nd.members))
-        for i, m in enumerate(nd.members):
+        rows = [("★", nd.main_name, nd.main_shape, f"{nd.main_az:g}°" if not nd.vertical else "—", f"{nd.main_el:g}°", "—")]
+        for m in nd.members:
             pos = f"{m.pos:g}" if u is None else f"{u.out('L', m.pos):.4g} {u.label('L')}"
-            for j, txt in enumerate((m.name, m.shape, f"{m.az:g}°", f"{m.el:g}°", pos)):
+            rows.append(("", m.name, m.shape, f"{m.az:g}°", f"{m.el:g}°", pos))
+        self.tbl.blockSignals(True)
+        self.tbl.setRowCount(len(rows))
+        for i, vals in enumerate(rows):
+            for j, txt in enumerate(vals):
                 it = QTableWidgetItem(txt)
-                if j >= 2:
+                if j >= 3:
                     it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if j == 0:
+                    it.setTextAlignment(Qt.AlignCenter)
+                if i == 0:
+                    f = it.font()
+                    f.setBold(True)
+                    it.setFont(f)
+                    it.setForeground(QColor("#1f3864"))
                 self.tbl.setItem(i, j, it)
-        if nd.members:
-            self.tbl.selectRow(max(0, min(self._sel, len(nd.members) - 1)))
+        self.tbl.selectRow(self._sel + 1)
         self.tbl.blockSignals(False)
 
     def _row_selected(self):
         if self._busy:
             return
-        r = self.tbl.currentRow()
+        r = self.tbl.currentRow() - 1
         nd = self._nodo()
-        if 0 <= r < len(nd.members) and r != self._sel:
+        if -1 <= r < len(nd.members) and r != self._sel:
             self._store_member(self._prj)
             self._sel = r
             self._load_member()
 
+    def _show_selected(self):
+        main = self._sel < 0
+        self.show_group("Miembro principal", main)
+        self.mf.setVisible(not main)
+        self.bt_dup.setEnabled(not main)
+        self.bt_del.setEnabled(not main)
+        self.bt_main.setEnabled(not main)
+
     def _load_member(self):
         nd = self._nodo()
-        self._hold.m = nd.members[self._sel] if nd.members else None
-        self.mf.setEnabled(self._hold.m is not None)
+        self._hold.m = nd.members[self._sel] if 0 <= self._sel < len(nd.members) else None
+        self._show_selected()
         if self._hold.m is None:
             return
         self._busy = True
@@ -302,6 +344,8 @@ class MembersPage(Form):
         self.mf.store(self._hold)
         self._hold.m.shape = self.m_pick.label()
         new = self._hold.m.name.strip() or self._old
+        if new == nd.main_name or any(x.name == new for x in nd.members if x is not self._hold.m):     # no se repiten los nombres
+            new = self._old
         if new != self._hold.m.name:
             self._hold.m.name = new
         if self._old and new != self._old:                      # renombrar el miembro: las operaciones y las cargas lo siguen
@@ -318,6 +362,14 @@ class MembersPage(Form):
         self._busy = False
         self.changed.emit()
 
+    def _emit(self, *_):
+        if not getattr(self, "_busy", False) and hasattr(self, "_prj") and hasattr(self, "tbl"):
+            self.store(self._prj)
+            self._busy = True
+            self._fill_table()
+            self._busy = False
+        super()._emit()
+
     def _refill(self):
         self._busy = True
         self._fill_table()
@@ -325,25 +377,22 @@ class MembersPage(Form):
         self._load_member()
         self.changed.emit()
 
+    # ------------------------------------------------------------------ botones
     def _add(self):
         self._store_member(self._prj)
         nd = self._nodo()
-        m = PRE.new_member(nd)
-        names = {x.name for x in nd.members}
-        while m.name in names:
-            m.name += "'"
-        nd.members.append(m)
+        nd.members.append(PRE.new_member(nd))
         self._sel = len(nd.members) - 1
         self._refill()
 
     def _dup(self):
         nd = self._nodo()
-        if not nd.members:
+        if not (0 <= self._sel < len(nd.members)):
             return
         self._store_member(self._prj)
         src = nd.members[self._sel]
         m = copy.deepcopy(src)
-        m.name = f"{src.name}'"
+        m.name = PRE.unique_name(nd, f"{src.name}'")
         m.az = (m.az + 90.0) % 360.0
         nd.members.insert(self._sel + 1, m)
         self._sel += 1
@@ -356,9 +405,37 @@ class MembersPage(Form):
             return
         name = nd.members[self._sel].name
         del nd.members[self._sel]
-        self._sel = max(0, min(self._sel, len(nd.members) - 1))
+        self._sel = max(-1, min(self._sel, len(nd.members) - 1))
         self.removed.emit(name)
         self._refill()
+
+    def _designate_clicked(self):
+        nd = self._nodo()
+        if not (0 <= self._sel < len(nd.members)):
+            return
+        m = nd.members[self._sel]
+        n_ops = len(nd.ops_of(m.name))
+        n_ld = sum(1 for x in nd.loads if x.member == m.name)
+        txt = (f"«{m.name}» pasará a ser el miembro principal y «{nd.main_name}» quedará como miembro conectado "
+               f"(la geometría del nudo se conserva).")
+        if n_ops or n_ld:
+            txt += (f"\n\nSe descartarán {n_ops} operación(es) y {n_ld} carga(s) de «{m.name}»: eran su conexión al principal actual; "
+                    f"hay que definirlas de nuevo en los miembros que ahora llegan a él.")
+        if QMessageBox.question(self, "Designar el miembro principal", txt) == QMessageBox.Yes:
+            self.designate(m.name)
+
+    def designate(self, name) -> list:
+        """Designa como principal al miembro `name` (ver `assembly.set_main`).  Devuelve los avisos."""
+        from .conn import assembly as AS
+        self._store_member(self._prj)
+        notes = AS.set_main(self._nodo(), name)
+        self._sel = -1
+        self.load(self._prj)
+        self.designated.emit(name)
+        self.changed.emit()
+        if notes:
+            self.info_notes = notes
+        return notes
 
     def select(self, name):
         nd = self._nodo()
@@ -366,7 +443,7 @@ class MembersPage(Form):
             if m.name == name:
                 self._sel = i
                 self._busy = True
-                self.tbl.selectRow(i)
+                self.tbl.selectRow(i + 1)
                 self._busy = False
                 self._load_member()
                 return
@@ -866,7 +943,7 @@ class NodeForm(Form):
         self._us = None
         super().__init__()
         self.mod, self.win = mod, win
-        self.attr, self.mode = mod.ATTR, mod.MODE
+        self.attr = mod.ATTR
         self.members_pg = MembersPage(mod)
         self.ops_pg = OperationsPage(mod)
         self.loads_pg = LoadsPage(mod)
@@ -883,6 +960,7 @@ class NodeForm(Form):
         for pg in self.pages:
             pg.changed.connect(self._on_page_changed)
         self.members_pg.renamed.connect(lambda *_: self._after_rename())
+        self.members_pg.designated.connect(lambda *_: self._after_rename())
         self.members_pg.removed.connect(self.ops_pg.on_member_removed)
         self.members_pg.duplicated.connect(self.ops_pg.on_member_duplicated)
         self.an_pg.check_requested.connect(self.check_requested)
@@ -914,7 +992,7 @@ class NodeForm(Form):
         sin_conn = [m.name for m in nd.members if nd.connection_of(m.name) is None]
         cases = sorted({x.case for x in nd.loads})
         cargados = {x.member for x in nd.loads if any(abs(getattr(x, k)) > 1e-12 for k in ("N", "Vy", "Vz", "T", "My", "Mz"))}
-        rows = [(bool(nd.members), f"<b>1 Miembros:</b> {len(nd.members)} conectado(s) al principal ({nd.main_shape})" if nd.members else "<b>1 Miembros:</b> no hay miembros conectados")]
+        rows = [(bool(nd.members), f"<b>1 Miembros:</b> {len(nd.members)} conectado(s) al principal «{nd.main_name}» ({nd.main_shape})" if nd.members else "<b>1 Miembros:</b> no hay miembros conectados")]
         if not conn:
             rows.append((False, "<b>2 Operaciones:</b> agregue al menos una operación de conexión"))
         else:
