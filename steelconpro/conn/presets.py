@@ -11,8 +11,8 @@ from __future__ import annotations
 import copy
 
 from ..shapes import CATALOG
-from .specs import (Nodo, Member, MODE_COL, MODE_BEAM, MODE_CHORD, END_LABELS, MEMBER_NAMES,
-                    CK_BLANK, CK_TAB, CK_DANG, CK_SEAT, CK_EP_FLUSH, CK_EP_EXT, CK_WELD, CK_GUSSET, CK_GUSSET_W)
+from .specs import (Nodo, Member, Operation, Load, MODE_COL, MODE_BEAM, MODE_CHORD, END_LABELS, MEMBER_NAMES,
+                    OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_CONT)
 
 SECTION_KEYS = [("I", "Perfil I (W)"), ("HSS", "HSS rectangular"), ("RND", "HSS circular")]
 DIAG_MIN = 10.0
@@ -44,12 +44,12 @@ def _steel_for(label: str, key: str) -> str:
     return "ASTM A992" if "ASTM A992" in names else names[0]
 
 
-def _member(mode, sec, idx, az=0.0, el=0.0, pos=0.0, off=0.0, L=48.0, conn=CK_TAB):
+def _member(mode, sec, idx, az=0.0, el=0.0, pos=0.0, off=0.0, L=48.0):
     lab = MEMBER_SHAPES[mode][sec]
     nm = f"{MEMBER_NAMES[mode][0]}{idx}" if mode != MODE_BEAM else f"S{idx}"
     if mode == MODE_CHORD:
         nm = f"D{idx}"
-    return Member(name=nm, shape=lab, steel=_steel_for(lab, sec), az=az, el=el, pos=pos, off=off, L=L, conn=conn)
+    return Member(name=nm, shape=lab, steel=_steel_for(lab, sec), az=az, el=el, pos=pos, off=off, L=L)
 
 
 def _main(mode, sec, **kw):
@@ -78,7 +78,7 @@ def _bb(azs, sec, offs=None):
 # ---------------------------------------------------------------------------------------------- crucetas (diagonales sobre un cordon)
 def _truss(items, sec):
     nd = _main(MODE_CHORD, sec)
-    nd.members = [_member(MODE_CHORD, sec, i + 1, az=az, el=el, conn=CK_GUSSET, L=60.0) for i, (az, el) in enumerate(items)]
+    nd.members = [_member(MODE_CHORD, sec, i + 1, az=az, el=el, L=60.0) for i, (az, el) in enumerate(items)]
     return nd
 
 
@@ -105,16 +105,16 @@ GEOMS = {
 }
 
 DESIGNS = {
-    MODE_COL: [("Conexión de momento", [("ep_flush", "Placa extrema a ras", CK_EP_FLUSH), ("ep_ext", "Placa extrema extendida", CK_EP_EXT),
-                                         ("weld", "Alas soldadas, alma atornillada", CK_WELD)]),
-               ("Conexión de corte", [("tab", "Placa simple", CK_TAB), ("dang", "Doble ángulo", CK_DANG), ("seat", "Asiento", CK_SEAT)]),
-               ("Conexión en blanco", [("blank", "En blanco", CK_BLANK)])],
-    MODE_BEAM: [("Conexión de momento", [("ep_flush", "Placa extrema a ras", CK_EP_FLUSH), ("ep_ext", "Placa extrema extendida", CK_EP_EXT),
-                                          ("weld", "Alas soldadas, alma atornillada", CK_WELD)]),
-                ("Conexión de corte", [("tab", "Placa simple", CK_TAB), ("dang", "Doble ángulo", CK_DANG), ("seat", "Asiento", CK_SEAT)]),
-                ("Conexión en blanco", [("blank", "En blanco", CK_BLANK)])],
-    MODE_CHORD: [("Conexión de truss", [("gus_bolt", "Cartela atornillada", CK_GUSSET), ("gus_weld", "Cartela con diagonales soldadas", CK_GUSSET_W)]),
-                 ("Conexión en blanco", [("blank", "En blanco", CK_BLANK)])],
+    MODE_COL: [("Conexión de momento", [("ep_flush", "Placa extrema a ras", OP_EP_FLUSH), ("ep_ext", "Placa extrema extendida", OP_EP_EXT),
+                                         ("weld", "Alas soldadas, alma atornillada", OP_WELD)]),
+               ("Conexión de corte", [("tab", "Placa simple", OP_TAB), ("dang", "Doble ángulo", OP_DANG), ("seat", "Asiento", OP_SEAT)]),
+               ("Conexión en blanco", [("blank", "En blanco", None)])],
+    MODE_BEAM: [("Conexión de momento", [("ep_flush", "Placa extrema a ras", OP_EP_FLUSH), ("ep_ext", "Placa extrema extendida", OP_EP_EXT),
+                                          ("weld", "Alas soldadas, alma atornillada", OP_WELD)]),
+                ("Conexión de corte", [("tab", "Placa simple", OP_TAB), ("dang", "Doble ángulo", OP_DANG), ("seat", "Asiento", OP_SEAT)]),
+                ("Conexión en blanco", [("blank", "En blanco", None)])],
+    MODE_CHORD: [("Conexión de truss", [("gus_bolt", "Cartela atornillada", OP_GUSSET), ("gus_weld", "Cartela con diagonales soldadas", OP_GUSSET_W)]),
+                 ("Conexión en blanco", [("blank", "En blanco", None)])],
 }
 
 
@@ -123,19 +123,24 @@ def design_kind(mode, key):
         for k, _nm, ck in items:
             if k == key:
                 return ck
-    return CK_BLANK
+    return None
 
 
 def apply_design(nd: Nodo, design_key: str) -> Nodo:
-    """Asigna la conexion elegida a todos los miembros; las diagonales llevan cartela (salvo en blanco)."""
+    """Agrega a cada miembro la operacion de conexion elegida; las diagonales llevan cartela (salvo «en blanco»), y la conexion soldada
+    en una columna I agrega las placas de continuidad."""
     ck = design_kind(nd.mode, design_key)
+    nd.operations = []
+    if ck is None:
+        return nd
     for m in nd.members:
-        if ck == CK_BLANK:
-            m.conn = CK_BLANK
-        elif abs(m.el) >= DIAG_MIN or nd.mode == MODE_CHORD:
-            m.conn = CK_GUSSET_W if ck == CK_GUSSET_W else CK_GUSSET
+        if abs(m.el) >= DIAG_MIN or nd.mode == MODE_CHORD:
+            kind = OP_GUSSET_W if ck == OP_GUSSET_W else OP_GUSSET
+            nd.operations.append(Operation(kind=kind, member=m.name, plate_t=0.5))
         else:
-            m.conn = ck
+            nd.operations.append(Operation(kind=ck, member=m.name))
+        if ck == OP_WELD and nd.mode == MODE_COL:
+            nd.operations.append(Operation(kind=OP_CONT, member=m.name, cont_t=0.5))
     return nd
 
 
@@ -166,5 +171,4 @@ def new_member(nd: Nodo) -> Member:
             m.az = (m.az + 180.0) % 360.0
         return m
     sec = "I"
-    return _member(nd.mode, sec, n, az=0.0 if nd.mode != MODE_BEAM else 90.0, el=-45.0 if nd.mode == MODE_CHORD else 0.0,
-                   conn=CK_GUSSET if nd.mode == MODE_CHORD else CK_TAB)
+    return _member(nd.mode, sec, n, az=0.0 if nd.mode != MODE_BEAM else 90.0, el=-45.0 if nd.mode == MODE_CHORD else 0.0)

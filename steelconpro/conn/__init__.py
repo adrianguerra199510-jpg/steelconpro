@@ -2,7 +2,7 @@
 """Modulos de conexion distintos de la placa base: nudo viga-columna, viga a viga y crucetas.
 
 Cada modulo es una instancia de `nodes.NodeModule` (identidad, esquema y texto de la lista) sobre un `specs.Nodo`; el modelo 3D lo arma
-`assembly.build_model`.  Por ahora son solo geometria y vista 3D (sin calculo): ver LEEME.
+`assembly.build_model`.  Se arman por operaciones (miembros, operaciones, cargas) y se verifican por codigo (conn/checks); el analisis 3D por elementos finitos es la etapa siguiente.
 Se importan al usarse, para que `model.py` pueda importar `conn.specs` sin arrastrar el resto (importacion circular).
 """
 from __future__ import annotations

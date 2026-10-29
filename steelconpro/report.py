@@ -465,7 +465,8 @@ def export_xlsx(prj: Project, res: Results, path: str,
 def export_docx(prj: Project, res: Results, path: str,
                 figs: list[str] | None = None, detail: bool = True) -> str:
     if prj.ctype != CT_BASEPLATE:
-        raise ValueError("Los modulos de nudo (viga-columna, viga a viga, crucetas) son por ahora solo geometria: no tienen memoria de calculo.")
+        from .conn import report_conn
+        return report_conn.export_docx(prj, res, path, figs, detail)
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -659,7 +660,8 @@ def export_pdf(prj: Project, res: Results, path: str,
                figs: list[str] | None = None, detail: bool = True) -> str:
     """Memoria de calculo en PDF (reportlab, sin depender de Word)."""
     if prj.ctype != CT_BASEPLATE:
-        raise ValueError("Los modulos de nudo (viga-columna, viga a viga, crucetas) son por ahora solo geometria: no tienen memoria de calculo.")
+        from .conn import report_conn
+        return report_conn.export_pdf(prj, res, path, figs, detail)
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

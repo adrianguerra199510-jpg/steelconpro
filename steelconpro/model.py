@@ -587,7 +587,7 @@ def _used_extras(projects):
             if s and s.source not in ("AISC", "integrado"):
                 shapes[s.label] = asdict(s)
         names = [p.section.steel, p.plate.steel, p.lug.steel, p.stiff.steel] + [nd.main_steel for nd in nodos] + \
-                [x for nd in nodos for m in nd.members for x in (m.steel, m.plate_steel)]
+                [m.steel for nd in nodos for m in nd.members] + [o.plate_steel for nd in nodos for o in nd.operations]
         for name in names:
             m = next((x for x in M.PLATE_STEELS + M.SHAPE_STEELS if x.name == name), None)
             if m and m.note in ("usuario", "proyecto"):

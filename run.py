@@ -52,16 +52,29 @@ def _out(argv, flag, suf):
 
 
 def batch_node(prj, argv, suf=""):
-    """Modulos de nudo (solo geometria): no hay calculo; --3d carpeta escribe las imagenes del modelo y el esquema."""
-    from steelconpro import conn
-    print(f"{prj.element}: {conn.module_for(prj.ctype).label(prj)}   (solo geometria: sin calculo ni analisis)")
+    """Modulos de nudo: verificaciones por codigo (AISC 360-22) de todas las operaciones; --3d carpeta escribe las imagenes del modelo y el esquema."""
+    import tempfile
+    from steelconpro import conn, report
+    mod = conn.module_for(prj.ctype)
+    res = conn.solve_conn(prj)
+    gov = res.governing
+    print(f"{prj.element}: {mod.label(prj)}")
+    print(f"{prj.element}: {'CUMPLE' if res.ok else 'NO CUMPLE'}   D/C max = {res.max_ratio:.3f}" + (f"   gobierna: {gov.title}" if gov else ""))
+    for w in res.warnings:
+        print("  aviso:", w)
     if "--3d" in argv:
-        for p in conn.save_figures(prj, None, _out(argv, "--3d", suf)):
+        for p in conn.save_figures(prj, res, _out(argv, "--3d", suf)):
             print("  ->", p)
-    for flag in ("--pdf", "--docx", "--geo"):
-        if flag in argv:
-            print(f"  aviso: {flag} no esta disponible en los modulos de nudo (todavia no tienen memoria de calculo).")
-    return 0
+    figs = None
+    if any(f in argv for f in ("--docx", "--pdf")):
+        figs = conn.save_figures(prj, res, tempfile.mkdtemp(prefix="scp_"))
+    if "--pdf" in argv:
+        print("  ->", report.export_pdf(prj, res, _out(argv, "--pdf", suf), figs))
+    if "--docx" in argv:
+        print("  ->", report.export_docx(prj, res, _out(argv, "--docx", suf), figs))
+    if "--geo" in argv:
+        print("  aviso: --geo (malla 3D) no esta disponible en los modulos de nudo.")
+    return 0 if res.ok else 2
 
 
 def batch_one(prj, argv, suf=""):

@@ -196,6 +196,8 @@ class MainWindow(QMainWindow):
         self.raw_cache = {}          # (id(conexion), combinacion) -> (firma, resultado crudo del 3D para dibujar)
         self.pairs = []              # [(proyecto de la combinacion, Results)] de la conexion actual
         self.res = None
+        self.node_res = None                     # verificaciones por codigo del nudo actual (modulos de nudo)
+        self.node_sig = ""                        # huella del nudo al verificar: si cambia, el resultado esta desactualizado
         self.worker = None
         self.path = None
         self._loading = False
@@ -346,7 +348,7 @@ class MainWindow(QMainWindow):
         f.text("Calculo", "author")
         f.text("Fecha", "date")
         f.group("Tipologia de la conexion")
-        f.combo("Tipologia", "ctype", CONN_TYPES, help="Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Nudo viga-columna, viga a viga y crucetas: por ahora solo geometria y vista 3D (sin calculo ni analisis). Cada conexion del proyecto tiene su propio modulo: se elige al crearla (boton Nueva).")
+        f.combo("Tipologia", "ctype", CONN_TYPES, help="Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Nudo viga-columna, viga a viga y crucetas: se arman por operaciones (miembros, operaciones, cargas) y se verifican por codigo (AISC 360-22). Cada conexion del proyecto tiene su propio modulo: se elige al crearla (boton Nueva).")
         f.group("Unidades de trabajo")
         self.cb_preset = QComboBox()
         self.cb_preset.addItem("(personalizado)")
@@ -664,6 +666,9 @@ class MainWindow(QMainWindow):
             f.changed.connect(self.on_change)
             self.forms.append(f)
             self.fnamed[mod.TAB] = f
+            f.check_requested.connect(self.run_node_checks)
+            f.fem_requested.connect(self.run_node_fem)
+            f.report_requested.connect(self.export_pdf)
             sw = scroll(f)
             self.tab_widgets[mod.TAB] = sw
             self.tabs_in.addTab(sw, mod.TAB)
@@ -803,7 +808,8 @@ class MainWindow(QMainWindow):
         w2 = QWidget()
         l2 = QVBoxLayout(w2)
         top = QHBoxLayout()
-        top.addWidget(QLabel("<b>Combinacion mostrada:</b>"))
+        self.lbl_combo2 = QLabel("<b>Combinacion mostrada:</b>")
+        top.addWidget(self.lbl_combo2)
         self.cb_combo2 = QComboBox()
         self.cb_combo2.setMinimumWidth(170)
         self.cb_combo2.setToolTip("Combinacion de carga que se dibuja y se detalla.")
@@ -1320,11 +1326,12 @@ class MainWindow(QMainWindow):
         return self.prj.ctype != CT_BASEPLATE
 
     def _apply_ctype(self):
-        """Muestra solo las pestañas de entrada y de salida que corresponden al modulo de la conexion actual.  En los modulos de nudo (solo geometria) las
-        pestañas Analisis FEM y Resultados quedan desactivadas y CALCULAR tambien."""
+        """Muestra solo las pestañas de entrada y de salida que corresponden al modulo de la conexion actual.  En los modulos de nudo la pestaña
+        Analisis FEM queda desactivada (etapa siguiente) y el boton VERIFICAR corre las verificaciones por codigo."""
         conn = self.is_conn
         mod = self._cur_mod()
         visual = bool(conn and getattr(mod, "VISUAL", False))
+        fem_off = conn                                   # analisis 3D por elementos finitos de los nudos: etapa siguiente
         mod_tab = mod.TAB if conn else None
         conn_tabs = {m.TAB for _c, m in connpkg.modules()}
         for title, sw in self.tab_widgets.items():
@@ -1334,23 +1341,25 @@ class MainWindow(QMainWindow):
             self.tabs_in.setCurrentWidget(self.tab_widgets["Proyecto"])
         for wd, vis in ((self.tab_model, True), (self.tab_fem, True), (self.tab_res, True), (self.tab_scheme, conn)):
             self.tabs_out.setTabVisible(self.tabs_out.indexOf(wd), vis)
-        for wd, nm in ((self.tab_fem, "Analisis FEM"), (self.tab_res, "Resultados")):
+        for wd, nm, off in ((self.tab_fem, "Analisis FEM", fem_off), (self.tab_res, "Resultados", visual)):
             i = self.tabs_out.indexOf(wd)
-            self.tabs_out.setTabEnabled(i, not visual)
-            self.tabs_out.setTabToolTip(i, f"{nm}: desactivado por ahora en los modulos de nudo (solo geometria y vista 3D)." if visual else "")
+            self.tabs_out.setTabEnabled(i, not off)
+            self.tabs_out.setTabToolTip(i, f"{nm}: todavia no disponible en los modulos de nudo." if off else "")
         if (not self.tabs_out.isTabVisible(self.tabs_out.currentIndex())) or (not self.tabs_out.isTabEnabled(self.tabs_out.currentIndex())):
             self.tabs_out.setCurrentWidget(self.tab_model)
         if hasattr(self, "spv_plan"):                 # sin OpenGL: la planta y la elevacion de la placa base no aplican a los nudos
             self.spv_plan.setVisible(not conn)
-        self.btn3d.setText("CALCULAR  (F8)")
+        self.lbl_combo2.setVisible(not conn)               # los nudos verifican todos los casos de carga a la vez
+        self.cb_combo2.setVisible(not conn)
+        self.btn3d.setText("VERIFICAR  (F8)" if conn else "CALCULAR  (F8)")
         self.btn3d.setEnabled(not visual)
-        self.btn3d.setToolTip("Analisis desactivado por ahora en este modulo: solo geometria y vista 3D." if visual else
+        self.btn3d.setToolTip("Verifica por codigo (AISC 360-22) cada operacion del nudo con los casos de carga y entrega el veredicto en la pestaña Resultados." if conn else
                               "Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
                               "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
-        self.chk_loads_geom.setText("Mostrar nombres" if visual else "Mostrar cargas")
-        self.chk_loads_geom.setToolTip("Nombre de cada miembro en su extremo." if visual else
+        self.chk_loads_geom.setText("Mostrar nombres" if conn else "Mostrar cargas")
+        self.chk_loads_geom.setToolTip("Nombre de cada miembro y de cada pieza en el modelo." if conn else
                                        "Flechas de la combinacion activa: Pu (rojo), cortantes (azul) y momentos (violeta).")
-        self.lbl_geom.setText(f"<b>Modelo 3D — {mod.TAB}</b>" if visual else "<b>Geometria de la conexion</b>")
+        self.lbl_geom.setText(f"<b>Modelo 3D — {mod.TAB}</b>" if conn else "<b>Geometria de la conexion</b>")
         self.tabs_out.setTabText(self.tabs_out.indexOf(self.tab_model), "Modelo 3D" if conn else "Modelo y vistas")
         self.tabs_out.setTabText(self.tabs_out.indexOf(self.tab_scheme), "Planta y elevacion")
 
@@ -1495,8 +1504,8 @@ class MainWindow(QMainWindow):
 
     def _solve_all(self, p):
         """Resultados de TODAS las combinaciones de la conexion p: lista de (proyecto_de_la_combinacion, Results)."""
-        if p.ctype != CT_BASEPLATE:                  # modulos de nudo: sin calculo (solo geometria)
-            return [(p, solve(p))]
+        if p.ctype != CT_BASEPLATE:                  # modulos de nudo: verificaciones por codigo (todos los casos de carga en un solo Results)
+            return [(p, connpkg.solve_conn(p))]
         out = []
         for i in range(len(p.combo_list())):
             q = p.with_combo(i)
@@ -1520,7 +1529,7 @@ class MainWindow(QMainWindow):
         """(proyecto, Results) de la combinacion que gobierna, con la tabla resumen de combinaciones."""
         p = p or self.prj
         if p.ctype != CT_BASEPLATE:
-            return p, solve(p)
+            return p, (self.node_res if (p is self.prj and self._node_fresh()) else connpkg.solve_conn(p))
         pairs = self._solve_all(p)
         k = self._governing(pairs)
         q, R = pairs[k]
@@ -1532,18 +1541,16 @@ class MainWindow(QMainWindow):
         if hasattr(self, "timer"):
             self.timer.stop()                   # evita que un recalculo pendiente pise este
         self.store_ui()
-        if self.is_conn:                                        # modulos de nudo: solo geometria, no se corre ningun calculo
+        if self.is_conn:                                        # modulos de nudo: dibuja; las verificaciones se corren con VERIFICAR (F8)
             self.pairs = []
-            self.res = self._cur_mod().solve(self.prj, False)
             self._update_labels()
-            for fn in (self.draw_all, self.fill_table):
+            for fn in (self.draw_all, self.fill_table, self._fill_memory_conn):
                 try:
                     fn()
                 except Exception as e:
                     log = self._log_error(fn.__name__, e)
                     traceback.print_exc()
                     self.statusBar().showMessage(f"Error en {fn.__name__}: {e}  (detalle en {log})", 15000)
-            self.statusBar().showMessage("Solo geometria y vista 3D: el analisis esta desactivado en este modulo.", 4000)
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
@@ -1579,7 +1586,9 @@ class MainWindow(QMainWindow):
 
     @property
     def calculated(self) -> bool:
-        """True si TODAS las combinaciones tienen un analisis 3D vigente."""
+        """True si TODAS las combinaciones tienen un analisis 3D vigente (nudos: las verificaciones vigentes)."""
+        if self.is_conn:
+            return self._node_fresh()
         pairs = getattr(self, "pairs", None)
         return bool(pairs) and all(not R.pending for _, R in pairs)
 
@@ -1918,9 +1927,8 @@ class MainWindow(QMainWindow):
         self.store_ui()
         if self.worker is not None and self.worker.isRunning():
             return
-        if self.is_conn:                               # modulos de nudo: sin analisis por ahora
-            self.statusBar().showMessage("El analisis esta desactivado en los modulos de nudo (solo geometria y vista 3D).", 5000)
-            return
+        if self.is_conn:
+            return self.run_node_checks()
         self.recalc()
         jobs = []
         for i in range(len(self.prj.combo_list())):
@@ -2077,13 +2085,127 @@ class MainWindow(QMainWindow):
             "compresion se transmite por contacto; el cordon se verifica a traccion y "
             "cortante.")
 
+    # ------------------------------------------------------------ modulos de nudo: verificaciones por codigo
+    def _node_sig_now(self) -> str:
+        return self._cur_mod().signature(self.prj)
+
+    def _node_fresh(self) -> bool:
+        """True si hay verificaciones del nudo y corresponden a los datos actuales."""
+        return self.is_conn and self.node_res is not None and self.node_sig == self._node_sig_now()
+
+    def run_node_checks(self, quiet: bool = False):
+        """VERIFICAR (F8): corre las verificaciones AISC 360-22 de todas las operaciones con todos los casos de carga."""
+        self.store_ui()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self.node_res = connpkg.solve_conn(self.prj)
+            self.node_sig = self._node_sig_now()
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            log = self._log_error("run_node_checks", e)
+            QMessageBox.critical(self, "Error de calculo", f"{e}\n\n{traceback.format_exc()[-1500:]}\n(detalle en {log})")
+            return
+        finally:
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
+        self.res = self.node_res
+        self.fill_table()
+        self._fill_memory_conn()
+        self._set_node_state()
+        if not quiet:
+            self.tabs_out.setCurrentWidget(self.tab_res)
+            R = self.node_res
+            self.statusBar().showMessage(f"Verificacion completa: {'CUMPLE' if R.ok else 'NO CUMPLE'}, D/C max = {R.max_ratio:.3f}", 8000)
+
+    def run_node_fem(self):
+        QMessageBox.information(self, "Analisis 3D", "El analisis 3D por elementos finitos de los nudos todavia no esta disponible en esta version: "
+                                "por ahora el nudo se verifica por codigo (AISC 360-22). La geometria 3D ya se puede exportar a STEP (Exportar > Modelo solido 3D).")
+
+    def _set_node_state(self):
+        f = self.fnamed.get(self._cur_mod().TAB) if self.is_conn else None
+        if f is None:
+            return
+        R = self.node_res
+        if R is None:
+            f.an_pg.set_state("Sin verificar.", None)
+        elif not self._node_fresh():
+            f.an_pg.set_state(f"Resultado desactualizado (D/C max {R.max_ratio:.3f}): vuelva a verificar.", None)
+        else:
+            f.an_pg.set_state(f"{'CUMPLE' if R.ok else 'NO CUMPLE'}  —  D/C max = {R.max_ratio:.3f}", R.ok)
+
+    def _fill_memory_conn(self):
+        if not self.is_conn:
+            return
+        if self._node_fresh() and self.node_res.rec is not None:
+            self.txt_mem.setHtml(self.node_res.rec.to_html())
+        else:
+            self.txt_mem.setHtml(f"<p style='color:{self.tc('#7f6000')}'><b>Sin verificar.</b> Presione <b>VERIFICAR (F8)</b> para generar "
+                                 "la memoria de calculo de cada operacion.</p>")
+        self._set_node_state()
+
+    def _fill_table_conn(self):
+        """Resultados de un nudo: casos de carga, verificaciones por operacion (la mas desfavorable de todos los casos), avisos y veredicto."""
+        self.tbl.setRowCount(0)
+        self.tbl_cmb.setRowCount(0)
+        red, green, grey = QColor("#ffc7ce"), QColor("#c6efce"), QColor("#eeeeee")
+        r = self.node_res
+        if r is None or not self._node_fresh():
+            stale = r is not None
+            self.lbl_verdict.setText("  DESACTUALIZADO  " if stale else "  SIN VERIFICAR  ")
+            self.lbl_verdict.setToolTip("Presione VERIFICAR (F8).")
+            self.lbl_verdict.setStyleSheet("background:#ffeb9c; color:#9c5700; border-radius:4px; padding:2px 8px;")
+            self.txt_info.setHtml("<b>%s</b> Presione <b>VERIFICAR (F8)</b> (barra superior): se verifica cada operacion del paso 2 con las cargas del paso 3 "
+                                  "y aparecen aqui las verificaciones, el D/C y la memoria de calculo." %
+                                  ("Los datos cambiaron despues de la ultima verificacion." if stale else "Sin verificar."))
+            self.lbl_res_ck.setText("<b>Verificaciones</b> (aparecen al verificar)")
+            return
+        rows = r.combo_rows or []
+        for k, cr in enumerate(rows):
+            self.tbl_cmb.insertRow(k)
+            vals = [cr["name"], f"{cr['ratio']:.3f}", cr["gov"], "CUMPLE" if cr["ok"] else "NO CUMPLE", "◄" if k == r.combo_gov else ""]
+            for j, v in enumerate(vals):
+                it = QTableWidgetItem(v)
+                if j == 3:
+                    it.setBackground(green if cr["ok"] else red)
+                    it.setForeground(QColor("#1b1b1b"))
+                self.tbl_cmb.setItem(k, j, it)
+        self.lbl_res_ck.setText("<b>Verificaciones de cada operacion</b> (para cada una, el caso de carga que gobierna)")
+        for ch in r.checks:
+            i = self.tbl.rowCount()
+            self.tbl.insertRow(i)
+            dv, cv, ul = report.ck_vals(self.us, ch)
+            vals = [ch.title, f"{dv:,.3f}", f"{cv:,.3f}", ul, "—" if ch.skip else f"{ch.ratio:.3f}", ch.ref + ("  —  " + ch.note if ch.note else "")]
+            for j, v in enumerate(vals):
+                it = QTableWidgetItem(v)
+                if j in (1, 2, 4):
+                    it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                if j == 4:
+                    it.setBackground(grey if ch.skip else (green if ch.ok else red))
+                    it.setForeground(QColor("#1b1b1b"))
+                    f_ = it.font(); f_.setBold(True); it.setFont(f_)
+                it.setToolTip(v)
+                self.tbl.setItem(i, j, it)
+        gov = r.governing
+        nskip = sum(1 for c in r.checks if c.skip)
+        html = [f"<b>{self.prj.ctype}</b> — verificaciones por codigo (AISC 360-22); el analisis 3D por elementos finitos todavia no esta disponible."]
+        if nskip:
+            html.append(f"{nskip} verificacion(es) <b>NO EVALUADA(S)</b> (filas grises): hay que revisarlas aparte.")
+        if gov:
+            html.append(f"Gobierna: <b>{gov.title}</b>  (D/C = {gov.ratio:.3f})")
+        for w in r.warnings:
+            col = self.tc("#9c0006" if w.startswith("**") else "#7f6000")
+            html.append(f"<span style='color:{col}'>• {w}</span>")
+        self.txt_info.setHtml("<br>".join(html))
+        ok = r.ok
+        self.lbl_verdict.setText(f"  {'CUMPLE' if ok else 'NO CUMPLE'}   D/C max = {r.max_ratio:.3f}"
+                                 + (f"  ({rows[r.combo_gov]['name']})" if len(rows) > 1 else "") + "  ")
+        bg, fg = ("#c6efce", "#006100") if ok else ("#ffc7ce", "#9c0006")
+        self.lbl_verdict.setToolTip("")
+        self.lbl_verdict.setStyleSheet(f"background:{bg}; color:{fg}; border-radius:4px; padding:2px 8px;")
+
     def fill_table(self):
         if self.is_conn:
-            self.tbl.setRowCount(0)
-            self.tbl_cmb.setRowCount(0)
-            self.lbl_verdict.setText("  Solo geometría  ")
-            self.lbl_verdict.setStyleSheet("background:#e4e7eb; color:#44546a; border-radius:4px; padding:2px 8px;")
-            return
+            return self._fill_table_conn()
         r = self.res
         self.tbl.setRowCount(0)
         self.tbl_cmb.setRowCount(0)
@@ -2239,6 +2361,8 @@ class MainWindow(QMainWindow):
     def _ensure_results(self):
         self.store_ui()
         if self.is_conn:
+            if not self._node_fresh():
+                self.run_node_checks(quiet=True)
             return
         if self.res is None:
             self.recalc()
@@ -2338,10 +2462,9 @@ class MainWindow(QMainWindow):
             self._done(f"{len(paths)} imagenes en {d}")
 
     def _no_report(self) -> bool:
-        """Los modulos de nudo aun no tienen memoria de calculo: se avisa y no se exporta."""
-        if self.is_conn:
-            QMessageBox.information(self, "Exportar", "Los modulos de nudo son por ahora solo geometria y vista 3D: no tienen memoria de calculo. "
-                                    "Use Exportar > Modelo solido 3D para obtener la geometria en STEP.")
+        """Los nudos sin operaciones de conexion no tienen nada que reportar."""
+        if self.is_conn and not self._cur_mod().spec(self.prj).operations:
+            QMessageBox.information(self, "Exportar", "El nudo no tiene operaciones: agregue una conexion en el paso 2 (Operaciones) y verifique.")
             return True
         return False
 
@@ -2358,7 +2481,7 @@ class MainWindow(QMainWindow):
         mb.setText(
             f"<b>SteelConPro {__version__}</b><br>"
             "Diseno y verificacion de conexiones de acero: placas base (completo) y modulos de nudo viga-columna, viga a viga y crucetas "
-            "(por ahora solo geometria y vista 3D).<br><br>"
+            "(verificacion por codigo AISC 360-22 y vista 3D).<br><br>"
             "AISC 360-22 · AISC Design Guide 1 (2ª Ed.) · AISC Manual 15a Ed. · AISC 358/341 · AASHTO LRFD · ACI 318-19 Cap. 17<br>"
             "Modelo solido 3D (Gmsh + CalculiX) "
             "con el concreto como resortes solo a compresion.<br><br>"

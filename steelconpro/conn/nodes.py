@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Los tres modulos de nudo (viga-columna, viga a viga, crucetas) vistos por la interfaz: identidad, texto de la lista y esquema (planta y elevacion).
 
-Son solo geometria: `solve` devuelve un resultado vacio (sin verificaciones) y no se corre ningun analisis.
+`solve` corre las verificaciones por codigo (conn/checks); el analisis 3D por elementos finitos se agrega despues.
 """
 from __future__ import annotations
 import math
@@ -12,10 +12,12 @@ from .specs import (CT_NODE, CT_B2B, CT_TRUSS, MODE_COL, MODE_BEAM, MODE_CHORD, 
 
 
 class NodeModule:
-    VISUAL = True                                  # solo geometria: sin calculo ni analisis
+    VISUAL = False                                 # tiene verificaciones por codigo (ver conn/checks); el analisis 3D llega despues
+    NORMS = "AISC 360-22 (Especificacion), AISC Steel Construction Manual 15a ed., AISC 341/358 donde aplique"
 
     def __init__(self, ctype, mode, tab, prefix, noun, plural):
         self.NAME, self.MODE, self.ATTR, self.TAB, self.PREFIX = ctype, mode, ATTR_OF[ctype], tab, prefix
+        self.TITLE = tab
         self.noun, self.plural = noun, plural      # "viga" / "vigas", "diagonal" / "diagonales"...
 
     def spec(self, prj):
@@ -24,19 +26,39 @@ class NodeModule:
     def label(self, prj) -> str:
         nd = self.spec(prj)
         n = len(nd.members)
-        return f"{nd.main_shape}  ·  {n} {self.noun if n == 1 else self.plural}"
+        return f"{nd.main_shape}  ·  {n} {self.noun if n == 1 else self.plural}  ·  {len(nd.operations)} op."
+
+    def signature(self, prj) -> str:
+        """Huella de todo lo que cambia el resultado (miembros, operaciones, cargas y unidades): detecta resultados desactualizados."""
+        import dataclasses, hashlib, json
+        d = dataclasses.asdict(self.spec(prj))
+        d["_u"] = [prj.u_len, prj.u_force, prj.u_stress, prj.u_moment]
+        return hashlib.sha1(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()
 
     def solve(self, prj, detail: bool = True):
-        from ..solver import Results
-        R = Results()
-        R.closed_form = True
-        return R
+        """Verificaciones por codigo de todas las operaciones con todos los casos de carga."""
+        from .checks import adapters
+        return adapters.run(prj, self.spec(prj))
 
     def input_rows(self, prj, us):
+        from .assembly import shape_of
         nd = self.spec(prj)
-        rows = [(MAIN_NAMES[nd.mode], nd.main_shape)]
+        rows = [(MAIN_NAMES[nd.mode], f"{nd.main_shape}, {nd.main_steel}; {nd.main_end}")]
         for m in nd.members:
-            rows.append((m.name, f"{m.shape}, azimut {m.az:g}°, elevación {m.el:g}°, {m.conn}"))
+            ops = "; ".join(o.kind for o in nd.ops_of(m.name)) or "sin operaciones"
+            rows.append((m.name, f"{m.shape} ({m.steel}), azimut {m.az:g}°, elevación {m.el:g}°, posición {us.q('L', m.pos)}: {ops}"))
+        for o in nd.operations:
+            if o.is_connection and "Cartela" not in o.kind and "Corte" not in o.kind:
+                rows.append((f"{o.member} — {o.kind}", f"pernos {o.n_bolts} × Ø{o.bolt_size} {o.bolt_grade}, separación {us.q('L', o.bolt_s)}, "
+                             f"placa/ángulo t = {us.q('L', o.plate_t)} ({o.plate_steel}), soldadura {us.q('L', o.weld_size)}"))
+            elif o.kind.startswith("Cartela"):
+                rows.append((f"{o.member} — {o.kind}", f"{o.n_bolts} filas de Ø{o.bolt_size} {o.bolt_grade}, separación {us.q('L', o.bolt_s)}, "
+                             f"cartela t = {us.q('L', o.plate_t)} ({o.plate_steel}), soldadura {us.q('L', o.weld_size)}"))
+            else:
+                rows.append((f"{o.member} — {o.kind}", ""))
+        for x in nd.loads:
+            rows.append((f"Carga «{x.case}» — {x.member}", f"N {us.fmt('F', x.N)}, Vy {us.fmt('F', x.Vy)}, Vz {us.fmt('F', x.Vz)} {us.F}; "
+                         f"T {us.fmt('M', x.T)}, My {us.fmt('M', x.My)}, Mz {us.fmt('M', x.Mz)} {us.M}"))
         return rows
 
     def draw(self, fig, prj):

@@ -33,16 +33,7 @@
       "off": 0.0,
       "L": 48.0,
       "roll": 0.0,
-      "conn": "Corte — placa simple",
-      "gap": 0.5,
-      "bolt_size": "3/4",
-      "bolt_grade": "A325-N",
-      "n_bolts": 3,
-      "bolt_s": 3.0,
-      "plate_t": 0.375,
-      "plate_steel": "ASTM A36",
-      "ep_ext": 3.0,
-      "cont": true
+      "gap": 0.5
      },
      {
       "name": "V2",
@@ -54,18 +45,44 @@
       "off": 0.0,
       "L": 48.0,
       "roll": 0.0,
-      "conn": "Corte — placa simple",
-      "gap": 0.5,
+      "gap": 0.5
+     }
+    ],
+    "operations": [
+     {
+      "kind": "Placa simple (corte)",
+      "member": "V1",
       "bolt_size": "3/4",
       "bolt_grade": "A325-N",
       "n_bolts": 3,
       "bolt_s": 3.0,
       "plate_t": 0.375,
       "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
       "ep_ext": 3.0,
-      "cont": true
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5
+     },
+     {
+      "kind": "Placa simple (corte)",
+      "member": "V2",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.375,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5
      }
     ],
+    "loads": [],
     "show_hw": true
    },
    "nbb": {
@@ -88,16 +105,7 @@
       "off": 3.8500000000000005,
       "L": 48.0,
       "roll": 0.0,
-      "conn": "Corte — placa simple",
-      "gap": 0.5,
-      "bolt_size": "3/4",
-      "bolt_grade": "A325-N",
-      "n_bolts": 3,
-      "bolt_s": 3.0,
-      "plate_t": 0.375,
-      "plate_steel": "ASTM A36",
-      "ep_ext": 3.0,
-      "cont": true
+      "gap": 0.5
      },
      {
       "name": "S2",
@@ -109,18 +117,44 @@
       "off": 3.8500000000000005,
       "L": 48.0,
       "roll": 0.0,
-      "conn": "Corte — placa simple",
-      "gap": 0.5,
+      "gap": 0.5
+     }
+    ],
+    "operations": [
+     {
+      "kind": "Placa simple (corte)",
+      "member": "S1",
       "bolt_size": "3/4",
       "bolt_grade": "A325-N",
       "n_bolts": 3,
       "bolt_s": 3.0,
       "plate_t": 0.375,
       "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
       "ep_ext": 3.0,
-      "cont": true
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5
+     },
+     {
+      "kind": "Placa simple (corte)",
+      "member": "S2",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.375,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5
      }
     ],
+    "loads": [],
     "show_hw": true
    },
    "ntr": {
@@ -143,16 +177,7 @@
       "off": 0.0,
       "L": 60.0,
       "roll": 0.0,
-      "conn": "Diagonal — cartela atornillada",
-      "gap": 0.5,
-      "bolt_size": "3/4",
-      "bolt_grade": "A325-N",
-      "n_bolts": 3,
-      "bolt_s": 3.0,
-      "plate_t": 0.375,
-      "plate_steel": "ASTM A36",
-      "ep_ext": 3.0,
-      "cont": true
+      "gap": 0.5
      },
      {
       "name": "D2",
@@ -164,16 +189,7 @@
       "off": 0.0,
       "L": 60.0,
       "roll": 0.0,
-      "conn": "Diagonal — cartela atornillada",
-      "gap": 0.5,
-      "bolt_size": "3/4",
-      "bolt_grade": "A325-N",
-      "n_bolts": 3,
-      "bolt_s": 3.0,
-      "plate_t": 0.375,
-      "plate_steel": "ASTM A36",
-      "ep_ext": 3.0,
-      "cont": true
+      "gap": 0.5
      },
      {
       "name": "M1",
@@ -185,16 +201,89 @@
       "off": 0.0,
       "L": 48.0,
       "roll": 0.0,
-      "conn": "Diagonal — cartela atornillada",
-      "gap": 0.5,
+      "gap": 0.5
+     }
+    ],
+    "operations": [
+     {
+      "kind": "Cartela atornillada (diagonal)",
+      "member": "D1",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.5,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5
+     },
+     {
+      "kind": "Cartela atornillada (diagonal)",
+      "member": "D2",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.5,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5
+     },
+     {
+      "kind": "Cartela atornillada (diagonal)",
+      "member": "M1",
       "bolt_size": "3/4",
       "bolt_grade": "A325-N",
       "n_bolts": 3,
       "bolt_s": 3.0,
       "plate_t": 0.375,
       "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
       "ep_ext": 3.0,
-      "cont": true
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5
+     }
+    ],
+    "loads": [
+     {
+      "case": "Caso 1",
+      "member": "D1",
+      "N": -35.0,
+      "Vy": 0.0,
+      "Vz": 0.0,
+      "T": 0.0,
+      "My": 0.0,
+      "Mz": 0.0
+     },
+     {
+      "case": "Caso 1",
+      "member": "D2",
+      "N": 35.0,
+      "Vy": 0.0,
+      "Vz": 0.0,
+      "T": 0.0,
+      "My": 0.0,
+      "Mz": 0.0
+     },
+     {
+      "case": "Caso 1",
+      "member": "M1",
+      "N": 0.0,
+      "Vy": 0.0,
+      "Vz": 0.0,
+      "T": 0.0,
+      "My": 0.0,
+      "Mz": 0.0
      }
     ],
     "show_hw": true

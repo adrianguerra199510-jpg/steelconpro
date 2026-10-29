@@ -17,8 +17,8 @@ from .. import materials as M
 from ..shapes import CATALOG, HSS_RECT, W_SHAPE
 from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, unit
-from .specs import (MODE_COL, MODE_BEAM, MODE_CHORD, CK_BLANK, CK_TAB, CK_DANG, CK_SEAT, CK_EP_FLUSH, CK_EP_EXT, CK_WELD, CK_GUSSET,
-                    CK_GUSSET_W, GUSSET_KINDS, MAIN_NAMES)
+from .specs import (MODE_COL, MODE_BEAM, MODE_CHORD, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
+                    OP_COPE, OP_CONT, GUSSET_OPS, MAIN_NAMES, Operation)
 
 EMBED = 0.35            # las placas entran un poco en el miembro principal para que no quede una rendija en las uniones esviadas
 DIAG_MIN = 10.0         # elevacion (grados) desde la cual un miembro se considera diagonal (color y cartela por omision)
@@ -162,11 +162,11 @@ def _plate_prism(poly, o, U, V, w0, w1):
 # ================================================================================================== herrajes de cada miembro
 class _Ctx:
     """Datos de un miembro ya colocado, comunes a todos sus herrajes."""
-    def __init__(self, m, shape, P0, Q, dirv, sx, sy, mshape, dmain):
-        self.m, self.shape, self.P0, self.Q, self.dir, self.sx, self.sy = m, shape, P0, Q, dirv, sx, sy
+    def __init__(self, m, op, shape, P0, Q, dirv, sx, sy, mshape, dmain):
+        self.m, self.op, self.shape, self.P0, self.Q, self.dir, self.sx, self.sy = m, op or Operation(), shape, P0, Q, dirv, sx, sy
         self.mshape, self.dmain = mshape, dmain
-        self.db = bolt_db(m.bolt_size)
-        self.t = max(float(m.plate_t), 0.125)
+        self.db = bolt_db(self.op.bolt_size)
+        self.t = max(float(self.op.plate_t), 0.125)
         self.parts, self.bolts, self.notes = [], [], []
 
     def at(self, s, lat=0.0, v=0.0):
@@ -176,8 +176,8 @@ class _Ctx:
 
 def _n_rows(ctx, hmax, edge=1.5):
     """Numero de pernos de una fila que caben en `hmax`."""
-    s = max(ctx.m.bolt_s, 3 * ctx.db * 0.8)
-    n = max(1, int(ctx.m.n_bolts))
+    s = max(ctx.op.bolt_s, 3 * ctx.db * 0.8)
+    n = max(1, int(ctx.op.n_bolts))
     fit = max(1, int((hmax - 2 * edge) / s) + 1)
     if n > fit:
         ctx.notes.append(f"{ctx.m.name}: caben {fit} pernos en {hmax:.1f} in; se dibujan {fit} de {n}.")
@@ -198,7 +198,7 @@ def _tab_geometry(ctx, tag):
     # plano (dir, sy): U×V = dir×sy = -sx  → el espesor se mide hacia -sx; se coloca con o desplazado
     pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
     name = f"Placa {tag}"
-    Fy, Fu = _steel(m.plate_steel, True)
+    Fy, Fu = _steel(ctx.op.plate_steel, True)
     ctx.parts.append(Part(name, "plate", f"Placa simple PL {t:g}", Fy, Fu, [pr], t=t))
     zs = [(i - (n - 1) / 2.0) * s for i in range(n)]
     if _is_open(shp):
@@ -210,7 +210,7 @@ def _tab_geometry(ctx, tag):
         p0 = shp.bf / 2.0
         nut = shp.bf
     for i, z in enumerate(zs):
-        ctx.bolts.append(_bolt(f"{tag}-B{i + 1}", ctx.at(sb, p0, z), -ctx.sx, ctx.db, 0.0, nut, grip, m.bolt_grade))
+        ctx.bolts.append(_bolt(f"{tag}-B{i + 1}", ctx.at(sb, p0, z), -ctx.sx, ctx.db, 0.0, nut, grip, ctx.op.bolt_grade))
     return Lp
 
 
@@ -223,7 +223,7 @@ def _dang_geometry(ctx, tag):
     lo = 3.5
     H = (n - 1) * s + 3.0
     l0 = _halfw(shp)
-    Fy, Fu = _steel(m.plate_steel, True)
+    Fy, Fu = _steel(ctx.op.plate_steel, True)
     for k, sg in enumerate((1, -1)):
         poly = [(-EMBED, sg * l0), (la, sg * l0), (la, sg * (l0 + t)), (t, sg * (l0 + t)), (t, sg * (l0 + lo)), (-EMBED, sg * (l0 + lo))]
         pr = _plate_prism(poly, ctx.Q, ctx.dir, ctx.sx, -H / 2.0, H / 2.0)      # U×V = dir×sx = sy
@@ -232,10 +232,10 @@ def _dang_geometry(ctx, tag):
     zs = [(i - (n - 1) / 2.0) * s for i in range(n)]
     grip = [(f"Angulo {tag}-1", 0.0, t), (ctx.partname, t, t + 2 * l0), (f"Angulo {tag}-2", t + 2 * l0, 2 * t + 2 * l0)]
     for i, z in enumerate(zs):
-        ctx.bolts.append(_bolt(f"{tag}-B{i + 1}", ctx.at(sb, l0 + t, z), -ctx.sx, ctx.db, 0.0, 2 * t + 2 * l0, grip, m.bolt_grade))
+        ctx.bolts.append(_bolt(f"{tag}-B{i + 1}", ctx.at(sb, l0 + t, z), -ctx.sx, ctx.db, 0.0, 2 * t + 2 * l0, grip, ctx.op.bolt_grade))
         for k, sg in enumerate((1, -1)):                # pernos de las alas salientes hacia el soporte
             ctx.bolts.append(_bolt(f"{tag}-S{i + 1}{k + 1}", ctx.at(t, sg * (l0 + lo * 0.62), z), -ctx.dir, ctx.db, 0.0, t + 1.0,
-                                   [(f"Angulo {tag}-{k + 1}", 0.0, t)], m.bolt_grade))
+                                   [(f"Angulo {tag}-{k + 1}", 0.0, t)], ctx.op.bolt_grade))
     return la
 
 
@@ -248,14 +248,14 @@ def _seat_geometry(ctx, tag):
     g = m.gap
     poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh, yb - t), (Lh, yb), (-EMBED, yb)]
     pr = _plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0)        # U×V = dir×sy = -sx (simetrico)
-    Fy, Fu = _steel(m.plate_steel, True)
+    Fy, Fu = _steel(ctx.op.plate_steel, True)
     ctx.parts.append(Part(f"Asiento {tag}", "angle", f"Angulo de asiento L {Lh:g}x{Lv:g}x{t:g}", Fy, Fu, [pr], t=t))
     gauge = min(max(W - 2.5, 1.5), 4.0)
     for k, sg in enumerate((1, -1)):
         ctx.bolts.append(_bolt(f"{tag}-A{k + 1}", ctx.at(Lh * 0.62, sg * gauge / 2.0, yb - t), ctx.sy, ctx.db, 0.0, t + (shp.tf if shp.tf > 0 else 0.5),
-                               [(f"Asiento {tag}", 0.0, t), (ctx.partname, t, t + (shp.tf if shp.tf > 0 else 0.5))], m.bolt_grade))
+                               [(f"Asiento {tag}", 0.0, t), (ctx.partname, t, t + (shp.tf if shp.tf > 0 else 0.5))], ctx.op.bolt_grade))
         ctx.bolts.append(_bolt(f"{tag}-S{k + 1}", ctx.at(t, sg * gauge / 2.0, yb - Lv * 0.6), -ctx.dir, ctx.db, 0.0, t + 1.0,
-                               [(f"Asiento {tag}", 0.0, t)], m.bolt_grade))
+                               [(f"Asiento {tag}", 0.0, t)], ctx.op.bolt_grade))
     return max(g, 0.5)
 
 
@@ -265,13 +265,13 @@ def _endplate_geometry(ctx, tag, extended):
     d = shp.d
     bf = shp.bf if shp.bf > 0 else shp.d
     hollow = shp.is_hollow
-    ext = max(m.ep_ext, 2.0) if (extended or hollow) else 0.5
+    ext = max(ctx.op.ep_ext, 2.0) if (extended or hollow) else 0.5
     hh = d / 2.0 + ext
     gb = min(max(bf - 2.5, 2.5), 5.5)
     wide = max(bf + 1.5, gb + 3.0)
     poly = [(-wide / 2, -hh), (wide / 2, -hh), (wide / 2, hh), (-wide / 2, hh)]
     pr = _plate_prism(poly, ctx.Q - ctx.dir * (-EMBED * 0.0), ctx.sx, ctx.sy, 0.0, t)      # U×V = sx×sy = dir: extruye hacia el miembro
-    Fy, Fu = _steel(m.plate_steel, True)
+    Fy, Fu = _steel(ctx.op.plate_steel, True)
     ctx.parts.append(Part(f"Placa extrema {tag}", "plate", f"Placa extrema PL {t:g}", Fy, Fu, [pr], t=t))
     rows = []
     if hollow:
@@ -285,7 +285,7 @@ def _endplate_geometry(ctx, tag, extended):
     for i, v in enumerate(rows):
         for k, sg in enumerate((1, -1)):
             ctx.bolts.append(_bolt(f"{tag}-B{i + 1}{k + 1}", ctx.at(t, sg * (gb / 2.0 if not hollow else wide / 2.0 - 1.25), v), -ctx.dir, ctx.db, 0.0, t + 1.0,
-                                   [(f"Placa extrema {tag}", 0.0, t)], m.bolt_grade))
+                                   [(f"Placa extrema {tag}", 0.0, t)], ctx.op.bolt_grade))
     return t
 
 
@@ -297,27 +297,50 @@ def _weld_geometry(ctx, tag):
     return 0.12
 
 
-def _continuity(ctx, nd, tag, main_frame_, mshape):
-    """Placas de continuidad dentro de una columna I frente a las alas de una viga que llega a su ala."""
-    if nd.mode != MODE_COL or mshape.kind != W_SHAPE:
+def _continuity(ctx, nd, tag, main_frame_, mshape, t):
+    """Placas de continuidad dentro de una columna I frente a las alas de la viga que llega a su ala (operacion «Placas de continuidad»)."""
+    if mshape.kind != W_SHAPE:
         return []
     A, msx, msy = main_frame_
     d2 = (float(np.dot(ctx.dir, msx)), float(np.dot(ctx.dir, msy)))
     if abs(d2[1]) < 0.6 * max(math.hypot(*d2), 1e-9):       # no llega por la cara del ala (de lado a lo largo de d)
         return []
-    t = max(ctx.shape.tf if ctx.shape.tf > 0 else 0.5, 0.375)
+    t = max(float(t), 0.25)
     out = []
     Fy, Fu = _steel("ASTM A36", True)
     dm, tfm = ctx.shape.d, (ctx.shape.tf if ctx.shape.tf > 0 else 0.5)
     for k, lv in enumerate((dm / 2.0 - tfm / 2.0, -(dm / 2.0 - tfm / 2.0))):
-        zc = float((ctx.P0 + lv * ctx.sy)[2])
+        base = ctx.P0 + lv * ctx.sy                       # punto del eje principal a la altura de esa ala
+        zc = float(np.dot(base, A))
         for j, sg in enumerate((1, -1)):
             x0, x1 = sg * mshape.tw / 2.0, sg * mshape.bf / 2.0
             y0, y1 = -(mshape.d / 2.0 - mshape.tf), (mshape.d / 2.0 - mshape.tf)
             poly = [(min(x0, x1), y0), (max(x0, x1), y0), (max(x0, x1), y1), (min(x0, x1), y1)]
-            pr = Prism(poly=poly, o=(0.0, 0.0, zc - t / 2.0), U=tuple(map(float, msx)), V=tuple(map(float, msy)), w0=0.0, w1=t)
+            pr = Prism(poly=poly, o=tuple(map(float, A * (zc - t / 2.0))), U=tuple(map(float, msx)), V=tuple(map(float, msy)), w0=0.0, w1=t)
             out.append(Part(f"Continuidad {tag}-{k + 1}{j + 1}", "stiff", f"Placa de continuidad PL {t:g}", Fy, Fu, [pr], t=t))
     return out
+
+
+def cope_prisms(shape, o, sx, sy, A, s0, s1, ct, cb, cl):
+    """Viga I con corte (cope) en el extremo: alma como poligono con las muescas y alas acortadas.  Profundidades ct / cb y longitud cl en in."""
+    d, bf, tf, tw = shape.d, shape.bf, shape.tf, shape.tw
+    ct, cb, cl = max(ct, 0.0), max(cb, 0.0), max(cl, 0.0)
+    pts = [(s0, -d / 2 + cb)]
+    if cb > 0:
+        pts += [(s0 + cl, -d / 2 + cb), (s0 + cl, -d / 2)]
+    pts += [(s1, -d / 2), (s1, d / 2)]
+    if ct > 0:
+        pts += [(s0 + cl, d / 2), (s0 + cl, d / 2 - ct), (s0, d / 2 - ct)]
+    else:
+        pts += [(s0, d / 2)]
+    o = tuple(map(float, o))
+    web = Prism(poly=[(float(a), float(b)) for a, b in pts], o=o, U=tuple(map(float, A)), V=tuple(map(float, sy)), w0=-tw / 2.0, w1=tw / 2.0)
+    U, V = tuple(map(float, sx)), tuple(map(float, sy))
+    st = s0 + (cl if ct > 0 else 0.0)
+    sb = s0 + (cl if cb > 0 else 0.0)
+    return [web,
+            Prism(poly=[(-bf / 2, d / 2 - tf), (bf / 2, d / 2 - tf), (bf / 2, d / 2), (-bf / 2, d / 2)], o=o, U=U, V=V, w0=float(st), w1=float(s1)),
+            Prism(poly=[(-bf / 2, -d / 2), (bf / 2, -d / 2), (bf / 2, -d / 2 + tf), (-bf / 2, -d / 2 + tf)], o=o, U=U, V=V, w0=float(sb), w1=float(s1))]
 
 
 # ================================================================================================== cartelas (placa comun por plano)
@@ -345,11 +368,11 @@ def _gusset_outline(ctx):
     dm = max(min(shp.d if not shp.is_round else shp.d, 16.0), 4.0)
     hb = max(dm * 1.05, 7.0)
     hm = max(dm * 0.9, 5.0)
-    rows = max(1, int(m.n_bolts))
-    s = max(m.bolt_s, 2.5)
+    rows = max(1, int(ctx.op.n_bolts))
+    s = max(ctx.op.bolt_s, 2.5)
     ov = (rows - 1) * s + 3.0 + 1.0
-    gl = 2.0 if m.conn == CK_GUSSET else 6.0
-    tip = gl + (ov if m.conn == CK_GUSSET else 0.0)
+    gl = 2.0 if ctx.op.kind == OP_GUSSET else 6.0
+    tip = gl + (ov if ctx.op.kind == OP_GUSSET else 0.0)
     pts = [ctx.at(-EMBED, 0.0, -hb / 2.0), ctx.at(-EMBED, 0.0, hb / 2.0), ctx.at(tip, 0.0, hm / 2.0), ctx.at(tip, 0.0, -hm / 2.0)]
     return pts, gl, ov, hm
 
@@ -358,7 +381,7 @@ def _gusset_members(ctxs, nd):
     """Una cartela por plano: la envolvente de los contornos de los miembros que comparten plano (p. ej. las dos diagonales de una V)."""
     groups = []
     for c in ctxs:
-        if c.m.conn not in GUSSET_KINDS:
+        if c.op.kind not in GUSSET_OPS:
             continue
         n = unit(c.sx)
         for g in groups:
@@ -395,16 +418,16 @@ def _build_gussets(ctxs, nd, mdl):
             continue
         o = g["P0"] + n * (lat - t / 2.0)
         pr = Prism(poly=hull, o=tuple(map(float, o)), U=tuple(map(float, e1)), V=tuple(map(float, e2)), w0=0.0, w1=t)
-        Fy, Fu = _steel(g["items"][0].m.plate_steel, True)
+        Fy, Fu = _steel(g["items"][0].op.plate_steel, True)
         names = "+".join(c.m.name for c in g["items"])
         mdl.parts.append(Part(f"Cartela {gi + 1}", "gusset", f"Cartela PL {t:g} ({names})", Fy, Fu, [pr], t=t))
         for c in g["items"]:
-            if c.m.conn != CK_GUSSET:
+            if c.op.kind != OP_GUSSET:
                 continue
             m, shp = c.m, c.shape
             _, gl, ov, hm = _gusset_outline(c)
-            rows = max(1, int(m.n_bolts))
-            s = max(m.bolt_s, 2.5)
+            rows = max(1, int(c.op.n_bolts))
+            s = max(c.op.bolt_s, 2.5)
             gauge = max(min(hm * 0.5, 6.0), 2.5)
             if _is_open(shp):
                 grip = [(f"Cartela {gi + 1}", 0.0, t), (c.partname, t, t + shp.tw)]
@@ -414,10 +437,26 @@ def _build_gussets(ctxs, nd, mdl):
                 p0, nut = shp.bf / 2.0, shp.bf
             for i in range(rows):
                 for k, sg in enumerate((1, -1)):
-                    mdl.bolts.append(_bolt(f"{m.name}-B{i + 1}{k + 1}", c.at(gl + 1.5 + i * s, p0, sg * gauge / 2.0), -c.sx, c.db, 0.0, nut, grip, m.bolt_grade))
+                    mdl.bolts.append(_bolt(f"{m.name}-B{i + 1}{k + 1}", c.at(gl + 1.5 + i * s, p0, sg * gauge / 2.0), -c.sx, c.db, 0.0, nut, grip, c.op.bolt_grade))
 
 
 # ================================================================================================== modelo completo
+def attach_info(nd, m) -> dict:
+    """Como llega un miembro al principal: punto de contacto Q, distancia s_ex desde el eje, cara ('ala' | 'alma' | 'cara') y direccion."""
+    mshape = shape_of(nd.main_shape)
+    A, msx, msy = main_frame(nd)
+    dirv = member_dir(m)
+    P0 = A * m.pos + (msy * m.off if nd.mode != MODE_COL else 0.0)
+    o2 = (0.0, float(m.off) if nd.mode != MODE_COL else 0.0)
+    d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
+    s_ex = ray_exit(outer_extent(mshape), o2, d2) if math.hypot(*d2) > 1e-6 else None
+    face = "cara"
+    if s_ex is not None and mshape.kind == W_SHAPE:
+        y = o2[1] + s_ex * d2[1]
+        face = "ala" if abs(y) >= mshape.d / 2.0 - 1e-6 else "alma"
+    return {"Q": P0 + dirv * (s_ex or 0.0), "s": s_ex, "face": face, "dir": dirv, "P0": P0, "main": mshape, "touches": s_ex is not None}
+
+
 def build_model(prj, vals=None) -> Model3D:
     from .specs import ATTR_OF
     nd = getattr(prj, ATTR_OF[prj.ctype])
@@ -425,6 +464,7 @@ def build_model(prj, vals=None) -> Model3D:
 
 
 def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
+    """Modelo 3D del nudo: el miembro principal, los miembros conectados y el resultado de aplicar las operaciones en el orden de la lista."""
     hw = nd.show_hw if hardware is None else hardware
     mdl = Model3D(name)
     mshape = shape_of(nd.main_shape)
@@ -436,6 +476,10 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
     mdl.parts.append(Part(MAIN_NAMES[nd.mode], "column", f"{MAIN_NAMES[nd.mode]} {mshape.label}", Fy, Fu,
                           section_prisms(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos), t=mshape.tw, stub=True))
     ext = outer_extent(mshape)
+    names = {m.name for m in nd.members}
+    for o in nd.operations:
+        if o.member not in names:
+            mdl.notes.append(f"Operación «{o.kind}»: el miembro «{o.member}» no existe.")
     ctxs = []
     for i, m in enumerate(nd.members):
         shp = shape_of(m.shape)
@@ -449,31 +493,49 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
             mdl.notes.append(f"{m.name}: su eje no toca al miembro principal (revise el azimut, la elevación o la posición).")
             s_ex = 0.0
         Q = P0 + dirv * s_ex
-        c = _Ctx(m, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
+        ops = nd.ops_of(m.name)
+        conns = [o for o in ops if o.is_connection]
+        if len(conns) > 1:
+            mdl.notes.append(f"{m.name}: tiene {len(conns)} operaciones de conexión; se dibuja solo la primera.")
+        conn_op = conns[0] if (conns and hw) else None
+        c = _Ctx(m, conn_op, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
         c.partname = m.name
         diag = abs(m.el) >= DIAG_MIN
-        conn = m.conn if hw else CK_BLANK
         ms = max(m.gap, 0.0)                          # distancia desde Q hasta el inicio del miembro
         tag = m.name
-        if conn == CK_TAB:
+        kind = conn_op.kind if conn_op else None
+        if kind == OP_TAB:
             _tab_geometry(c, tag)
-        elif conn == CK_DANG:
+        elif kind == OP_DANG:
             _dang_geometry(c, tag)
-        elif conn == CK_SEAT:
+        elif kind == OP_SEAT:
             _seat_geometry(c, tag)
-        elif conn == CK_EP_FLUSH:
+        elif kind == OP_EP_FLUSH:
             ms = _endplate_geometry(c, tag, False)
-        elif conn == CK_EP_EXT:
+        elif kind == OP_EP_EXT:
             ms = _endplate_geometry(c, tag, True)
-        elif conn == CK_WELD:
+        elif kind == OP_WELD:
             ms = _weld_geometry(c, tag)
-            mdl.parts += _continuity(c, nd, tag, (A, msx, msy), mshape) if m.cont else []
-        elif conn in GUSSET_KINDS:
+        elif kind in GUSSET_OPS:
             _, gl, ov, hm = _gusset_outline(c)
-            ms = gl if conn == CK_GUSSET else gl + 0.1
+            ms = gl if kind == OP_GUSSET else gl + 0.1
+        for o in ops:
+            if o.kind == OP_CONT and hw:
+                pl = _continuity(c, nd, tag, (A, msx, msy), mshape, o.cont_t)
+                if not pl:
+                    mdl.notes.append(f"{m.name}: las placas de continuidad solo se dibujan en una columna I a la que llega el miembro por la cara del ala.")
+                mdl.parts += pl
         Fy_m, Fu_m = _steel(m.steel)
-        mdl.parts.append(Part(m.name, "brace" if diag else "beam", f"{m.name} {shp.label}", Fy_m, Fu_m,
-                              section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0)), t=shp.tw, stub=True))
+        cope = next((o for o in ops if o.kind == OP_COPE), None)
+        if cope is not None and shp.kind == W_SHAPE and (cope.cope_top > 0 or cope.cope_bot > 0):
+            if 0 < cope.cope_top < shp.tf or 0 < cope.cope_bot < shp.tf:
+                mdl.notes.append(f"{m.name}: el corte es menos profundo que el espesor del ala ({shp.tf:g} in): el ala no queda eliminada.")
+            prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0), cope.cope_top, cope.cope_bot, cope.cope_len)
+        else:
+            if cope is not None and shp.kind != W_SHAPE:
+                mdl.notes.append(f"{m.name}: el corte solo se dibuja en perfiles I.")
+            prisms = section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0))
+        mdl.parts.append(Part(m.name, "brace" if diag else "beam", f"{m.name} {shp.label}", Fy_m, Fu_m, prisms, t=shp.tw, stub=True))
         for p in c.parts:
             mdl.parts.append(p)
         mdl.bolts += c.bolts
