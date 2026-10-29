@@ -30,8 +30,9 @@ def _style(c: dict) -> str:
     """Hoja de estilo comun a los dos temas; `c` trae los colores (borde, fondo suave, texto, acento...)."""
     return f"""
 QToolBar {{ background: {c['bar']}; border: 0; border-bottom: 2px solid {ORANGE}; spacing: 6px; padding: 3px 6px; }}
-QToolBar QToolButton {{ border: 1px solid transparent; border-radius: 5px; padding: 3px 8px; }}
+QToolBar QToolButton {{ border: 1px solid transparent; border-radius: 5px; padding: 3px 8px; background: transparent; }}
 QToolBar QToolButton:hover {{ border-color: {c['line']}; background: {c['hover']}; }}
+QToolBar QToolButton:checked {{ border-color: {c['line']}; background: {c['soft']}; }}
 QMenuBar {{ background: {c['bar']}; }}
 QMenuBar::item {{ padding: 4px 9px; border-radius: 4px; background: transparent; }}
 QMenuBar::item:selected {{ background: {c['hover']}; }}
