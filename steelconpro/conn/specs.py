@@ -165,8 +165,9 @@ class Operation:
 
 @dataclass
 class Load:
-    """Esfuerzos internos de un caso de carga en el extremo de un miembro (junto al nudo), en sus ejes locales: x a lo largo del miembro
-    (desde el nudo hacia fuera; N > 0 = traccion), z el peralte (vertical en una viga) e y = z × x.  kip y kip·in."""
+    """Accion de un miembro sobre el nudo en un caso de carga (su extremo junto al nudo), en sus ejes locales: x a lo largo del miembro
+    (desde el nudo hacia fuera; N > 0 = traccion), z el peralte (vertical en una viga) e y = z × x.  kip y kip·in.  `member` = «@nudo» es una carga
+    externa aplicada al nudo en ejes globales (N = Fx, Vy = Fy, Vz = Fz, T = Mx, My, Mz).  Las del miembro principal dan un lado; el otro sale del equilibrio."""
     case: str = "Caso 1"
     member: str = "V1"
     N: float = 0.0
@@ -175,6 +176,7 @@ class Load:
     T: float = 0.0
     My: float = 0.0
     Mz: float = 0.0
+    side: int = 0                # solo para el miembro principal: lado del nudo (−1 / +1) en el que se da la carga (0 = el opuesto al que equilibra)
 
 
 @dataclass
@@ -194,6 +196,7 @@ class Nodo:
     operations: list = field(default_factory=list)   # [Operation], en el orden en que se aplican
     loads: list = field(default_factory=list)        # [Load]
     show_hw: bool = True         # dibujar los herrajes (placas, angulos, pernos)
+    balance_end: int = -1        # lado del principal (−1 / +1) cuya accion sobre el nudo sale del equilibrio (analisis nodal, conn/nodal.py)
 
     def __post_init__(self):
         raw = list(self.members or [])

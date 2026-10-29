@@ -109,6 +109,15 @@ export async function baseplateForm(E, parentCtx) {
   // ---- tabla de combinaciones
   const comboTable = () => {
     const wrap = h('div', { class: 'col gap-8' });
+    if (conn().node.loads.length) {                        // con casos de carga del nudo, las combinaciones salen del analisis nodal
+      const box = h('div', { class: 'col gap-8' }, h('p', { class: 'hint-text', text: 'Las cargas de la placa base salen del ANÁLISIS NODAL: el nudo tiene casos de carga y la placa recibe la acción del miembro que la lleva, trasladada del nudo al centro de la placa. Se editan en «Cargas» del árbol.' }));
+      call('nodal', { connection: conn() }).then((a) => {
+        const tb = h('table', { class: 't compact' }, h('thead', null, h('tr', null, h('th', { text: 'Caso' }), ...[['Pu', 'F'], ['Mux', 'M'], ['Muy', 'M'], ['Vux', 'F'], ['Vuy', 'F']].map(([n, k]) => h('th', { class: 'num', text: `${n} (${us.label(k)})` })))),
+          h('tbody', null, a.cases.filter((c) => c.base).map((c) => h('tr', null, h('td', { text: c.case }), ...[['Pu', 'F'], ['Mux', 'M'], ['Muy', 'M'], ['Vux', 'F'], ['Vuy', 'F']].map(([n, k]) => h('td', { class: 'num', text: us.fmt(k, c.base[n], 2) }))))));
+        box.append(tb);
+      }).catch(() => {});
+      return box;
+    }
     const tb = h('table', { class: 't compact' });
     const head = h('tr', null, h('th', { text: 'Nombre' }), ...[['Pu', 'F'], ['Mux', 'M'], ['Muy', 'M'], ['Vux', 'F'], ['Vuy', 'F']].map(([n, k]) => h('th', { class: 'num', text: `${n} (${us.label(k)})` })), h('th'));
     const body = h('tbody');

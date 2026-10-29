@@ -169,6 +169,13 @@ def new_member(args) -> dict:
     return {"member": asdict(m)}
 
 
+def nodal(args) -> dict:
+    """Analisis nodal: equilibrio del nudo por caso de carga (acciones de los miembros, reaccion del principal) y las cargas que recibe la placa base."""
+    from .conn import nodal as NOD
+    p = _prj(args["connection"])
+    return NOD.analysis(p, p.node)
+
+
 def element_info(args) -> dict:
     """Elementos de la conexion a los que se puede hacer referencia (para elegir en los dialogos): miembros, placas de operaciones y caras."""
     from .conn import ops as OPS

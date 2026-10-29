@@ -106,7 +106,28 @@
       "cope_bot": 0.0,
       "cope_len": 4.5,
       "cont_t": 0.5,
-      "end": -1
+      "end": -1,
+      "name": "",
+      "parent": "",
+      "face": "",
+      "targets": [],
+      "role": "Refuerzo",
+      "orient": "Paralela a la cara",
+      "shape": "Rectangular",
+      "attach": "Soldada",
+      "pl_L": 8.0,
+      "pl_W": 6.0,
+      "pl_s": 12.0,
+      "pl_u": 0.0,
+      "pl_rot": 0.0,
+      "pl_clip": 1.0,
+      "weld_all": true,
+      "rows": 2,
+      "cols": 2,
+      "bolt_g": 3.0,
+      "cut_at": "Inicio",
+      "force_V": 0.0,
+      "force_T": 0.0
      },
      {
       "kind": "Placa extrema extendida (momento)",
@@ -123,7 +144,28 @@
       "cope_bot": 0.0,
       "cope_len": 4.5,
       "cont_t": 0.5,
-      "end": -1
+      "end": -1,
+      "name": "",
+      "parent": "",
+      "face": "",
+      "targets": [],
+      "role": "Refuerzo",
+      "orient": "Paralela a la cara",
+      "shape": "Rectangular",
+      "attach": "Soldada",
+      "pl_L": 8.0,
+      "pl_W": 6.0,
+      "pl_s": 12.0,
+      "pl_u": 0.0,
+      "pl_rot": 0.0,
+      "pl_clip": 1.0,
+      "weld_all": true,
+      "rows": 2,
+      "cols": 2,
+      "bolt_g": 3.0,
+      "cut_at": "Inicio",
+      "force_V": 0.0,
+      "force_T": 0.0
      },
      {
       "kind": "Doble ángulo (corte)",
@@ -140,7 +182,28 @@
       "cope_bot": 0.0,
       "cope_len": 4.5,
       "cont_t": 0.5,
-      "end": -1
+      "end": -1,
+      "name": "",
+      "parent": "",
+      "face": "",
+      "targets": [],
+      "role": "Refuerzo",
+      "orient": "Paralela a la cara",
+      "shape": "Rectangular",
+      "attach": "Soldada",
+      "pl_L": 8.0,
+      "pl_W": 6.0,
+      "pl_s": 12.0,
+      "pl_u": 0.0,
+      "pl_rot": 0.0,
+      "pl_clip": 1.0,
+      "weld_all": true,
+      "rows": 2,
+      "cols": 2,
+      "bolt_g": 3.0,
+      "cut_at": "Inicio",
+      "force_V": 0.0,
+      "force_T": 0.0
      },
      {
       "kind": "Alas soldadas y alma atornillada (momento)",
@@ -157,7 +220,28 @@
       "cope_bot": 0.0,
       "cope_len": 4.5,
       "cont_t": 0.5,
-      "end": -1
+      "end": -1,
+      "name": "",
+      "parent": "",
+      "face": "",
+      "targets": [],
+      "role": "Refuerzo",
+      "orient": "Paralela a la cara",
+      "shape": "Rectangular",
+      "attach": "Soldada",
+      "pl_L": 8.0,
+      "pl_W": 6.0,
+      "pl_s": 12.0,
+      "pl_u": 0.0,
+      "pl_rot": 0.0,
+      "pl_clip": 1.0,
+      "weld_all": true,
+      "rows": 2,
+      "cols": 2,
+      "bolt_g": 3.0,
+      "cut_at": "Inicio",
+      "force_V": 0.0,
+      "force_T": 0.0
      },
      {
       "kind": "Placas de continuidad",
@@ -174,7 +258,28 @@
       "cope_bot": 0.0,
       "cope_len": 4.5,
       "cont_t": 0.5,
-      "end": -1
+      "end": -1,
+      "name": "",
+      "parent": "",
+      "face": "",
+      "targets": [],
+      "role": "Refuerzo",
+      "orient": "Paralela a la cara",
+      "shape": "Rectangular",
+      "attach": "Soldada",
+      "pl_L": 8.0,
+      "pl_W": 6.0,
+      "pl_s": 12.0,
+      "pl_u": 0.0,
+      "pl_rot": 0.0,
+      "pl_clip": 1.0,
+      "weld_all": true,
+      "rows": 2,
+      "cols": 2,
+      "bolt_g": 3.0,
+      "cut_at": "Inicio",
+      "force_V": 0.0,
+      "force_T": 0.0
      },
      {
       "kind": "Cartela atornillada (diagonal)",
@@ -191,7 +296,28 @@
       "cope_bot": 0.0,
       "cope_len": 4.5,
       "cont_t": 0.5,
-      "end": -1
+      "end": -1,
+      "name": "",
+      "parent": "",
+      "face": "",
+      "targets": [],
+      "role": "Refuerzo",
+      "orient": "Paralela a la cara",
+      "shape": "Rectangular",
+      "attach": "Soldada",
+      "pl_L": 8.0,
+      "pl_W": 6.0,
+      "pl_s": 12.0,
+      "pl_u": 0.0,
+      "pl_rot": 0.0,
+      "pl_clip": 1.0,
+      "weld_all": true,
+      "rows": 2,
+      "cols": 2,
+      "bolt_g": 3.0,
+      "cut_at": "Inicio",
+      "force_V": 0.0,
+      "force_T": 0.0
      }
     ],
     "loads": [
@@ -203,7 +329,8 @@
       "Vz": -25.0,
       "T": 0.0,
       "My": 0.0,
-      "Mz": 0.0
+      "Mz": 0.0,
+      "side": 0
      },
      {
       "case": "Caso 1",
@@ -213,7 +340,8 @@
       "Vz": -20.0,
       "T": 0.0,
       "My": 0.0,
-      "Mz": 0.0
+      "Mz": 0.0,
+      "side": 0
      },
      {
       "case": "Caso 1",
@@ -223,7 +351,8 @@
       "Vz": -25.0,
       "T": 0.0,
       "My": 0.0,
-      "Mz": 0.0
+      "Mz": 0.0,
+      "side": 0
      },
      {
       "case": "Caso 1",
@@ -233,7 +362,8 @@
       "Vz": -20.0,
       "T": 0.0,
       "My": 0.0,
-      "Mz": 0.0
+      "Mz": 0.0,
+      "side": 0
      },
      {
       "case": "Caso 1",
@@ -243,10 +373,12 @@
       "Vz": 0.0,
       "T": 0.0,
       "My": 0.0,
-      "Mz": 0.0
+      "Mz": 0.0,
+      "side": 0
      }
     ],
-    "show_hw": true
+    "show_hw": true,
+    "balance_end": -1
    },
    "section": {
     "label": "W14X90",

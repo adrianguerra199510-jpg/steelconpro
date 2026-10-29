@@ -118,7 +118,8 @@ const runVerify = debounce(async () => {
     const r = await verify();
     if (!r) return;
     E.res = r; E.stale = false;
-    renderResults(); renderTree(); setVerdict();
+    try { E.nodal = await call('nodal', { connection: E.conn() }); } catch (e) { E.nodal = null; }
+    renderResults(); renderNodal(); renderTree(); setVerdict();
   } catch (e) { E.res = null; setVerdict('error', e.message); renderResults(e.message); }
 }, 700);
 
@@ -469,6 +470,7 @@ function buildRight() {
   E.ui.vbadge = h('span', { class: 'big-chip idle' });
   const items = [
     { id: 'res', label: 'Resultados', icon: 'check', render: () => { E.ui.resBox = h('div', { class: 'scroll', style: { padding: '0 0 12px' } }); renderResults(); return E.ui.resBox; } },
+    { id: 'nod', label: 'Nudo', icon: 'zap', render: () => { E.ui.nodBox = h('div', { class: 'scroll', style: { padding: '0 12px 12px' } }); renderNodal(); return E.ui.nodBox; } },
     { id: 'mem', label: 'Memoria', icon: 'file-text', render: () => { E.ui.memBox = h('div', { class: 'scroll memory' }); renderMemory(); return E.ui.memBox; } },
   ];
   if (hasBase) items.push({ id: 'fem', label: 'FEM', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
@@ -532,6 +534,26 @@ function combosTable(r) {
   const tb = h('table', { class: 't compact' }, h('thead', null, h('tr', null, h('th', { text: 'Combinación' }), h('th', { class: 'num', text: 'D/C' }))),
     h('tbody', null, r.combos.map((row, i) => h('tr', { class: i === r.combo_gov ? 'sel' : '' }, h('td', { text: Array.isArray(row) ? row[0] : (row.name ?? String(i + 1)) }), h('td', { class: 'num', text: Array.isArray(row) ? Number(row[row.length - 1]).toFixed(3) : Number(row.ratio ?? row.dc ?? 0).toFixed(3) })))));
   return h('div', { class: 'res-group', style: { marginTop: '10px' } }, h('div', { class: 'gh' }, svg('list', 15), h('span', { class: 'name', text: 'Combinaciones de carga' })), h('div', { class: 'gb' }, tb));
+}
+
+function renderNodal() {
+  const box = E.ui.nodBox; if (!box) return;
+  clear(box);
+  const nd = E.conn().node, us = S.us, a = E.nodal;
+  box.append(h('p', { class: 'hint-text', style: { margin: '8px 0' }, text: 'Equilibrio del nudo por caso de carga: acciones de los miembros sobre el nudo (ejes globales, momentos respecto del cruce de ejes) y reacción del miembro principal por equilibrio.' }),
+    btn('Editar cargas', { icon: 'pencil', onClick: () => openLoads(E) }));
+  if (!a || !a.cases.length) { box.append(h('p', { class: 'muted', style: { padding: '10px 2px' }, text: 'Sin casos de carga.' })); return; }
+  const f = (v) => us.fmt('F', v, 2), m = (v) => us.fmt('M', v, 1);
+  for (const c of a.cases) {
+    const rows = c.rows.map((r) => h('tr', { class: r.given ? '' : 'sel' }, h('td', { text: r.member }), ...r.F.map((x) => h('td', { class: 'num', text: f(x) })), ...r.M.map((x) => h('td', { class: 'num', text: m(x) }))));
+    const tb = h('table', { class: 't compact' }, h('thead', null, h('tr', null, h('th', { text: 'Acción sobre el nudo' }), ...['Fx', 'Fy', 'Fz'].map((k) => h('th', { class: 'num', text: `${k} (${us.label('F')})` })), ...['Mx', 'My', 'Mz'].map((k) => h('th', { class: 'num', text: `${k} (${us.label('M')})` })))),
+      h('tbody', null, rows, h('tr', null, h('td', { text: 'Σ (con la reacción)', style: { fontWeight: 650 } }), ...[0, 1, 2].map(() => h('td', { class: 'num', text: '0' })), ...[0, 1, 2].map(() => h('td', { class: 'num', text: '0' })))));
+    const ml = c.main_local;
+    const info = h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '6px' } },
+      `Reacción de «${nd.main_name}» (lado ${c.side > 0 ? '+' : '−'}, ejes locales): N = ${f(ml.N)}, Vy = ${f(ml.Vy)}, Vz = ${f(ml.Vz)} ${us.label('F')}; T = ${m(ml.T)}, My = ${m(ml.My)}, Mz = ${m(ml.Mz)} ${us.label('M')}.`);
+    const base = c.base ? h('div', { style: { marginTop: '4px', fontSize: '12.5px', fontWeight: 600 } }, `Placa base: Pu = ${f(c.base.Pu)} ${us.label('F')}, Mux = ${m(c.base.Mux)}, Muy = ${m(c.base.Muy)} ${us.label('M')}, Vux = ${f(c.base.Vux)}, Vuy = ${f(c.base.Vuy)} ${us.label('F')}`) : null;
+    box.append(h('div', { class: 'card-sec', style: { marginTop: '10px' } }, h('h4', { text: c.case }), h('div', { style: { overflow: 'auto' } }, tb), info, base));
+  }
 }
 
 function renderMemory() {

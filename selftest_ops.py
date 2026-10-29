@@ -91,6 +91,36 @@ def run():
             fail("ops: designar el miembro principal")
         print(f"{'corte, placa base, principal':34} corte de {nm['name']}, placa base como operacion ({len(v2['checks'])} verificaciones), designar principal OK")
 
+        # ---- analisis nodal: equilibrio del nudo y cargas de la placa base
+        import numpy as np
+        cn = copy.deepcopy(con)
+        cn["section"]["rotation"] = 0.0
+        ndn = cn["node"]
+        ndn["main_name"], ndn["main_el"], ndn["main_az"], ndn["main_roll"] = "C1", 90.0, 0.0, 0.0
+        ndn["members"] = [dict(nm, name="V1", az=0.0, el=0.0, pos=96.0, off=0.0, off2=0.0, roll=0.0)]
+        ndn["operations"] = [o for o in ndn["operations"] if o["kind"] == K["BASE"]]
+        ndn["operations"][0].update(member="C1", end=-1)
+        ndn["loads"] = [{"case": "A", "member": "V1", "N": 5.0, "Vy": 0.0, "Vz": -10.0, "T": 0.0, "My": 0.0, "Mz": 0.0, "side": 0}]
+        a = api.nodal({"connection": cn})
+        c0 = a["cases"][0]
+        tot = np.sum([r["F"] for r in c0["rows"]], axis=0)
+        totm = np.sum([r["M"] for r in c0["rows"]], axis=0)
+        if np.abs(tot).max() > 1e-9 or np.abs(totm).max() > 1e-9:
+            fail(f"nodal: el nudo no queda en equilibrio (ΣF = {tot}, ΣM = {totm})")
+        b = c0["base"]
+        # viga a 96 in sobre el nudo con 5 kip de traccion horizontal y 10 kip hacia abajo; el principal termina en el nudo (base en el nudo si no tiene largo inferior)
+        lneg = ndn["main_len_neg"] if ndn["main_end"].startswith("Continuo") else 0.0
+        if abs(b["Pu"] - 10.0) > 1e-6 or abs(b["Vuy"] - 5.0) > 1e-6 or abs(abs(b["Mux"]) - 5.0 * (96.0 + lneg)) > 1e-6:
+            fail(f"nodal: cargas de la placa base {b} (esperado Pu = 10, |Mux| = {5.0 * (96.0 + lneg)}, Vuy = 5)")
+        ndn["loads"].append({"case": "B", "member": "@nudo", "N": 0.0, "Vy": 0.0, "Vz": -7.0, "T": 0.0, "My": 0.0, "Mz": 0.0, "side": 0})
+        a2 = api.nodal({"connection": cn})
+        if abs(a2["cases"][1]["base"]["Pu"] - 7.0) > 1e-6:
+            fail(f"nodal: carga externa en el nudo ({a2['cases'][1]['base']})")
+        v3 = api.verify({"connection": cn})
+        if not any("Placa base" in (c["group"] or "") for c in v3["checks"]) or len(v3["combos"]) < 2:
+            fail("nodal: la placa base debe verificar los casos del nudo")
+        print(f"{'analisis nodal':34} equilibrio ΣF = ΣM = 0, carga externa, y cargas de la placa base desde el nudo (Pu {b['Pu']:.1f}, Mux {b['Mux']:.0f}, Vuy {b['Vuy']:.1f}): OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")

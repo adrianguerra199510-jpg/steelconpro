@@ -74,7 +74,7 @@ def columna_con_placa_base() -> Project:
     nd.members.append(Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=-45.0, pos=84.0, L=60.0))
     nd.operations.append(Operation(kind=OP_GUSSET, member="D1", plate_t=0.5))
     nd.operations.append(Operation(kind=OP_BASE, member=nd.main_name, end=-1))
-    nd.loads = [Load("Caso 1", "V1", Vz=-20.0), Load("Caso 1", "V2", Vz=-20.0), Load("Caso 1", "D1", N=25.0)]
+    nd.loads = [Load("Caso 1", "V1", Vz=-15.0), Load("Caso 1", "V2", Vz=-15.0), Load("Caso 1", "D1", N=2.0)]
     ref = load_book(str(OUT / "PB-01_W14X90.scp"))[0]                           # datos de la placa base del ejemplo PB-01 (placa, anclajes, llave, soldadura, concreto y cargas)
     for k in ("plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea", "combos"):
         setattr(p, k, getattr(ref, k))

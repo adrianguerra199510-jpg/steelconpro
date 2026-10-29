@@ -43,6 +43,12 @@ def derive(prj, nd: Nodo = None, into=None):
             setattr(q, k, copy.deepcopy(getattr(prj, k)))
     q.ctype = CT_BASEPLATE
     if op is not None:
+        from . import nodal
+        nc = nodal.base_combos(prj, nd)             # con casos de carga del nudo, las combinaciones de la placa salen del analisis nodal
+        if nc:
+            q.combos, q.combo_idx = nc, 0
+            q.apply_combo(0)
+    if op is not None:
         name, m = base_member(nd, op)
         if m is None and name is not None:
             q.section.label, q.section.steel = nd.main_shape, nd.main_steel

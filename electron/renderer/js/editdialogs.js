@@ -85,35 +85,43 @@ export async function openMember(E, name) {
   });
 }
 
-// ---------------------------------------------------------------------------------------------------- cargas del nudo
+// ---------------------------------------------------------------------------------------------------- cargas del nudo (análisis nodal)
 export function openLoads(E) {
   const nd = E.conn().node;
   const us = E.us();
   E.snap();
-  const before = JSON.stringify(nd.loads);
-  const names = [nd.main_name, ...nd.members.map((x) => x.name)];
+  const before = JSON.stringify([nd.loads, nd.balance_end]);
+  const NODE = '@nudo';
+  const names = () => [{ value: nd.main_name, label: `${nd.main_name} (principal)` }, ...nd.members.map((x) => ({ value: x.name, label: x.name })), { value: NODE, label: 'Carga externa en el nudo (ejes globales)' }];
   const cols = [['N', 'F'], ['Vy', 'F'], ['Vz', 'F'], ['T', 'M'], ['My', 'M'], ['Mz', 'M']];
   const tb = h('tbody');
+  const sideLbl = (v) => (v < 0 ? 'Lado −' : v > 0 ? 'Lado +' : 'Auto');
   const draw = () => {
     tb.replaceChildren();
     nd.loads.forEach((l, i) => {
       const tr = h('tr');
+      const isMain = l.member === nd.main_name;
       tr.append(h('td', null, textInput({ value: l.case, onChange: (v) => { l.case = v; E.changed({ loads: true }); } })),
-        h('td', null, selectInput({ value: l.member, options: names, onChange: (v) => { l.member = v; E.changed({ loads: true }); } })));
+        h('td', null, selectInput({ value: l.member, options: names(), onChange: (v) => { l.member = v; if (v !== nd.main_name) l.side = 0; draw(); E.changed({ loads: true }); } })),
+        h('td', null, isMain ? selectInput({ value: String(l.side || 0), options: [{ value: '0', label: 'Auto (el opuesto)' }, { value: '-1', label: 'Lado −' }, { value: '1', label: 'Lado +' }], onChange: (v) => { l.side = parseInt(v, 10); E.changed({ loads: true }); } }) : null));
       for (const [k, u] of cols) tr.append(h('td', { class: 'num' }, numInput({ value: us.out(u, l[k]), dec: us.dec(u === 'M' ? 'F' : u), onChange: (v) => { l[k] = us.inn(u, v); E.changed({ loads: true }); } })));
       tr.append(h('td', null, iconBtn('trash', 'Quitar', () => { nd.loads.splice(i, 1); draw(); E.changed({ loads: true }); })));
       tb.append(tr);
     });
-    if (!nd.loads.length) tb.append(h('tr', null, h('td', { colspan: 9, class: 'muted', style: { padding: '14px' }, text: 'Sin casos de carga: los resultados de las operaciones de conexión necesitan al menos uno.' })));
+    if (!nd.loads.length) tb.append(h('tr', null, h('td', { colspan: 10, class: 'muted', style: { padding: '14px' }, text: 'Sin casos de carga: escriba las acciones de los miembros que llegan al nudo.' })));
   };
   draw();
-  const head = h('tr', null, h('th', { text: 'Caso' }), h('th', { text: 'Miembro' }), ...cols.map(([k, u]) => h('th', { class: 'num', text: `${k} (${us.label(u)})` })), h('th'));
+  const head = h('tr', null, h('th', { text: 'Caso' }), h('th', { text: 'Miembro' }), h('th', { text: 'Lado' }), ...cols.map(([k, u]) => h('th', { class: 'num', text: `${k} (${us.label(u)})` })), h('th'));
+  const balSel = selectInput({ value: String(nd.balance_end ?? -1), options: [{ value: '-1', label: `Lado − de «${nd.main_name}»` }, { value: '1', label: `Lado + de «${nd.main_name}»` }], onChange: (v) => { nd.balance_end = parseInt(v, 10); E.changed({ loads: true }); } });
   const body = h('div', { class: 'col gap-12' },
-    h('p', { class: 'hint-text', text: 'Esfuerzos internos en el extremo de cada miembro junto al nudo, en sus ejes locales: x a lo largo del miembro (N > 0 = tracción), z el peralte y y = z × x.' }),
+    h('p', { class: 'hint-text', text: 'Análisis nodal: escriba la ACCIÓN DE CADA MIEMBRO SOBRE EL NUDO en su extremo junto al nudo, en sus ejes locales (x a lo largo del miembro hacia afuera del nudo, N > 0 = tracción; z el peralte; y = z × x). '
+      + 'Una carga externa aplicada al nudo se escribe en ejes globales (N = Fx, Vy = Fy, Vz = Fz, T = Mx). El miembro principal da sus cargas en un lado; la acción en el otro lado (el que equilibra) se calcula por equilibrio de fuerzas y momentos del nudo '
+      + 'y de ella salen las combinaciones de la placa base.' }),
+    h('div', { class: 'card-sec' }, h('div', { class: 'form-grid' }, field('Lado del principal que equilibra el nudo', balSel))),
     h('div', { style: { overflow: 'auto' } }, h('table', { class: 't compact' }, h('thead', null, head), tb)),
-    btn('Agregar caso', { icon: 'plus', onClick: () => { nd.loads.push({ case: `Caso ${nd.loads.length + 1}`, member: nd.members[0] ? nd.members[0].name : nd.main_name, N: 0, Vy: 0, Vz: 0, T: 0, My: 0, Mz: 0 }); draw(); E.changed({ loads: true }); } }));
-  const mod = modal({ title: 'Cargas del nudo', icon: 'zap', width: 900, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
-    onClose: () => { if (JSON.stringify(nd.loads) === before) E.dropSnap(); E.refreshTree(); } });
+    btn('Agregar carga', { icon: 'plus', onClick: () => { nd.loads.push({ case: nd.loads.length ? nd.loads[nd.loads.length - 1].case : 'Caso 1', member: nd.members[0] ? nd.members[0].name : nd.main_name, N: 0, Vy: 0, Vz: 0, T: 0, My: 0, Mz: 0, side: 0 }); draw(); E.changed({ loads: true }); } }));
+  const mod = modal({ title: 'Cargas del nudo', icon: 'zap', width: 980, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
+    onClose: () => { if (JSON.stringify([nd.loads, nd.balance_end]) === before) E.dropSnap(); E.refreshTree(); } });
 }
 
 // ---------------------------------------------------------------------------------------------------- proyecto y unidades

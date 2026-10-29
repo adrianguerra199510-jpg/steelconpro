@@ -9,7 +9,7 @@ el motor de cálculo en Python como servicio local; el visor 3D es three.js.
 |---|---|
 | **Miembros** | cualquier número (columnas, vigas, diagonales; cualquier sección y ángulo); **uno es el principal, que usted designa** (el que recibe a los demás, como el miembro de apoyo de IDEA StatiCa) |
 | **Operaciones** | las de conexión (placa simple, doble ángulo, asiento, placa extrema, alas soldadas, cartelas), **placa** (refuerzo soldado o atornillado, cartela o rigidizador, sobre la cara de un miembro, de la placa base o de **otra placa**), **pernos**, **soldadura de filete**, **corte de elementos**, corte del extremo, placas de continuidad y **placa base** (anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis 3D por elementos finitos sólido con Gmsh + CalculiX) |
-| **Cargas y análisis** | esfuerzos por miembro y caso de carga (y las combinaciones de la placa base), verificación por código (AISC 360-22, AISC DG1, ACI 318), vista 3D, memoria de cálculo; análisis FEM 3D de la placa base |
+| **Cargas y análisis** | **análisis nodal** (equilibrio del nudo por caso de carga; de él salen las cargas de la placa base), verificación por código (AISC 360-22, AISC DG1, ACI 318), vista 3D, memoria de cálculo; análisis FEM 3D de la placa base |
 
 **No hay un módulo de placa base aparte** ni «tipologías» de nudo: se crea una conexión, se le agregan miembros y las operaciones que se necesiten, y el tipo de nudo lo define lo que usted arma.
 Los archivos y plantillas de placa base de las versiones anteriores abren como una conexión con la operación *Placa base* (mismos resultados).
@@ -49,6 +49,19 @@ si hay placa base, **FEM**.
 
 Las operaciones generales (placa, pernos, soldadura) se verifican con las **fuerzas de diseño que usted escriba en la operación** (cortante y tracción): placa (fluencia y rotura en tracción, fluencia por cortante, esbeltez del rigidizador),
 pernos (separación, distancia al borde, cortante, tracción, aplastamiento y desgarramiento por capa) y soldadura (cateto mínimo y máximo, resistencia). Con las fuerzas en cero solo se comprueban las condiciones geométricas.
+
+### Cargas y análisis nodal
+
+Una conexión es **un nodo** con el miembro principal y cualquier número de miembros que llegan a él. En *Cargas* se escribe, por caso de carga, la **acción de cada miembro sobre el nudo** en su extremo junto al nudo, en sus ejes
+locales (x a lo largo del miembro hacia afuera del nudo, N > 0 = tracción; z el peralte; y = z × x), y opcionalmente una **carga externa en el nudo** (miembro «Carga externa», ejes globales: N = Fx, Vy = Fy, Vz = Fz, T = Mx, My, Mz).
+El miembro principal puede dar sus cargas en un lado; **la acción del principal en el otro lado (el *lado que equilibra*) no se escribe: se calcula** por equilibrio de fuerzas y de momentos del nudo
+(`R = −(Σ F + F externa)`, `M = −(Σ (M + r × F) + M externo)`, con los momentos respecto del cruce de ejes y `r` el punto donde cada miembro llega al eje del principal). La pestaña **Nudo** del editor muestra, por caso, las acciones
+en ejes globales, la reacción del principal en sus ejes locales y comprueba que ΣF = ΣM = 0.
+
+**Placa base**: si el nudo tiene casos de carga, las combinaciones de la placa base **salen del análisis nodal** (un caso = una combinación): la carga sobre la placa es la opuesta a la reacción del apoyo sobre el miembro, trasladada
+del nudo al centro de la placa (Pu, Mux, Muy, Vux, Vuy en los ejes del miembro, girados con la *Rotación* de la placa; Mux > 0 tracciona el lado +Y, Muy > 0 el lado +X). Sin casos de carga se usan las combinaciones escritas en la operación.
+Esto vale para la placa base en el lado que equilibra del principal, en el lado dado del principal y en un miembro conectado (en éste, el brazo se mide hasta el extremo libre dibujado, sin el retranqueo de los herrajes).
+Los miembros conectados se verifican con las cargas que usted escribió; las operaciones generales (placa, pernos, soldadura) siguen usando las fuerzas de diseño de su propia ventana.
 
 ### Resultados por operación
 
