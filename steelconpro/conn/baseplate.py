@@ -26,7 +26,7 @@ PROJECT_BLOCKS = ("section", "plate", "bolts", "lug", "stiff", "welds", "conc", 
 
 def base_member(nd: Nodo, op: Operation):
     """(nombre, Member | None) del miembro que lleva la placa; None si es el principal."""
-    if op.member == nd.main_name:
+    if op.member == nd.main_name or not op.member:
         return nd.main_name, None
     m = nd.member_named(op.member)
     return (op.member, m) if m is not None else (None, None)
@@ -149,7 +149,7 @@ def add_checks(prj, nd: Nodo, R, rec, fem_map=None):
         R.warnings.append(("** " if w.startswith("**") else "") + "Placa base: " + w.lstrip("* ").strip())
     if Rb.fem is None:
         R.warnings.append("Placa base: verificada con el calculo cerrado (DG1 + ACI 318); el analisis 3D por elementos finitos de la placa base se corre aparte "
-                          "(pestana Elementos finitos).")
+                          "(pestaña FEM).")
     if Rb.rec is not None and rec is not None:
         rec.section(f"OPERACION: PLACA BASE — {name}  (combinación {cname})")
         rec.sections.extend(Rb.rec.sections)

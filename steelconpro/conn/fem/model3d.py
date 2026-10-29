@@ -322,7 +322,10 @@ def model_to_dict(m: Model3D) -> dict:
         if isinstance(o, np.ndarray):
             return o.tolist()
         return o
-    return clean(asdict(m))
+    d = asdict(m)
+    for k in ("generic", "elems"):                  # datos de las operaciones generales para sus verificaciones: no van al mallador
+        d.pop(k, None)
+    return clean(d)
 
 
 def model_from_dict(d: dict) -> Model3D:

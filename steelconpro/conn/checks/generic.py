@@ -74,7 +74,7 @@ def _gusset(nd, op, m, vals, rec):
     if rec:
         rec.add("P", "fuerza axial del miembro", "", P, "F", note="tracción" if tens else "compresión")
     if P < 1e-9:
-        not_evaluated(ck, "g0", "Cartela sin fuerza axial en el miembro", "AISC 360-22 J", "Defina la carga axial N del miembro en el paso 3.")
+        not_evaluated(ck, "g0", "Cartela sin fuerza axial en el miembro", "AISC 360-22 J", "Defina la carga axial N del miembro en «Cargas».")
         return ck
     if bolted:
         db = bolt_db(op.bolt_size)

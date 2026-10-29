@@ -353,40 +353,22 @@ try:
 except Exception as _e:
     FAIL.append(f"criterios del cordon: {type(_e).__name__}: {_e}")
 
-# ---------------------------------------------------- visor OpenGL: la escena se arma sin necesitar GPU
+# ---------------------------------------------------- escena 3D del visor (sin interfaz): la geometria se arma sin necesitar GPU
 try:
-    from steelconpro import gl3d as _gl
+    from steelconpro import scene3d as _gl
     import numpy as _np
     _conc = [(0, 0, 0), (4, 0, 0), (4, 1, 0), (1, 1, 0), (1, 4, 0), (0, 4, 0)]          # poligono concavo en L
     _tr = _gl.tri_poly(_conc)
     _ar = sum(abs(_np.cross(_np.subtract(_conc[b], _conc[a]), _np.subtract(_conc[c], _conc[a]))[2]) / 2 for a, b, c in _tr)
     if len(_tr) != 4 or abs(_ar - 7.0) > 1e-9:
-        FAIL.append(f"visor GL: triangulacion de un poligono concavo incorrecta ({len(_tr)} tris, area {_ar})")
+        FAIL.append(f"escena 3D: triangulacion de un poligono concavo incorrecta ({len(_tr)} tris, area {_ar})")
     _sc = _gl.scene_geometry(_u0, loads=True)
     _o, _t, _l = _sc.packed()
     if len(_o) < 100 or len(_t) == 0 or len(_l) == 0 or not _np.isfinite(_o).all() or not _sc.vlabels or len(_sc.dims) < 10:
-        FAIL.append("visor GL: la escena de geometria quedo vacia o con valores no finitos")
-    print(f"{'visor OpenGL (escena)':34} {len(_o) // 3} tris opacos, {len(_t) // 3} translucidos, {len(_l) // 2} aristas, {len(_sc.vlabels)} etiquetas, {len(_sc.dims)} cotas")
+        FAIL.append("escena 3D: la escena de geometria quedo vacia o con valores no finitos")
+    print(f"{'escena 3D (visor)':34} {len(_o) // 3} tris opacos, {len(_t) // 3} translucidos, {len(_l) // 2} aristas, {len(_sc.vlabels)} etiquetas, {len(_sc.dims)} cotas")
 except Exception as _e:
-    FAIL.append(f"visor GL: {type(_e).__name__}: {_e}")
-
-# ---------------------------------------------------- interfaz (solo si hay Qt): que existan y corran los metodos clave
-try:
-    os_ = __import__("os"); os_.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication as _QA
-    from steelconpro import ui as _ui
-    _app = _QA.instance() or _QA([])
-    _w = _ui.MainWindow()
-    for _m in ("_bolt_loads", "_fem_now", "_raw_now", "draw_geom", "draw_3d", "_goto_calc", "export_target", "recalc"):
-        if not hasattr(_w, _m):
-            FAIL.append(f"interfaz: falta el metodo {_m}")
-    _w.recalc(); _w.draw_geom(); _w.draw_3d()
-    _q, _R = _w.export_target()
-    print(f"{'interfaz (offscreen)':34} recalc, dibujo y exportacion OK   metodos: {len(dir(_w))}")
-except ImportError:
-    print(f"{'interfaz':34} omitida (sin PySide6)")
-except Exception as _e:
-    FAIL.append(f"interfaz: {type(_e).__name__}: {_e}")
+    FAIL.append(f"escena 3D: {type(_e).__name__}: {_e}")
 
 
 # ---------------------------------------------------------------- columna descentrada (cx, cy)
@@ -486,6 +468,12 @@ if "--3d" in sys.argv:
 # ====================================================================================================
 import selftest_nodes as _sn
 FAIL += _sn.run()
+
+# ====================================================================================================
+# OPERACIONES GENERALES (placa, pernos, soldadura, corte), API JSON, espacio de trabajo y servidor local de la aplicacion Electron
+# ====================================================================================================
+import selftest_ops as _so
+FAIL += _so.run()
 
 
 print()

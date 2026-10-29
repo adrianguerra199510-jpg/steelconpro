@@ -165,9 +165,6 @@ def main():
         return 0
     if args and not args[0].startswith("-"):
         return batch(args)
-    if args and args[0] == "--qt":                     # interfaz anterior (Qt), en retiro
-        from steelconpro.ui import main as gui
-        return gui()
     sys.stderr.write("SteelConPro: la interfaz es la aplicacion Electron; este programa es su motor (use --serve) o calcula por lotes: run.py proyecto.scp --pdf memoria.pdf\n")
     return 1
 

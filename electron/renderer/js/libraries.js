@@ -169,7 +169,7 @@ export async function openDesigner(E, shape, onSaved) {
     tplSel.set('');
   } });
   const body = h('div', { style: { display: 'grid', gridTemplateColumns: '300px 1fr', gap: '14px', height: '100%' } },
-    h('div', { class: 'col gap-12', style: { overflow: 'auto' } }, field('Nombre', nameInp), tplSel, h('div', { class: 'row' }, ...[['rect', 'Rect.'], ['circ', 'Círculo'], ['ring', 'Tubo'], ['poly', 'Polígono']].map(([t, l]) => btn(l, { icon: 'plus', onClick: () => addComp(t) }))), listBox, formBox),
+    h('div', { class: 'col gap-12', style: { overflow: 'auto' } }, field('Nombre', nameInp), tplSel, h('div', { class: 'row', style: { flexWrap: 'wrap' } }, ...[['rect', 'Rect.'], ['circ', 'Círculo'], ['ring', 'Tubo'], ['poly', 'Polígono']].map(([t, l]) => btn(l, { icon: 'plus', onClick: () => addComp(t) }))), listBox, formBox),
     h('div', { class: 'col gap-12', style: { minHeight: 0 } }, canvas, propBox));
   const m = modal({ title: 'Section Designer', icon: 'shapes', width: 1040, cls: 'tall', body,
     footer: [btn('Cancelar', { onClick: () => m.close() }), btn('Guardar sección', { kind: 'primary', icon: 'save', onClick: async () => {
@@ -200,7 +200,7 @@ export async function openMaterials(E) {
   const t = tabs(KINDS.map(([kind, label, cols]) => ({ id: kind, label, render: () => {
     const wrap = h('div', { class: 'col gap-12' });
     const builtin = data.all[kind].filter((x) => !x.extra);
-    const bt = h('table', { class: 't compact' }, h('thead', null, h('tr', null, cols.map(([, l]) => h('th', { text: l })))),
+    const bt = h('table', { class: 't compact' }, h('thead', null, h('tr', null, cols.map(([, l, ty]) => h('th', { class: ty === 'text' ? '' : 'num', text: l })))),
       h('tbody', null, builtin.map((r) => h('tr', null, cols.map(([k, , ty]) => h('td', { class: ty === 'text' ? '' : 'num', text: ty === 'S' ? us.fmt('S', r[k]) : String(r[k] ?? '') }))))));
     const ut = h('tbody');
     const drawUser = () => {
@@ -210,7 +210,7 @@ export async function openMaterials(E) {
       if (!user[kind].length) ut.append(h('tr', null, h('td', { colspan: cols.length + 1, class: 'muted', style: { padding: '10px' }, text: 'Sin materiales propios.' })));
     };
     drawUser();
-    wrap.append(h('div', { class: 'card-sec' }, h('h4', { text: `Mis ${label.toLowerCase()}` }), h('table', { class: 't compact' }, h('thead', null, h('tr', null, cols.map(([, l]) => h('th', { text: l })), h('th'))), ut),
+    wrap.append(h('div', { class: 'card-sec' }, h('h4', { text: `Mis ${label.toLowerCase()}` }), h('table', { class: 't compact' }, h('thead', null, h('tr', null, cols.map(([, l, ty]) => h('th', { class: ty === 'text' ? '' : 'num', text: l })), h('th'))), ut),
       h('div', { style: { height: '8px' } }), btn('Agregar', { icon: 'plus', onClick: () => { user[kind].push(mk(kind)); drawUser(); } })),
       h('div', { class: 'card-sec' }, h('h4', { text: `${label} incluidos (${us.stress})` }), h('div', { style: { maxHeight: '240px', overflow: 'auto' } }, bt)));
     return wrap;

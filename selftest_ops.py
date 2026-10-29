@@ -1,0 +1,192 @@
+# -*- coding: utf-8 -*-
+"""Pruebas del motor de la aplicacion: operaciones generales (placa, pernos, soldadura, corte) con dependencias, resultados por operacion,
+API JSON, espacio de trabajo de proyectos y servidor local.
+
+    python selftest_ops.py        (tambien las corre selftest.py al final)
+"""
+import sys, os, json, copy, tempfile, threading, urllib.request, urllib.error, traceback
+sys.path.insert(0, ".")
+
+
+def run():
+    FAIL = []
+    from steelconpro import api
+    from steelconpro.conn import specs as SP, ops as OPS
+    from steelconpro.model import load_book
+
+    print()
+    print("=" * 150)
+    print("OPERACIONES GENERALES, API Y SERVIDOR")
+    print("=" * 150)
+
+    def fail(msg):
+        FAIL.append(msg)
+
+    try:
+        K = api.constants()["op"]
+        book = api.book_new()
+        con = book["connections"][0]
+        nd = con["node"]
+        if nd["members"] or nd["operations"]:
+            fail("ops: una conexion nueva debe estar en blanco")
+
+        # ---- placa sobre el principal, rigidizador sobre esa placa (dependencia) y soldadura entre ellas
+        r = api.add_operation({"connection": con, "kind": K["PLATE"]})
+        con = r["connection"]; p1 = con["node"]["operations"][r["index"]]
+        if p1["name"] != "P1" or p1["parent"] != con["node"]["main_name"] or not p1["face"]:
+            fail(f"ops: la placa nueva debe unirse al principal ({p1['name']}, {p1['parent']}, {p1['face']})")
+        r = api.add_operation({"connection": con, "kind": K["PLATE"], "params": {"parent": "P1", "face": "Cara +", "role": "Rigidizador", "orient": SP.PLATE_ORIENTS[1]}})
+        con = r["connection"]; p2 = con["node"]["operations"][r["index"]]
+        if p2["parent"] != "P1" or p2["name"] != "P2":
+            fail("ops: la placa debe poder apoyarse en otra placa")
+        r = api.add_operation({"connection": con, "kind": K["FILLET"], "params": {"targets": ["P1"]}})
+        con = r["connection"]
+        r = api.add_operation({"connection": con, "kind": K["BOLTS"], "params": {"parent": "P1", "face": "Cara +", "pl_s": 6.0, "targets": [con["node"]["main_name"]]}})
+        con = r["connection"]
+        if any(o["member"] for o in con["node"]["operations"]):
+            fail("ops: las operaciones generales no deben quedar ligadas a un miembro por defecto")
+        el = api.element_info({"connection": con})["elements"]
+        names = [e["name"] for e in el]
+        if "P1" not in names or "P2" not in names or el[0]["main"] is not True:
+            fail(f"ops: element_info no lista las placas ({names})")
+        m = api.mesh({"connection": con})
+        kinds = {p["name"] for p in m["parts"]}
+        if "P1" not in kinds or "P2" not in kinds or not m["bounds"]:
+            fail(f"ops: la malla 3D no trae las placas ({sorted(kinds)})")
+        v = api.verify({"connection": con})
+        groups = {c["group"] for c in v["checks"] if c["group"]}
+        if not any(g.startswith("1.") for g in groups) or not any(g.startswith("2.") for g in groups):
+            fail(f"ops: los resultados deben agruparse por operacion ({sorted(groups)})")
+        print(f"{'operaciones generales':34} placa → rigidizador → soldadura → pernos: {len(m['parts'])} piezas, {len(v['checks'])} verificaciones en {len(groups)} operaciones   D/C max {v['max_ratio']:.3f}")
+
+        # ---- el filete minimo depende de la parte mas delgada (AISC Tabla J2.4)
+        if OPS.min_fillet(0.375) != 0.1875 or OPS.min_fillet(0.2) != 0.125 or OPS.min_fillet(0.9) != 0.3125:
+            fail("ops: cateto minimo del filete (AISC J2.4)")
+
+        # ---- dependencias: borrar P1 quita P2 (y lo que depende de P1)
+        dep = api.dependents({"connection": con, "name": "P1"})["operations"]
+        d = api.delete_operation({"connection": con, "index": 0})
+        left = [o["name"] or o["kind"] for o in d["connection"]["node"]["operations"]]
+        if len(dep) < 2 or any(o["name"] in ("P1", "P2") for o in d["connection"]["node"]["operations"]):
+            fail(f"ops: el borrado en cascada no quito las placas dependientes ({left}, dependientes {dep})")
+        print(f"{'dependencias':34} borrar P1 quita {len(d['removed'])} operaciones (P1, P2 y las que dependen de ellas); quedan {len(left)}")
+
+        # ---- miembro conectado + corte de elementos
+        nm = api.new_member({"connection": con})["member"]
+        con["node"]["members"].append(nm)
+        r = api.add_operation({"connection": con, "kind": K["CUT"], "params": {"targets": [nm["name"]], "cut_at": "Inicio"}})
+        con = r["connection"]
+        m2 = api.mesh({"connection": con})
+        if not m2["parts"]:
+            fail("ops: el corte deja el modelo vacio")
+        # ---- placa base en la misma conexion
+        r = api.add_operation({"connection": con, "kind": K["BASE"]})
+        con = r["connection"]
+        v2 = api.verify({"connection": con})
+        if not any("Placa base" in (c["group"] or "") for c in v2["checks"]):
+            fail("ops: los resultados de la placa base deben aparecer como una operacion mas")
+        # ---- nombre repetido / renombrado desde la interfaz: designar principal
+        dm = api.designate_main({"connection": con, "name": nm["name"]})
+        if dm["connection"]["node"]["main_name"] != nm["name"]:
+            fail("ops: designar el miembro principal")
+        print(f"{'corte, placa base, principal':34} corte de {nm['name']}, placa base como operacion ({len(v2['checks'])} verificaciones), designar principal OK")
+
+        # ---- archivos
+        tmp = tempfile.mkdtemp(prefix="scp_ops_")
+        f = os.path.join(tmp, "p.scp")
+        api.book_save({"path": f, "connections": [con]})
+        back = api.book_load({"path": f})["connections"][0]
+        if [o["kind"] for o in back["node"]["operations"]] != [o["kind"] for o in con["node"]["operations"]]:
+            fail("ops: el archivo no conserva las operaciones")
+        for ex in ("CN-01_columna_con_vigas", "CN-04_columna_con_placa_base", "PB-01_W14X90"):
+            b = load_book(os.path.join("ejemplos", ex + ".scp"))
+            vv = api.verify({"connection": api.book_load({"path": os.path.join("ejemplos", ex + ".scp")})["connections"][0]})
+            if not vv["checks"]:
+                fail(f"ops: el ejemplo {ex} no produce verificaciones")
+        th = api.thumbnail({"connection": con, "w": 200, "h": 140})
+        if not th["png"]:
+            fail("ops: miniatura vacia")
+
+        # ---- espacio de trabajo
+        root = os.path.join(tmp, "ws")
+        os.makedirs(root)
+        c1 = api.ws_create_project({"root": root, "name": "Nave 1", "folder": ""})
+        api.ws_create_folder({"root": root, "name": "Naves"})
+        mv = api.ws_move({"root": root, "path": c1["rel"], "folder": "Naves"})
+        api.ws_favorite({"root": root, "path": mv["path"]})
+        api.ws_touch({"root": root, "path": mv["path"]})
+        lst = api.ws_list({"root": root, "thumbs": False})
+        pj = lst["projects"][0]
+        if len(lst["projects"]) != 1 or pj["folder"] != "Naves" or not pj["favorite"] or lst["recent"] != [mv["path"]] or not any(x["name"] == "Naves" for x in lst["folders"]):
+            fail(f"workspace: listado inesperado {lst['projects']}")
+        dup = api.ws_duplicate({"root": root, "path": mv["path"]})
+        rn = api.ws_rename({"root": root, "path": dup["path"], "name": "Copia"})
+        api.ws_delete({"root": root, "path": rn["path"]})
+        try:
+            api.ws_delete({"root": root, "path": "../fuera"})
+            fail("workspace: debe rechazar rutas fuera de la carpeta de trabajo")
+        except api.ApiError:
+            pass
+        imp = api.ws_import({"root": root, "source": os.path.join("ejemplos", "PB-01_W14X90.scp")})
+        if not os.path.exists(os.path.join(root, imp["path"])):
+            fail("workspace: importar un proyecto")
+        print(f"{'espacio de trabajo':34} crear, carpeta, mover, favorito, reciente, duplicar, renombrar, eliminar, importar, ruta fuera rechazada: OK")
+
+        # ---- servidor local
+        from steelconpro import server
+        srv, info = server.serve(0, "tok123", quiet=True)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        base = f"http://127.0.0.1:{info['port']}"
+
+        def post(fn, body, token="tok123"):
+            rq = urllib.request.Request(f"{base}/api/{fn}", data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "X-SCP-Token": token})
+            with urllib.request.urlopen(rq, timeout=60) as rs:
+                return json.loads(rs.read())
+        if post("app_info", {})["name"] != "SteelConPro":
+            fail("servidor: app_info")
+        try:
+            post("app_info", {}, token="malo")
+            fail("servidor: debe rechazar un token invalido")
+        except urllib.error.HTTPError as e:
+            if e.code != 403:
+                fail(f"servidor: codigo {e.code} con token invalido")
+        try:
+            post("section_info", {"label": "NO-EXISTE"})
+            fail("servidor: un perfil desconocido debe dar error")
+        except urllib.error.HTTPError as e:
+            if e.code != 400 or "desconocido" not in json.loads(e.read())["error"]:
+                fail("servidor: error de perfil desconocido")
+        rv = post("verify", {"connection": con})
+        if rv["max_ratio"] != v2["max_ratio"]:
+            fail("servidor: verify por HTTP no coincide con la llamada directa")
+        srv.shutdown()
+        print(f"{'servidor local':34} token, errores y calculo por HTTP: OK")
+
+        # ---- bibliotecas
+        sec = api.section_build({"template": next(iter(__import__("steelconpro.sections", fromlist=["TEMPLATES"]).TEMPLATES))})
+        if not sec["props"] or sec["props"]["A"] <= 0:
+            fail("secciones: plantilla del Section Designer")
+        mats = api.materials_get()
+        if not mats["all"]["steel"]:
+            fail("materiales: lista vacia")
+    except Exception as e:                                  # noqa: BLE001
+        fail(f"ops/api: {type(e).__name__}: {e}")
+        traceback.print_exc()
+    return FAIL
+
+
+if __name__ == "__main__":
+    for _st in (sys.stdout, sys.stderr):
+        try:
+            _st.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    fails = run()
+    print()
+    if fails:
+        print(f"FALLAS ({len(fails)}):")
+        for f in fails:
+            print("  -", f)
+        sys.exit(1)
+    print("TODAS LAS PRUEBAS DE OPERACIONES Y API PASARON")

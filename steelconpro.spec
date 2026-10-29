@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec de SteelConPro (formato carpeta).
-# Uso:  pyinstaller --noconfirm --clean steelconpro.spec
-# build_portable.bat agrega despues la carpeta solvers\ y arma el .zip final.
+# PyInstaller spec del MOTOR de SteelConPro (formato carpeta, sin ventana): lo lanza la aplicacion Electron como proceso local.
+# Uso:  pyinstaller --noconfirm --clean steelconpro.spec      ->  dist/engine/SteelConPro-engine(.exe)
+# build_portable.bat arma despues la aplicacion Electron (electron-builder) con esta carpeta.
 import os
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import gmsh as _gmsh
@@ -18,21 +18,19 @@ binaries = [(_gmsh.libpath, ".")]
 
 hidden = []
 hidden += collect_submodules("scipy.sparse")
-hidden += collect_submodules("steelconpro.conn")     # tipologias cargadas con importlib (conn/__init__.py)
-hidden += ["mpl_toolkits.mplot3d", "scipy.sparse.linalg", "scipy.sparse.csgraph",
-           "matplotlib.backends.backend_qtagg", "matplotlib.backends.backend_agg",
-           "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
+hidden += collect_submodules("steelconpro")          # modulos cargados con importlib (conn/__init__.py) y funciones de api.py
+hidden += ["tools", "tools.node_presets", "mpl_toolkits.mplot3d", "scipy.sparse.linalg", "scipy.sparse.csgraph",
+           "matplotlib.backends.backend_agg", "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus",
            "reportlab.lib.styles", "PIL", "gmsh"]
 
 a = Analysis(
     ["run.py"],
     pathex=["."],
     binaries=binaries,
-    datas=datas + [("selftest.py", "."), ("selftest_nodes.py", "."), ("ejemplos", "ejemplos"),
+    datas=datas + [("selftest.py", "."), ("selftest_nodes.py", "."), ("selftest_ops.py", "."), ("ejemplos", "ejemplos"),
                    ("steelconpro/data", "steelconpro/data")],
     hiddenimports=hidden,
-    excludes=["tkinter", "PyQt5", "PyQt6", "PySide2", "IPython", "notebook",
-              "pytest", "sphinx"],
+    excludes=["tkinter", "PyQt5", "PyQt6", "PySide2", "PySide6", "shiboken6", "IPython", "notebook", "pytest", "sphinx"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
@@ -40,9 +38,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
-    name="SteelConPro",
-    console=False,            # sin ventana de consola
+    name="SteelConPro-engine",
+    console=True,             # el motor no tiene ventana: Electron lo lanza oculto y lee su salida
     icon="steelconpro/data/steelconpro.ico",
     upx=False,
 )
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="SteelConPro")
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="engine")

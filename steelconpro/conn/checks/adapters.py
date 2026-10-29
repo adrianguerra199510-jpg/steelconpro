@@ -168,9 +168,9 @@ def run(prj, nd: Nodo, fem_map=None):
     R.warnings = list(warns)
     cases = _load_cases(nd)
     if not items and nd.base_op() is None:
-        R.warnings.append("El nudo no tiene operaciones de conexión: agregue una en el paso 2 (Operaciones).")
+        R.warnings.append("El nudo no tiene operaciones de conexión: agregue una con «Agregar operación».")
     if items and not cases:
-        R.warnings.append("** No hay cargas definidas: agregue los esfuerzos de los miembros en el paso 3 (Cargas). **")
+        R.warnings.append("** No hay cargas definidas: agregue los esfuerzos de los miembros en «Cargas». **")
     if not cases:
         cases = [("Sin cargas", {})]
     us = prj.units()

@@ -207,7 +207,7 @@ function boltsBody(body, E, op, ctx, info, el, nd, us, addForm) {
   const build = () => {
     clear(parentSel); clear(faceSel);
     parentSel.append(field('Elemento de partida (cara donde apoyan las cabezas)', selectInput({ value: op.parent, options: info.map((e) => ({ value: e.name, label: `${e.name} — ${e.type}` })),
-      onChange: (v) => { op.parent = v; const e = el(v); if (e && !e.faces.includes(op.face)) op.face = e.faces[0]; build(); ctx.onChange(); } })));
+      onChange: (v) => { op.parent = v; const e = el(v); if (e && !e.faces.includes(op.face)) op.face = e.faces[0]; if (e && e.type === 'placa' && e.op != null) { op.pl_s = nd.operations[e.op].pl_L / 2; op.pl_u = 0; } build(); ctx.onChange(); if (mdlRoot && mdlRoot.refresh) mdlRoot.refresh(); } })));
     const e = el(op.parent);
     faceSel.append(field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } })));
   };
@@ -217,11 +217,13 @@ function boltsBody(body, E, op, ctx, info, el, nd, us, addForm) {
   for (const e of info.filter((x) => x.name !== op.parent)) checks.append(checkInput({ value: tg.has(e.name), label: `${e.name} — ${e.type}`, onChange: (v) => { v ? tg.add(e.name) : tg.delete(e.name); op.targets = info.map((x) => x.name).filter((n) => tg.has(n)); ctx.onChange(); } }));
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Elementos' }), h('div', { class: 'form-grid' }, parentSel, faceSel), h('div', { style: { height: '10px' } }),
     h('div', { class: 'lbl muted', style: { fontSize: '12px', fontWeight: 600, marginBottom: '6px' }, text: 'Otros elementos que atraviesan los pernos (hacia adentro, en el orden de la lista)' }), checks));
-  root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Grupo de pernos' }), addForm([
+  const grid = addForm([
     { path: 'bolt_size', label: 'Diámetro', type: 'combo', items: C.bolt_sizes }, { path: 'bolt_grade', label: 'Calidad', type: 'combo', items: C.bolt_grades },
     { path: 'rows', label: 'Filas (a lo largo)', type: 'int', lo: 1, hi: 20 }, { path: 'cols', label: 'Columnas (a lo ancho)', type: 'int', lo: 1, hi: 10 },
     numField2('Separación a lo largo', 'bolt_s', 1, 40), numField2('Separación a lo ancho', 'bolt_g', 1, 40),
-    numField2('Posición del centro a lo largo', 'pl_s', -600, 6000), numField2('Desplazamiento transversal', 'pl_u', -600, 600)])));
+    numField2('Posición del centro a lo largo', 'pl_s', -600, 6000), numField2('Desplazamiento transversal', 'pl_u', -600, 600)]);
+  root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Grupo de pernos' }), grid));
+  root.refresh = () => grid.refresh();
   body.append(root);
   return root;
 }

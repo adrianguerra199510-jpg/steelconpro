@@ -11,11 +11,8 @@ import numpy as np
 
 def run():
     FAIL = []
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    try:                                                   # la interfaz fija el backend de matplotlib: se importa antes de que otro codigo use pyplot
-        from steelconpro import ui as _ui                  # noqa: F401
-    except ImportError:
-        pass
+    import matplotlib
+    matplotlib.use("Agg")
     from steelconpro.model import Project, save_book, load_book
     import steelconpro.model as MD
     from steelconpro.shapes import CATALOG
@@ -742,270 +739,44 @@ def run():
         FAIL.append("nudos: no se escribio el STEP")
     print(f"{'exportacion STEP':34} geometria del nudo ({os.path.getsize(sp) // 1024} KB): OK")
 
-    # ---------------------------------------------------------------- interfaz (offscreen, solo si hay Qt)
-    try:
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QApplication
-        from steelconpro import ui
-        from steelconpro.ui_wizard import NewConnectionDialog
-        app = QApplication.instance() or QApplication([])
-        win = ui.MainWindow()
-        for ct, pre in ((CT_NODE, (MODE_COL, "int4", "I", "ep_flush")), (CT_NODE, (MODE_BEAM, "sec2", "HSS", "tab")), (CT_NODE, (MODE_CHORD, "V", "RND", "gus_bolt"))):
-            win.add_connection(ct)                                            # conexion nueva: en blanco (no hay plantillas predefinidas)
-            app.processEvents()
-            nd0_ = win.prj.node
-            if nd0_.members or nd0_.operations or nd0_.loads or win.prj.ctype != ct or nd0_.main_name != "M1" or nd0_.main_el != 90.0:
-                FAIL.append(f"nudos UI {ct}: la conexion nueva debe estar en blanco: {len(nd0_.members)} miembros, {len(nd0_.operations)} operaciones")
-            win.recalc(); win.run_3d(); app.processEvents()                   # en blanco no debe fallar (sin operaciones: solo avisa)
-            if win.node_res is None or not any("operaci" in w.lower() for w in win.node_res.warnings):
-                FAIL.append(f"nudos UI {ct}: verificar una conexion en blanco debe avisar que faltan operaciones")
-            win.prj.node = PRE.build(*pre)                                    # se arma el nudo como lo haria el usuario
-            win.load_ui(); win.recalc(); app.processEvents()
-            tabs_in = [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)]
-            tabs_out = {win.tabs_out.tabText(i): win.tabs_out.isTabEnabled(i) for i in range(win.tabs_out.count()) if win.tabs_out.isTabVisible(i)}
-            mod = module_for(ct)
-            if tabs_in != ["Proyecto", mod.TAB] or tabs_out.get("Analisis FEM") is not False or tabs_out.get("Resultados") is not True \
-                    or tabs_out.get("Modelo 3D") is not True or not win.btn3d.isEnabled():
-                FAIL.append(f"nudos UI {ct}: pestañas {tabs_in} / {tabs_out}, VERIFICAR habilitado = {win.btn3d.isEnabled()}")
-            nd_ = win.prj.node
-            ref = PRE.build(*pre)
-            if len(nd_.members) != len(ref.members) or len(nd_.operations) != len(ref.operations):
-                FAIL.append(f"nudos UI {ct}: no se cargo el nudo armado")
-            form = win.fnamed[mod.TAB]
-            mp, op, lp = form.members_pg, form.ops_pg, form.loads_pg
-            m0 = nd_.members[0]
-            mp.select(m0.name)
-            mp.mf.w("m.az").setValue(30.0)
-            mp.m_pick.set_label("W21X44"); mp.m_pick.changed.emit()
-            if m0.az != 30.0 or m0.shape != "W21X44":
-                FAIL.append(f"nudos UI {ct}: la edicion del miembro no se guardo: {m0.az} {m0.shape}")
-            n0 = len(nd_.members)
-            mp._add(); mp._dup(); mp._del()
-            if len(nd_.members) != n0 + 1 or len(set(nd_.names())) != len(nd_.names()):
-                FAIL.append(f"nudos UI {ct}: agregar/duplicar/quitar miembros: {n0} -> {len(nd_.members)} {nd_.names()}")
-            # el principal se edita en su propia fila (la primera de la tabla) y se puede renombrar, no repetir un nombre
-            mp.select(nd_.members[0].name)
-            mp.tbl.selectRow(0)
-            mp._row_selected()
-            if mp._sel != -1 or mp.bt_main.isEnabled() or mp.bt_del.isEnabled() or mp.bt_dup.isEnabled():
-                FAIL.append(f"nudos UI {ct}: la fila del principal debe seleccionarse y no permitir quitarlo ni designarlo: sel {mp._sel}")
-            mp.w("node.main_name").setText(nd_.members[0].name)
-            mp._emit()
-            if nd_.main_name == nd_.members[0].name:
-                FAIL.append(f"nudos UI {ct}: el principal no puede repetir el nombre de un miembro")
-            mp.w("node.main_az").setValue(15.0)
-            mp.w("node.main_el").setValue(nd_.main_el)
-            mp.select(nd_.members[0].name)
-            # operaciones: una conexion por miembro (la nueva reemplaza), agregar corte, quitar, mover
-            nops = len(nd_.operations)
-            op.selected_member = m0.name
-            op._add(OP_SEAT, m0.name)
-            if len([o for o in nd_.operations if o.member == m0.name and o.is_connection]) != 1 or nd_.connection_of(m0.name).kind != OP_SEAT:
-                FAIL.append(f"nudos UI {ct}: la nueva conexion debe reemplazar a la anterior del miembro")
-            op._add(OP_COPE, m0.name)
-            if nd_.operations[-1].kind != OP_COPE:
-                FAIL.append(f"nudos UI {ct}: agregar el corte")
-            op._dup()
-            op._del()
-            # cargas
-            lp._add_case()
-            if not nd_.loads or {x.case for x in nd_.loads} != {"Caso 1"}:
-                FAIL.append(f"nudos UI {ct}: agregar caso de carga: {[x.case for x in nd_.loads]}")
-            lp.tbl.item(0, 4).setText("12.5")                           # Vz del primer miembro
-            lp.store(win.prj)
-            if abs(nd_.loads[0].Vz - win.us.inn("F", 12.5)) > 1e-9:
-                FAIL.append(f"nudos UI {ct}: la carga editada no se guardo: {nd_.loads[0]}")
-            mp.w("node.main_end").setCurrentIndex(1)
-            if nd_.end_index != 1:
-                FAIL.append(f"nudos UI {ct}: extremo del miembro principal")
-            # VERIFICAR: llena la tabla, el veredicto y la memoria; cualquier cambio la deja desactualizada
-            win.recalc(); app.processEvents()
-            if win._node_fresh() or "DESACTUALIZADO" not in win.lbl_verdict.text():                    # se verifico la conexion en blanco y despues se armo el nudo
-                FAIL.append(f"nudos UI {ct}: tras armar el nudo el resultado de la conexion en blanco debe quedar DESACTUALIZADO: '{win.lbl_verdict.text()}'")
-            win.run_3d(); app.processEvents()
-            if not win._node_fresh() or win.tbl.rowCount() == 0 or ("CUMPLE" not in win.lbl_verdict.text()) or not win.node_res.checks \
-                    or "OPERACION" not in win.txt_mem.toPlainText():
-                FAIL.append(f"nudos UI {ct}: VERIFICAR no lleno la tabla / el veredicto / la memoria: '{win.lbl_verdict.text()}', {win.tbl.rowCount()} filas")
-            n_hdr = sum(1 for r_ in range(win.tbl.rowCount()) if win.tbl.columnSpan(r_, 0) > 1)
-            n_chk = sum(1 for r_ in range(win.tbl.rowCount()) if win.tbl.item(r_, 0) is not None and win.tbl.item(r_, 0).data(Qt.UserRole) is not None)
-            if n_hdr < 1 or n_chk != len(win.node_res.checks) or not win.kpi["ver"].lv.text() in ("CUMPLE", "NO CUMPLE"):
-                FAIL.append(f"nudos UI {ct}: tabla agrupada ({n_hdr} grupos, {n_chk} filas de {len(win.node_res.checks)}) o tarjetas")
-            win._goto_calc(next(r_ for r_ in range(win.tbl.rowCount()) if win.tbl.item(r_, 0).data(Qt.UserRole) is not None))
-            win.cb_filter.setCurrentIndex(3)                                     # solo las no evaluadas
-            n_na = sum(1 for r_ in range(win.tbl.rowCount()) if win.tbl.item(r_, 0) is not None and win.tbl.item(r_, 0).data(Qt.UserRole) is not None)
-            if n_na != sum(1 for c_ in win.node_res.checks if c_.skip):
-                FAIL.append(f"nudos UI {ct}: el filtro «No evaluadas» muestra {n_na} filas de {sum(1 for c_ in win.node_res.checks if c_.skip)}")
-            win.cb_filter.setCurrentIndex(0)
-            if win.tabs_out.currentWidget() is not win.tab_res:
-                FAIL.append(f"nudos UI {ct}: VERIFICAR debe mostrar la pestaña Resultados")
-            lp.tbl.item(0, 4).setText("99")
-            lp.store(win.prj)
-            win.recalc(); app.processEvents()
-            if win._node_fresh() or "DESACTUALIZADO" not in win.lbl_verdict.text():
-                FAIL.append(f"nudos UI {ct}: tras editar, el resultado debe quedar DESACTUALIZADO: '{win.lbl_verdict.text()}'")
-            q_, R_ = win.export_target()
-            if R_ is None or not R_.checks:
-                FAIL.append(f"nudos UI {ct}: export_target sin resultados")
-            if win.worker is not None and win.worker.isRunning():
-                FAIL.append(f"nudos UI {ct}: VERIFICAR no debe lanzar ningun analisis 3D")
-        # ---- el boton «Nueva» (con el asistente) crea la conexion: se acepta el dialogo con un temporizador
-        from PySide6.QtCore import QTimer
-        n_bk = len(win.book)
-        QTimer.singleShot(300, lambda: (app.activeModalWidget().accept() if app.activeModalWidget() is not None else None))
-        win.con_new()
-        app.processEvents()
-        if len(win.book) != n_bk + 1:
-            FAIL.append(f"asistente: el boton Nueva no creo la conexion ({n_bk} -> {len(win.book)})")
-        # ---- designar el miembro principal desde la tabla de miembros
-        win.add_connection(CT_NODE)
-        win.prj.node = PRE.build(MODE_COL, "int2", "I", "tab")
-        win.prj.node.loads = [Load("C", "V1", Vz=-10.0), Load("C", "V2", Vz=-12.0)]
-        win.load_ui(); win.recalc(); app.processEvents()
-        formd = win.fnamed[module_for(CT_NODE).TAB]
-        mpd = formd.members_pg
-        if mpd.tbl.rowCount() != 3 or mpd.tbl.item(0, 0).text() != "★" or mpd.tbl.item(0, 1).text() != "Columna" or mpd._sel != -1:
-            FAIL.append(f"principal UI: la primera fila debe ser el principal ★: {[mpd.tbl.item(r_, 1).text() for r_ in range(mpd.tbl.rowCount())]}")
-        mpd.select("V1")
-        if not mpd.bt_main.isEnabled():
-            FAIL.append("principal UI: con un miembro conectado seleccionado se puede designar como principal")
-        mpd.designate("V1")
-        app.processEvents()
-        ndd = win.prj.node
-        if ndd.main_name != "V1" or mpd.tbl.item(0, 1).text() != "V1" or mpd.tbl.rowCount() != 4 or mpd._sel != -1 or mpd.bt_main.isEnabled():
-            FAIL.append(f"principal UI: tras designar, V1 debe ser la primera fila, el principal debe quedar seleccionado: {ndd.names()}")
-        if abs(mpd.w("node.main_el").value()) > 1e-9 or mpd.main_pick.label() != ndd.main_shape or "Columna" not in {m_.name.rstrip("+−") for m_ in ndd.members}:
-            FAIL.append("principal UI: el editor del principal debe mostrar los datos del nuevo principal")
-        win.recalc(); win.run_3d(); app.processEvents()
-        if not win._node_fresh() or win.node_res is None or not win.node_res.checks:
-            FAIL.append("principal UI: tras designar el principal se debe poder verificar el nudo")
-        mpd.select("Columna+")
-        if mpd._sel < 0 or mpd.mf.w("m.name").text() != "Columna+":
-            FAIL.append("principal UI: el miembro seleccionado (antes principal) debe poder editarse")
-        # ---- la placa base es una operacion: una placa base de la version anterior abre como nudo con la operacion y sus pestañas
-        from steelconpro.conn import baseplate as BPm
-        n_bk0 = len(win.book)
-        win.book = win.book + load_book("ejemplos/PB-01_W14X90.scp")
-        win._switch(n_bk0)
-        app.processEvents()
-        tabs_pb = [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)]
-        tabs_out_pb = {win.tabs_out.tabText(i): win.tabs_out.isTabEnabled(i) for i in range(win.tabs_out.count()) if win.tabs_out.isTabVisible(i)}
-        if win.prj.ctype != CT_NODE or not win.has_base or tabs_pb != ["Proyecto", "Conexión de nudo", "Placa base"] or tabs_out_pb.get("Analisis FEM") is not True \
-                or [win.tabs_bp.tabText(i) for i in range(win.tabs_bp.count())] != win.BASE_TABS:
-            FAIL.append(f"nudos UI: con la operacion de placa base deben aparecer sus pestañas y el analisis FEM: {tabs_pb} / {tabs_out_pb}")
-        win.recalc(); win.run_3d(); app.processEvents()
-        Rb = win.node_res
-        if Rb is None or not win._node_fresh() or abs(Rb.max_ratio - 0.75) > 1e-3 or not any(c.title.startswith("[Placa base") for c in Rb.checks) or "CUMPLE" not in win.lbl_verdict.text():
-            FAIL.append(f"nudos UI: VERIFICAR en una conexion con placa base: D/C {getattr(Rb, 'max_ratio', None)}, '{win.lbl_verdict.text()}'")
-        if not any("Placa base" in (win.tbl.item(r_, 0).text() if win.tbl.item(r_, 0) else "") for r_ in range(win.tbl.rowCount())):
-            FAIL.append("nudos UI: la tabla de resultados debe tener el grupo de la placa base")
-        # el perfil de la placa base es el del miembro: cambiarlo en Miembros cambia el de la placa
-        win.fnamed[module_for(CT_NODE).TAB].members_pg.main_pick.set_label("W12X65")
-        win.store_ui(); win.load_ui(); win.recalc(); app.processEvents()
-        if win._bp_prj().section.label != "W12X65" or win.prj.section.label != "W12X65":
-            FAIL.append("nudos UI: el perfil de la placa base debe seguir al del miembro")
-        # agregar / quitar la operacion de placa base en una conexion nueva
-        win.add_connection(CT_NODE)
-        win.recalc(); app.processEvents()
-        if win.has_base or [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)] != ["Proyecto", "Conexión de nudo"]:
-            FAIL.append("nudos UI: una conexion nueva no lleva la placa base")
-        opp = win.fnamed[module_for(CT_NODE).TAB].ops_pg
-        opp._add(OP_BASE)
-        win.load_ui(); win.recalc(); app.processEvents()
-        if not win.has_base or win.prj.node.base_op().member != win.prj.node.main_name or "Placa base" not in [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)]:
-            FAIL.append("nudos UI: agregar la operacion de placa base debe mostrar sus pestañas")
-        opp._add(OP_BASE)                                                # una sola por conexion
-        if len([o for o in win.prj.node.operations if o.kind == OP_BASE]) != 1:
-            FAIL.append("nudos UI: solo una placa base por conexion")
-        mdl_b = AS.build_model(win.prj)
-        if not mdl_b.extra or any(t == "column" for t, _f, _c, _a in mdl_b.extra):
-            FAIL.append("nudos UI: la geometria de la placa base debe estar en el modelo 3D (sin duplicar el perfil)")
-        win.run_3d(); app.processEvents()
-        if not win._node_fresh() or not any(c.title.startswith("[Placa base") for c in win.node_res.checks):
-            FAIL.append("nudos UI: verificar la placa base en una conexion nueva")
-        opp.tbl.selectRow([i for i, o in enumerate(win.prj.node.operations) if o.kind == OP_BASE][0])
-        opp._row_selected()
-        opp._del()
-        win.load_ui(); win.recalc(); app.processEvents()
-        if win.has_base:
-            FAIL.append("nudos UI: quitar la operacion de placa base debe ocultar sus pestañas")
-        win._switch(n_bk0)
-        # ---- plantillas del usuario: guardar una conexion terminada, crear otra desde ella, renombrar y eliminar
-        from steelconpro import templates as TPL
-        from steelconpro.ui_wizard import SaveTemplateDialog
-        tdir = __import__("pathlib").Path(tmp) / "plantillas_ui"
-        tdir.mkdir(exist_ok=True)
-        dlg = NewConnectionDialog(None, where=tdir)
-        if dlg.choice() != {"ctype": CT_NODE, "template": None} or dlg.lst_tpl.count() < 1 or "blanco" not in dlg.lst_tpl.item(0).text():
-            FAIL.append(f"asistente: sin plantillas debe ofrecer solo la conexion en blanco: {dlg.choice()}")
-        win._switch(1)
-        win.store_ui()
-        src = win.prj
-        sd = SaveTemplateDialog(None, src, where=tdir)
-        sd.ed_name.setText("Mi nudo tipo"); sd.ed_desc.setPlainText("prueba"); sd._ok()
-        if not sd.path or [t["name"] for t in TPL.list_templates(src.ctype, tdir)] != ["Mi nudo tipo"]:
-            FAIL.append("plantillas: no se guardo la plantilla")
-        dlg = NewConnectionDialog(None, where=tdir)
-        if dlg.lst_tpl.count() != 2 or dlg.lst_tpl.item(1).data(Qt.UserRole) != sd.path or dlg.lbl_img.pixmap() is None:
-            FAIL.append("asistente: la plantilla guardada debe aparecer en la lista de su modulo")
-        dlg.lst_tpl.setCurrentRow(1)
-        ch = dlg.choice()
-        n_before = len(win.book)
-        win.add_connection(ch["ctype"], ch["template"])
-        new = win.prj
-        a_, b_ = src.node, new.node
-        if len(win.book) != n_before + 1 or new is src or a_ != b_ or new.element == src.element:
-            FAIL.append("plantillas: la conexion creada desde la plantilla debe tener los mismos miembros, operaciones y cargas y otro nombre")
-        # otro modulo no la ve
-        if TPL.list_templates(CT_BASEPLATE, tdir):
-            FAIL.append("plantillas: cada modulo solo lista las suyas")
-        TPL.rename_template(sd.path, "Mi nudo renombrado")
-        if [t["name"] for t in TPL.list_templates(src.ctype, tdir)] != ["Mi nudo renombrado"]:
-            FAIL.append("plantillas: renombrar")
-        TPL.delete_template(sd.path)
-        if TPL.list_templates(src.ctype, tdir):
-            FAIL.append("plantillas: eliminar")
-        # la placa base tambien: copia completa del proyecto
-        win._switch(n_bk0)
-        win.store_ui()
-        pb_ = win.prj
-        pbp = TPL.save_template(pb_, "Placa tipo", "", True, tdir)
-        pb2 = TPL.load_template(pbp)
-        from dataclasses import asdict as _asd
-        d1, d2 = _asd(pb_), _asd(pb2)
-        d1["element"] = d2["element"] = ""
-        if d1 != d2 or pb2.ctype != CT_NODE or pb2.node.base_op() is None:
-            FAIL.append("plantillas: la placa base debe volver idéntica")
-        # sin cargas
-        qn = copy.deepcopy(src)
-        tn = TPL.save_template(qn, "Sin cargas", "", False, tdir)
-        if TPL.load_template(tn).node.loads or not qn.node.loads:
-            FAIL.append("plantillas: «incluir cargas» desmarcado debe guardar sin cargas sin tocar la conexion original")
-        print(f"{'interfaz (offscreen)':34} 3 nudos (principal vertical, horizontal e inclinado): miembros / operaciones / cargas, VERIFICAR llena Resultados y la memoria, resultado desactualizado al editar, "
-              f"Analisis FEM desactivado, conexiones nuevas en blanco, plantillas propias (guardar, crear, renombrar, eliminar), la placa base como operacion (pestañas, verificacion, perfil del miembro)")
-    except ImportError as e:
-        if "PySide6" not in str(e) and "shiboken" not in str(e):
-            FAIL.append(f"nudos UI: {type(e).__name__}: {e}")
-            traceback.print_exc()
-        print(f"{'interfaz (offscreen)':34} omitida (sin PySide6)")
-    except Exception as e:
-        FAIL.append(f"nudos UI: {type(e).__name__}: {e}")
-        traceback.print_exc()
-    # ---------------------------------------------------------------- cierre ordenado de Qt (si no, el interprete puede fallar al destruir las ventanas de las pruebas)
-    try:
-        from PySide6.QtCore import QEvent
-        from PySide6.QtWidgets import QApplication
-        app_ = QApplication.instance()
-        if app_ is not None:
-            for w_ in list(app_.topLevelWidgets()):
-                w_.close()
-                w_.deleteLater()
-            app_.sendPostedEvents(None, QEvent.DeferredDelete)
-            app_.processEvents()
-            import gc
-            gc.collect()
-    except Exception:
-        pass
+    # ---------------------------------------------------------------- plantillas del usuario: guardar una conexion terminada, crear otra desde ella, renombrar y eliminar
+    from steelconpro import templates as TPL
+    from dataclasses import asdict as _asd
+    tdir = __import__("pathlib").Path(tmp) / "plantillas"
+    tdir.mkdir(exist_ok=True)
+    src = prj[1]
+    p_ = TPL.save_template(src, "Mi nudo tipo", "prueba", True, tdir)
+    if [t["name"] for t in TPL.list_templates(src.ctype, tdir)] != ["Mi nudo tipo"]:
+        FAIL.append("plantillas: no se guardo la plantilla")
+    new = TPL.load_template(p_)
+    if new.node != src.node:
+        FAIL.append("plantillas: la conexion creada desde la plantilla debe tener los mismos miembros, operaciones y cargas")
+    if TPL.list_templates(CT_BASEPLATE, tdir):
+        FAIL.append("plantillas: cada modulo solo lista las suyas")
+    TPL.rename_template(p_, "Mi nudo renombrado")
+    if [t["name"] for t in TPL.list_templates(src.ctype, tdir)] != ["Mi nudo renombrado"]:
+        FAIL.append("plantillas: renombrar")
+    TPL.delete_template(p_)
+    if TPL.list_templates(src.ctype, tdir):
+        FAIL.append("plantillas: eliminar")
+    # una placa base de la version anterior abre como nudo con la operacion de placa base, y la plantilla la devuelve identica
+    pb_ = load_book("ejemplos/PB-01_W14X90.scp")[0]
+    if pb_.ctype != CT_NODE or pb_.node.base_op() is None:
+        FAIL.append("plantillas: una placa base antigua debe abrir como nudo con la operacion de placa base")
+    pbp = TPL.save_template(pb_, "Placa tipo", "", True, tdir)
+    pb2 = TPL.load_template(pbp)
+    d1, d2 = _asd(pb_), _asd(pb2)
+    d1["element"] = d2["element"] = ""
+    if d1 != d2 or pb2.ctype != CT_NODE or pb2.node.base_op() is None:
+        FAIL.append("plantillas: la placa base debe volver idéntica")
+    qn = copy.deepcopy(src)
+    tn = TPL.save_template(qn, "Sin cargas", "", False, tdir)
+    if TPL.load_template(tn).node.loads or not qn.node.loads:
+        FAIL.append("plantillas: «incluir cargas» desmarcado debe guardar sin cargas sin tocar la conexion original")
+    Rb = solve_conn(pb_)
+    if abs(Rb.max_ratio - 0.75) > 1e-3 or not any(c.title.startswith("[Placa base") for c in Rb.checks):
+        FAIL.append(f"placa base como operacion: D/C {Rb.max_ratio:.3f} (esperado 0.750 como el modulo anterior)")
+    print(f"{'plantillas y placa base':34} guardar, crear, renombrar, eliminar; placa base antigua abre como operacion con D/C = {Rb.max_ratio:.3f}")
     return FAIL
 
 

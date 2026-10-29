@@ -468,6 +468,10 @@ def add_operation(nd, kind: str, **kw) -> Operation:
     d = defaults(kind, kw.get("role", ""))
     d.update(kw)
     o = Operation(kind=kind, **d)
+    if kind in (OP_PLATE, OP_BOLTS, OP_FILLET) and "member" not in kw:
+        o.member = ""                                    # estas operaciones se refieren a elementos por `parent` y `targets`, no a un miembro
+    if kind == OP_BASE and "member" not in kw:
+        o.member = nd.main_name                          # la placa base va, por defecto, en el extremo del miembro principal
     if kind == OP_PLATE and not o.name:
         o.name = unique_plate_name(nd, "P")
     if kind == OP_PLATE and not o.parent:

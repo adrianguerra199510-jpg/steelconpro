@@ -396,7 +396,7 @@ async function createOperation(kind) {
   } else if (kind === K.BOLTS || kind === K.FILLET) {
     const plates = nd.operations.filter((o) => o.kind === K.PLATE);
     const last = plates[plates.length - 1];
-    if (last && kind === K.BOLTS) { params.parent = last.name; params.targets = [last.parent]; }
+    if (last && kind === K.BOLTS) { params.parent = last.name; params.targets = [last.parent]; params.pl_s = last.pl_L / 2; params.pl_u = 0; }
     if (last && kind === K.FILLET) params.targets = [last.name];
   }
   E.snap();
@@ -425,7 +425,7 @@ async function deleteOperation(i) {
   const nd = E.conn().node;
   const o = nd.operations[i];
   let deps = [];
-  if (o.kind === S.C.op.PLATE) { try { deps = (await call('dependents', { connection: E.conn(), name: o.name })).operations; } catch (e) { /* sin dependientes */ } }
+  if (o.kind === S.C.op.PLATE) { try { deps = (await call('dependents', { connection: E.conn(), name: o.name })).operations.map((j) => `${j + 1}. ${opTitle(nd.operations[j])}`); } catch (e) { /* sin dependientes */ } }
   const msg = `¿Eliminar la operación «${opTitle(o)}»?`;
   const detail = deps.length ? `También se eliminarán las operaciones que dependen de esta placa: ${deps.join(', ')}.` : '';
   if (!(await confirmBox(msg, { danger: true, ok: 'Eliminar', detail }))) return;
@@ -444,6 +444,7 @@ function setVerdict(state, msg) {
   let cls = 'idle', txt = 'Sin calcular', ic = 'circle-help';
   if (state === 'calc') { cls = 'idle'; txt = 'Calculando…'; ic = 'loader'; }
   else if (state === 'error') { cls = 'bad'; txt = msg || 'Error'; ic = 'circle-alert'; }
+  else if (r && !E.stale && state !== 'stale' && !r.checks.length) { cls = 'idle'; txt = 'Sin verificaciones'; ic = 'circle-help'; }
   else if (r && !E.stale && state !== 'stale') { cls = r.ok ? 'ok' : 'bad'; txt = `${r.ok ? 'CUMPLE' : 'NO CUMPLE'} · D/C máx ${r.max_ratio.toFixed(3)}`; ic = r.ok ? 'check' : 'circle-alert'; }
   else if (r) { cls = 'stale'; txt = `Desactualizado · último D/C ${r.max_ratio.toFixed(3)}`; ic = 'refresh-cw'; }
   v.className = `big-chip ${cls}`; v.replaceChildren(svg(ic, 16), h('span', { text: txt }));
@@ -459,7 +460,7 @@ function buildRight() {
     { id: 'res', label: 'Resultados', icon: 'check', render: () => { E.ui.resBox = h('div', { class: 'scroll', style: { padding: '0 0 12px' } }); renderResults(); return E.ui.resBox; } },
     { id: 'mem', label: 'Memoria', icon: 'file-text', render: () => { E.ui.memBox = h('div', { class: 'scroll memory' }); renderMemory(); return E.ui.memBox; } },
   ];
-  if (hasBase) items.push({ id: 'fem', label: 'Elementos finitos', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
+  if (hasBase) items.push({ id: 'fem', label: 'FEM', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
   const t = tabs(items, { active: E.ui.rtab && items.some((i) => i.id === E.ui.rtab) ? E.ui.rtab : 'res', cls: 'pill', onChange: (id) => { E.ui.rtab = id; } });
   E.ui.rtabs = t;
   right.append(h('div', { style: { padding: '10px 12px 4px', display: 'flex', gap: '8px', alignItems: 'center' } }, E.ui.vbadge), t);
