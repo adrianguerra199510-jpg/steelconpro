@@ -14,7 +14,7 @@ import math
 import numpy as np
 
 from .. import materials as M
-from ..shapes import CATALOG, HSS_RECT, W_SHAPE
+from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN
 from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, unit
 from .specs import (MODE_COL, MODE_BEAM, MODE_CHORD, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
@@ -73,6 +73,16 @@ def section_prisms(shape, o, sx, sy, A, s0, s1):
     """Prismas de la seccion extruida de s0 a s1 a lo largo de A desde el origen `o` (la seccion tiene su centroide en `o`)."""
     o = tuple(map(float, o))
     U, V = tuple(map(float, sx)), tuple(map(float, sy))
+    if shape.kind == GEN:                                   # seccion libre (Section Designer): una pieza por componente
+        out = []
+        for pc in shape.pieces():
+            if pc[0] == "circle":
+                _, u, v, ro, ri = pc
+                oc = tuple(float(q) for q in (np.asarray(o) + u * np.asarray(U) + v * np.asarray(V)))
+                out.append(Prism(poly=[], o=oc, U=U, V=V, w0=float(s0), w1=float(s1), circle=(ro, ri)))
+            else:
+                out.append(Prism(poly=[(float(a), float(b)) for a, b in pc[1]], o=o, U=U, V=V, w0=float(s0), w1=float(s1)))
+        return out
     if shape.is_round:
         return [Prism(poly=[], o=o, U=U, V=V, w0=float(s0), w1=float(s1), circle=(shape.d / 2.0, max(shape.d / 2.0 - shape.tw, 0.0)))]
     return [Prism(poly=[(x0, y0), (x1, y0), (x1, y1), (x0, y1)], o=o, U=U, V=V, w0=float(s0), w1=float(s1)) for (x0, y0, x1, y1) in shape.rects()]
@@ -82,6 +92,15 @@ def outer_extent(shape):
     """Envolvente EXTERIOR de la seccion para saber donde un miembro toca al principal: ('circle', R) o rectangulos (x0, y0, x1, y1)."""
     if shape.is_round:
         return ("circle", shape.d / 2.0)
+    if shape.kind == GEN:
+        polys = []
+        for pc in shape.pieces():
+            if pc[0] == "circle":
+                _, u, v, ro, _ri = pc
+                polys.append([(u + ro * math.cos(2 * math.pi * k / 48), v + ro * math.sin(2 * math.pi * k / 48)) for k in range(48)])
+            else:
+                polys.append(list(pc[1]))
+        return ("polys", polys)
     if shape.kind == HSS_RECT:
         return [(-shape.bf / 2.0, -shape.d / 2.0, shape.bf / 2.0, shape.d / 2.0)]
     return shape.rects()
@@ -103,6 +122,20 @@ def ray_exit(ext, o2, d2):
         s = (-b + math.sqrt(disc)) / (2.0 * a)
         return s if s > 0 else None
     best = None
+    if ext[0] == "polys":                                   # ultimo cruce del rayo con el contorno de cualquier pieza
+        for poly in ext[1]:
+            n = len(poly)
+            for i in range(n):
+                (ax_, ay_), (bx_, by_) = poly[i], poly[(i + 1) % n]
+                ex, ey = bx_ - ax_, by_ - ay_
+                den = d2[0] * ey - d2[1] * ex
+                if abs(den) < 1e-12:
+                    continue
+                t = ((ax_ - o2[0]) * ey - (ay_ - o2[1]) * ex) / den
+                u_ = ((ax_ - o2[0]) * d2[1] - (ay_ - o2[1]) * d2[0]) / den
+                if t > 1e-9 and -1e-9 <= u_ <= 1 + 1e-9 and (best is None or t > best):
+                    best = t
+        return best
     for (x0, y0, x1, y1) in ext:
         lo, hi = -1e18, 1e18
         for k, (a0, a1) in enumerate(((x0, x1), (y0, y1))):

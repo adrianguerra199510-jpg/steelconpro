@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Dialogos: seccion personalizada y biblioteca de materiales."""
+"""Dialogos: seccion personalizada (dimensiones).  La biblioteca de materiales esta en ui_materials.py y la de secciones en ui_sections.py."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -116,101 +116,4 @@ class SectionDialog(QDialog):
             QMessageBox.warning(self, "Seccion", "Complete todas las dimensiones.")
             return
         self.result_shape = make_custom(name, k, d, bf, tw, tf)
-        self.accept()
-
-
-class MaterialsDialog(QDialog):
-    """Biblioteca de materiales del usuario (acero, anclajes, concreto).
-    Se guarda en %APPDATA%/SteelConPro/materials.json."""
-
-    COLS = {"steel": ["Nombre", "Fy", "Fu"],
-            "anchor": ["Nombre", "Fy", "Fu", "Ductil (si/no)"],
-            "concrete": ["Nombre", "f'c", "λ (1 = peso normal)"]}
-    TITLES = {"steel": "Acero (placa, perfil, llave)", "anchor": "Anclajes",
-              "concrete": "Concreto"}
-
-    def __init__(self, us, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Biblioteca de materiales")
-        self.resize(640, 420)
-        self.us = us
-        data = M.user_materials()
-        lay = QVBoxLayout(self)
-        lay.addWidget(QLabel(f"Esfuerzos en {us.S}. Los materiales quedan disponibles en "
-                             "todas las listas del programa y se guardan dentro de cada "
-                             "proyecto que los use."))
-        self.tabs = QTabWidget()
-        self.tbl = {}
-        for kind in ("steel", "anchor", "concrete"):
-            w = QWidget(); vl = QVBoxLayout(w)
-            t = QTableWidget(0, len(self.COLS[kind]))
-            t.setHorizontalHeaderLabels(self.COLS[kind])
-            t.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-            for d in data.get(kind, []):
-                self._add_row(t, kind, d)
-            vl.addWidget(t)
-            hl = QHBoxLayout()
-            for txt, fn in (("Agregar", lambda _=0, k=kind: self._add_row(self.tbl[k], k)),
-                            ("Quitar", lambda _=0, k=kind: self._del_row(self.tbl[k]))):
-                b = QPushButton(txt); b.clicked.connect(fn); hl.addWidget(b)
-            hl.addStretch(1)
-            vl.addLayout(hl)
-            self.tbl[kind] = t
-            self.tabs.addTab(w, self.TITLES[kind])
-        lay.addWidget(self.tabs)
-        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self._save)
-        bb.rejected.connect(self.reject)
-        lay.addWidget(bb)
-
-    def _add_row(self, t, kind, d=None):
-        u = self.us
-        i = t.rowCount(); t.insertRow(i)
-        if d is None:
-            d = {"steel": {"name": "Acero nuevo", "Fy": 50.0, "Fu": 65.0},
-                 "anchor": {"name": "Anclaje nuevo", "Fy": 55.0, "Fu": 75.0, "ductile": True},
-                 "concrete": {"name": "Concreto nuevo", "fc": 4.0, "lam": 1.0}}[kind]
-        if kind == "steel":
-            vals = [d["name"], u.fmt("S", d["Fy"]), u.fmt("S", d["Fu"])]
-        elif kind == "anchor":
-            vals = [d["name"], u.fmt("S", d["Fy"]), u.fmt("S", d["Fu"]),
-                    "si" if d.get("ductile", True) else "no"]
-        else:
-            vals = [d["name"], u.fmt("S", d["fc"]), f"{d.get('lam', 1.0):g}"]
-        for j, v in enumerate(vals):
-            t.setItem(i, j, QTableWidgetItem(str(v)))
-
-    @staticmethod
-    def _del_row(t):
-        r = t.currentRow()
-        if r >= 0:
-            t.removeRow(r)
-
-    def _save(self):
-        u = self.us
-        out = {}
-        try:
-            for kind, t in self.tbl.items():
-                lst = []
-                for i in range(t.rowCount()):
-                    c = [t.item(i, j).text().strip() if t.item(i, j) else ""
-                         for j in range(t.columnCount())]
-                    if not c[0]:
-                        continue
-                    num = lambda x: float(x.replace(",", ""))
-                    if kind == "steel":
-                        lst.append({"name": c[0], "Fy": u.inn("S", num(c[1])),
-                                    "Fu": u.inn("S", num(c[2]))})
-                    elif kind == "anchor":
-                        lst.append({"name": c[0], "Fy": u.inn("S", num(c[1])),
-                                    "Fu": u.inn("S", num(c[2])),
-                                    "ductile": c[3].lower().startswith(("s", "y", "1"))})
-                    else:
-                        lst.append({"name": c[0], "fc": u.inn("S", num(c[1])),
-                                    "lam": num(c[2]) if c[2] else 1.0})
-                out[kind] = lst
-        except ValueError as e:
-            QMessageBox.warning(self, "Materiales", f"Revise los valores numericos: {e}")
-            return
-        M.save_user_materials(out)
         self.accept()

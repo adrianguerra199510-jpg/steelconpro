@@ -578,7 +578,7 @@ class Project:
 def _used_extras(projects):
     """Perfiles personalizados y materiales del usuario que usan las conexiones,
     para guardarlos dentro del archivo."""
-    shapes, mats = {}, {"steel": {}, "anchor": {}, "concrete": {}}
+    shapes, mats = {}, {"steel": {}, "bolt": {}, "electrode": {}, "anchor": {}, "concrete": {}}
     for p in projects:
         nodos = [p.ncol, p.nbb, p.ntr]
         labs = [p.section.label, p.lug.label] + [nd.main_shape for nd in nodos] + [m.shape for nd in nodos for m in nd.members]
@@ -590,14 +590,18 @@ def _used_extras(projects):
                 [m.steel for nd in nodos for m in nd.members] + [o.plate_steel for nd in nodos for o in nd.operations]
         for name in names:
             m = next((x for x in M.PLATE_STEELS + M.SHAPE_STEELS if x.name == name), None)
-            if m and m.note in ("usuario", "proyecto"):
-                mats["steel"][name] = {"name": m.name, "Fy": m.Fy, "Fu": m.Fu}
+            if m and M.is_extra("steel", name):
+                mats["steel"][name] = {"name": m.name, "Fy": m.Fy, "Fu": m.Fu, "E": m.E, "nu": m.nu, "rho": m.rho}
+        for g in {o.bolt_grade for nd in nodos for o in nd.operations}:
+            b = next((x for x in M.bolt_grades() if x.name == g), None)
+            if b and g not in M.BUILTIN_BOLTS:
+                mats["bolt"][g] = {"name": b.name, "Fnt": b.Fnt, "Fnv": b.Fnv}
         m = next((x for x in M.ANCHOR_STEELS if x.name == p.bolts.steel), None)
-        if m and m.note in ("usuario", "proyecto"):
+        if m and M.is_extra("anchor", m.name):
             mats["anchor"][m.name] = {"name": m.name, "Fy": m.Fy, "Fu": m.Fu,
                                       "dmax": m.dmax, "ductile": m.ductile}
         m = next((x for x in M.CONCRETES if x.name == p.conc.material), None)
-        if m and m.note in ("usuario", "proyecto"):
+        if m and M.is_extra("concrete", m.name):
             mats["concrete"][m.name] = {"name": m.name, "fc": m.fc, "lam": m.lam}
     return list(shapes.values()), {k: list(v.values()) for k, v in mats.items()}
 

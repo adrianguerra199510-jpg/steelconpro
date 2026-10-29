@@ -251,7 +251,9 @@ def draw_scene_mpl(ax, sc, max_tris=30000, sub=True):
     N = N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
     k = 0.55 + 0.45 * np.abs(N @ np.array([0.45, -0.55, 0.7]) / 1.0)
     col = np.concatenate([np.clip(C[:, :, :3].mean(axis=1) * k[:, None], 0, 1), C[:, 0, 3:4]], axis=1)
-    pc = Poly3DCollection(V, facecolors=col, edgecolors=col * 0.8, linewidths=0.1)
+    pc = Poly3DCollection(V, facecolors=col, edgecolors=col, linewidths=0.25)      # arista del mismo color: sin rendijas entre triangulos
+    pc.set_zsort("average")
+    pc.set_clip_on(False)
     ax.add_collection3d(pc)
     pts = V.reshape(-1, 3)
     lo, hi = pts.min(axis=0), pts.max(axis=0)
@@ -260,7 +262,7 @@ def draw_scene_mpl(ax, sc, max_tris=30000, sub=True):
     ax.set_zlim(lo[2], hi[2])
     ax.set_box_aspect(tuple(np.maximum(hi - lo, 1e-6)))
     for pos, text, fg, _bg, border, bold in getattr(sc, "labels", []):
-        ax.text(pos[0], pos[1], pos[2], text, color=fg, fontsize=8, weight="bold" if bold else "normal", ha="center", va="center",
+        ax.text(pos[0], pos[1], pos[2], text, color=fg, fontsize=8, weight="bold" if bold else "normal", ha="center", va="center", zorder=10,
                 bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=border or fg, alpha=0.9, lw=0.8))
     return pc
 

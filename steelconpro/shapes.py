@@ -18,7 +18,7 @@ Los perfiles importados quedan guardados en   %APPDATA%/SteelConPro/shapes.json
 y tienen prioridad sobre la tabla integrada.
 """
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 import json
 import math
@@ -26,15 +26,17 @@ import os
 
 W_SHAPE, HSS_RECT, HSS_ROUND, PIPE = "W", "HSS-R", "HSS-C", "PIPE"
 CHANNEL, ANGLE, TEE, PLATE = "C", "L", "T", "PL"
+GEN = "GEN"                 # seccion libre armada con el Section Designer (componentes: rectangulos, circulos, tubos y poligonos)
+FREE_FAMILY = "Libre"
 # tipos que se describen como rectangulos (todo salvo los redondos)
 RECT_KINDS = (W_SHAPE, HSS_RECT, CHANNEL, ANGLE, TEE, PLATE)
 # tipos que el calculo trata de forma "generica" (grupo de soldadura, sin
 # rigidizadores de ala/alma)
-GENERIC_KINDS = (CHANNEL, ANGLE, TEE, PLATE)
+GENERIC_KINDS = (CHANNEL, ANGLE, TEE, PLATE, GEN)
 KIND_LABELS = {W_SHAPE: "Perfil I (W, M, S, HP)", CHANNEL: "Canal (C, MC)",
                ANGLE: "Angulo (L)", TEE: "Te (WT, MT, ST)",
                HSS_RECT: "HSS rectangular / cuadrado", HSS_ROUND: "HSS circular",
-               PIPE: "Tuberia (Pipe)", PLATE: "Pletina / placa (PL)"}
+               PIPE: "Tuberia (Pipe)", PLATE: "Pletina / placa (PL)", GEN: "Seccion libre (Section Designer)"}
 
 
 @dataclass
@@ -56,6 +58,10 @@ class Shape:
     source: str = "integrado"
     family: str = ""
     aw: float = 0.0          # area de cortante impuesta (secciones dobles)
+    comps: list = field(default_factory=list)   # componentes de una seccion libre (ver sections.py)
+    J: float = 0.0           # constante de torsion (secciones libres)
+    ox: float = 0.0          # centroide de la seccion libre en el sistema de dibujo de sus componentes
+    oy: float = 0.0
 
     # --------------------------------------------------- geometria por rectangulos
     def rects(self):
@@ -63,6 +69,12 @@ class Shape:
         el origen, d a lo largo de Y y bf a lo largo de X.  None si es redonda."""
         d, bf, tf, tw = self.d, self.bf, self.tf, self.tw
         k = self.kind
+        if k == GEN:
+            cs = [c for c in self.comps if c.get("t") == "rect" and abs(float(c.get("rot", 0.0))) < 1e-9]
+            if len(cs) == len(self.comps) and cs:           # solo rectangulos sin girar: los mismos rectangulos, centrados en el centroide
+                return [(float(c["x"]) - float(c["w"]) / 2 - self.ox, float(c["y"]) - float(c["h"]) / 2 - self.oy,
+                         float(c["x"]) + float(c["w"]) / 2 - self.ox, float(c["y"]) + float(c["h"]) / 2 - self.oy) for c in cs]
+            return [(-bf / 2, -d / 2, bf / 2, d / 2)]        # otra forma: su caja envolvente (solo para codigo que no sabe de formas libres)
         if k == W_SHAPE:
             r = [(-bf / 2, d / 2 - tf, bf / 2, d / 2), (-bf / 2, -d / 2, bf / 2, -d / 2 + tf),
                  (-tw / 2, -d / 2 + tf, tw / 2, d / 2 - tf)]
@@ -85,6 +97,11 @@ class Shape:
             return None
         cx, cy = rect_centroid(r)
         return [(a - cx, b - cy, c - cx, e - cy) for a, b, c, e in r]
+
+    def pieces(self):
+        """Piezas del 3D de una seccion libre, centradas en el centroide: [("poly", [(u, v)...]) | ("circle", u, v, ro, ri)]."""
+        from . import sections
+        return sections.pieces(self.comps, self.ox, self.oy)
 
     @property
     def generic(self) -> bool:
@@ -198,6 +215,25 @@ def make_custom(label: str, kind: str, d: float, bf: float, tw: float, tf: float
     s.A, s.Ix, s.Iy, s.Sx, s.Sy, s.Zx, s.Zy = (pr[k] for k in
                                                ("A", "Ix", "Iy", "Sx", "Sy", "Zx", "Zy"))
     return s
+
+
+def make_general(label: str, comps: list) -> "Shape":
+    """Seccion libre a partir de sus componentes (ver sections.py): las propiedades salen de la geometria exacta."""
+    from . import sections
+    pr = sections.section_props(comps)
+    if not pr:
+        raise ValueError("la seccion no tiene componentes validos")
+    ok = [c for c in comps if not sections.valid_comp(c)]
+    per = 0.0
+    for c in ok:
+        if c["t"] in ("circ", "ring"):
+            per += math.pi * float(c["d"]) * (2 if c["t"] == "ring" else 1)
+        else:
+            P = sections.comp_outline(c)
+            per += sum(math.hypot(P[(i + 1) % len(P)][0] - P[i][0], P[(i + 1) % len(P)][1] - P[i][1]) for i in range(len(P)))
+    t = 2.0 * pr["A"] / per if per > 0 else 0.0                 # espesor equivalente de pared
+    return Shape(label, GEN, pr["H"], pr["W"], t, t, pr["A"], pr["Ix"], pr["Sx"], pr["Zx"], pr["Iy"], pr["Sy"], pr["Zy"], 0.0,
+                 "libre", FREE_FAMILY, sections.shear_area(ok), [dict(c) for c in ok], pr["J"], pr["cx"], pr["cy"])
 
 
 def _norm(label: str) -> str:
@@ -496,18 +532,28 @@ class Catalog:
         return s
 
     FAMILIES = ["W", "M", "S", "HP", "C", "MC", "L", "WT", "MT", "ST", "HSS",
-                "HSS circular", "Pipe", "Personalizado"]
+                "HSS circular", "Pipe", "Personalizado", FREE_FAMILY]
 
-    def families(self) -> list[str]:
-        have = {s.family for s in self.shapes.values()}
+    def families(self, free: bool = False) -> list[str]:
+        """Familias del catalogo; las secciones libres (Section Designer) solo se listan con free=True (la placa base no las usa)."""
+        have = {s.family for s in self.shapes.values() if free or s.kind != GEN}
         return [f for f in self.FAMILIES if f in have] + sorted(have - set(self.FAMILIES) - {""})
+
+    def add_free(self, s: Shape, replace: str = ""):
+        """Guarda una seccion libre (Section Designer); `replace` = nombre anterior si se renombro."""
+        s.source, s.family = "libre", FREE_FAMILY
+        if replace and replace != s.label and replace in self.shapes and self.shapes[replace].source != "AISC":
+            del self.shapes[replace]
+        self.shapes[s.label] = s
+        self._reindex()
+        self.save_user()
 
     def by_family(self, fam: str) -> list[str]:
         def keyf(lab: str):
             s = self.shapes[lab]
             return (round(s.d, 3), round(s.bf, 3), round(s.A, 3))
         return sorted([k for k, v in self.shapes.items() if v.family == fam],
-                      key=keyf, reverse=fam not in ("Personalizado",))
+                      key=keyf, reverse=fam not in ("Personalizado", FREE_FAMILY))
 
     def add_custom(self, s: Shape):
         s.source, s.family = "personalizado", "Personalizado"

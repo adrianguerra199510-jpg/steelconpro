@@ -1037,6 +1037,26 @@ def plot_geometry(ax, prj, show_concrete=True, title=True, loads=False):
                         if tl.tilted else ""), fontsize=9, loc="left")
 
 
+def plot_model(ax, mdl, scale: float = 1.0, tags: bool = True):
+    """Modelo 3D de un nudo (miembros, placas, angulos, pernos y soldaduras) con el visor clasico de matplotlib (el de la placa base): ejes
+    ocultos, proporciones reales, sombreado por orientacion y encuadre con `fit_to_axes`.  Las caras se subdividen para que el orden de
+    profundidad por pintor sea fiable donde las piezas se atraviesan (placas dentro de la columna, pernos en las placas)."""
+    from .conn.fem import scene as S
+    sc = S.scene_model(mdl, loads=False, scale=scale, tags=tags)
+    S.draw_scene_mpl(ax, sc)
+    P = np.asarray(sc.pts, float).reshape(-1, 3)
+    if len(P):
+        mins, maxs = P.min(axis=0), P.max(axis=0)
+        spans = np.maximum(maxs - mins, 1e-6)
+        pad = 0.03 * float(spans.max())
+        ax.set_xlim(mins[0] - pad, maxs[0] + pad)
+        ax.set_ylim(mins[1] - pad, maxs[1] + pad)
+        ax.set_zlim(mins[2] - pad, maxs[2] + pad)
+        set_aspect(ax, tuple(float(v) + 2 * pad for v in spans), pts=P)
+    ax._pb_groups = None
+    ax._pb_conc = None
+
+
 def render_result_png(res: Result3D, prj, field: str, path: str, scale: float = 0.0,
                       size=(7.0, 4.6), dpi=150):
     """Imagen de un campo de resultados 3D con la etiqueta del maximo (para el reporte).

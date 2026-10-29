@@ -392,6 +392,140 @@ def run():
         FAIL.append(f"nudos: modo por lotes: {buf.getvalue()}")
     print(f"{'memoria y lotes':34} PDF ({os.path.getsize(fp) // 1024} KB) y Word ({os.path.getsize(fd) // 1024} KB) con el desarrollo de las ecuaciones; run.py verifica y exporta")
 
+
+    # ---------------------------------------------------------------- secciones de forma libre (Section Designer): propiedades contra formulas cerradas
+    from steelconpro import sections as SEC, shapes as SH
+    r = SEC.section_props([SEC._R(0, 0, 4, 10)])
+    ok_ = abs(r["A"] - 40) < 1e-9 and abs(r["Ix"] - 4 * 1000 / 12) < 1e-6 and abs(r["Zx"] - 100) < 1e-6 and abs(r["Zy"] - 40) < 1e-6 and abs(r["Sx"] - 4 * 100 / 6) < 1e-6
+    c_ = SEC.section_props([{"t": "circ", "x": 3, "y": -2, "d": 4}])
+    ok_ &= abs(c_["A"] - 4 * math.pi) < 1e-9 and abs(c_["Zx"] - 4 ** 3 / 6) < 5e-3 and abs(c_["cx"] - 3) < 1e-9 and abs(c_["cy"] + 2) < 1e-9
+    t_ = SEC.section_props(SEC.t_tube(8, 0.5))
+    ok_ &= abs(t_["Zx"] - (8 ** 3 - 7 ** 3) / 6) < 0.01 and abs(t_["J"] - 2 * t_["Ix"]) < 1e-9
+    tr = SEC.section_props([{"t": "poly", "pts": [[0, 0], [6, 0], [0, 3]]}])
+    ok_ &= abs(tr["Ix"] - 6 * 27 / 36) < 1e-9 and abs(tr["cx"] - 2) < 1e-9 and abs(tr["cy"] - 1) < 1e-9
+    rot = SEC.section_props([SEC._R(1, 2, 2, 2, 45)])
+    ok_ &= abs(rot["Ix"] - 16 / 12) < 1e-9 and abs(rot["Ixy"]) < 1e-9
+    w = CATALOG.get("W14X90")
+    wi = SEC.section_props(SEC.t_i_shape(w.d, w.bf, w.tf, w.tw))
+    ok_ &= abs(wi["Ix"] / w.Ix - 1) < 0.03 and abs(wi["Zx"] / w.Zx - 1) < 0.03 and abs(wi["A"] / w.A - 1) < 0.03          # sin los radios de laminacion
+    ang = SEC.section_props(SEC.t_angle(6, 4, 0.5))
+    ok_ &= abs(ang["Ixy"]) > 1.0 and abs(ang["I1"] + ang["I2"] - ang["Ix"] - ang["Iy"]) < 1e-9
+    ok_ &= abs(SEC.overlap_area([SEC._R(0, 0, 4, 4), SEC._R(2, 0, 4, 4)]) - 8.0) < 0.2
+    ok_ &= bool(SEC.valid_comp({"t": "poly", "pts": [[0, 0], [1, 1], [1, 0], [0, 1]]})) and bool(SEC.valid_comp({"t": "rect", "x": 0, "y": 0, "w": 0, "h": 1}))
+    if not ok_:
+        FAIL.append(f"secciones libres: propiedades contra formulas cerradas: rect {r['A']}, {r['Ix']}, {r['Zx']}; circulo {c_['Zx']}; tubo {t_['Zx']}; I {wi['Ix']} / {w.Ix}")
+    for nm_, (spec_, _fn) in SEC.TEMPLATES.items():
+        pr_ = SEC.section_props(SEC.build_template(nm_))
+        if not pr_ or pr_["A"] <= 0 or pr_["Ix"] <= 0 or pr_["Iy"] <= 0 or SEC.overlap_area(SEC.build_template(nm_)) > 0.01 * pr_["A"]:
+            FAIL.append(f"secciones libres: la plantilla «{nm_}» no es una seccion valida sin superposiciones")
+    print(f"{'secciones libres (propiedades)':34} rectangulo, circulo, tubo, triangulo, giro 45°, perfil I contra el catalogo y {len(SEC.TEMPLATES)} plantillas: OK")
+
+    # ---------------------------------------------------------------- secciones libres dentro del nudo: 3D, rayo, verificaciones y archivo
+    old_db = SH.USER_DB
+    SH.USER_DB = type(old_db)(os.path.join(tmp, "shapes_test.json"))
+    free = {}
+    try:
+        free["LB-I"] = SH.make_general("LB-I", SEC.t_i_shape(14, 10, 0.75, 0.4, 6.0, 0.5))
+        free["LB-BOX"] = SH.make_general("LB-BOX", SEC.t_box(10, 12, 0.5, 0.5) + [{"t": "ring", "x": 0, "y": 0, "d": 4, "ti": 0.5}])
+        free["LB-L"] = SH.make_general("LB-L", SEC.t_angle(6, 4, 0.5))
+        free["LB-POLY"] = SH.make_general("LB-POLY", SEC.t_polygon(6, 8.0))
+        for sh_ in free.values():
+            CATALOG.add_free(sh_)
+        if "LB-I" in CATALOG.by_family("Personalizado") or SH.FREE_FAMILY in CATALOG.families() or SH.FREE_FAMILY not in CATALOG.families(free=True) \
+                or "LB-I" not in CATALOG.by_family(SH.FREE_FAMILY):
+            FAIL.append("secciones libres: la familia libre solo debe aparecer con free=True")
+        if not all(CATALOG.get(k).kind == SH.GEN and CATALOG.get(k).pieces() for k in free):
+            FAIL.append("secciones libres: no quedaron en el catalogo")
+        n_free = 0
+        for main_ in free:
+            for mem_ in list(free) + ["W16X31", "HSS6X6X3/8"]:
+                for mode_ in (MODE_COL, MODE_BEAM, MODE_CHORD):
+                    nd_ = PRE.build(mode_, {MODE_COL: "int2", MODE_BEAM: "sec2", MODE_CHORD: "V"}[mode_], "I")
+                    nd_.main_shape = main_
+                    for m_ in nd_.members:
+                        m_.shape = mem_
+                        nd_.loads.append(Load("U", m_.name, N=4.0, Vz=6.0, My=30.0))
+                    mm_ = AS.build_nodo(nd_)
+                    for pt_ in mm_.parts:
+                        if not np.all(np.isfinite(np.vstack([p_.corners() for p_ in pt_.prisms]))):
+                            FAIL.append(f"secciones libres: coordenadas no finitas {main_}/{mem_}/{mode_}")
+                    ct_ = {MODE_COL: CT_NODE, MODE_BEAM: CT_B2B, MODE_CHORD: CT_TRUSS}[mode_]
+                    Rr_ = solve_conn(prj_of(ct_, nd_))
+                    if any(not math.isfinite(c2_.ratio) for c2_ in Rr_.checks):
+                        FAIL.append(f"secciones libres: verificacion no finita {main_}/{mem_}/{mode_}")
+                    SC.scene_model(mm_, loads=False, tags=True)
+                    n_free += 1
+        e1 = AS.outer_extent(CATALOG.get("LB-I"))
+        sx_ = AS.ray_exit(e1, (0, 0), (1, 0))
+        if abs(sx_ - 0.2) > 1e-6:
+            FAIL.append(f"secciones libres: el rayo por el alma de LB-I debe salir en tw/2 = 0.2: {sx_}")
+        e2 = AS.outer_extent(CATALOG.get("LB-BOX"))
+        if abs(AS.ray_exit(e2, (0, 0), (1, 0)) - 5.0) > 1e-6 or abs(AS.ray_exit(e2, (0, 0), (0, 1)) - 6.0) > 1e-6:
+            FAIL.append("secciones libres: el rayo contra la caja debe salir en b/2 y h/2")
+        nf = PRE.default_nodo(MODE_COL)
+        nf.main_shape, nf.members[0].shape = "LB-BOX", "LB-I"
+        q_ = Project(); q_.ctype = CT_NODE; q_.ncol = nf
+        ff = os.path.join(tmp, "libre.scp")
+        save_book(ff, [q_])
+        for k in ("LB-I", "LB-BOX"):
+            del CATALOG.shapes[k]
+        CATALOG._reindex()
+        load_book(ff)
+        g_ = CATALOG.get("LB-BOX")
+        if g_ is None or g_.kind != SH.GEN or len(g_.comps) != 5 or abs(g_.A - free["LB-BOX"].A) > 1e-9 or not CATALOG.get("LB-I"):
+            FAIL.append("secciones libres: el proyecto debe llevar dentro las secciones libres que usa")
+        print(f"{'secciones libres en el nudo':34} {n_free} nudos con 4 secciones libres como principal y como miembros: 3D, rayo, verificaciones (NO EVALUADO donde no aplica) y archivo: OK")
+    finally:
+        for k in list(free):
+            CATALOG.shapes.pop(k, None)
+        CATALOG._reindex()
+        SH.USER_DB = old_db
+
+    # ---------------------------------------------------------------- materiales: pernos y aceros propios llegan a los calculos y al archivo
+    from steelconpro.conn import common as CM, specs as SPX
+    old_mat = M._mat_file
+    M._mat_file = lambda: type(old_db)(os.path.join(tmp, "materials_test.json"))
+    try:
+        M.save_user_materials({"steel": [{"name": "Acero T-70", "Fy": 70.0, "Fu": 90.0, "E": 29500.0, "nu": 0.29, "rho": 7850.0}],
+                               "bolt": [{"name": "A354-BD-X", "Fnt": 113.0, "Fnv": 84.0}, {"name": "A325-N", "Fnt": 1.0, "Fnv": 1.0}],
+                               "electrode": [{"name": "E75XX", "FEXX": 75.0}], "anchor": [], "concrete": []})
+        st_ = M.find(M.SHAPE_STEELS, "Acero T-70")
+        if st_.Fy != 70.0 or abs(st_.G - 29500.0 / (2 * 1.29)) > 1e-6 or not M.is_extra("steel", "Acero T-70") or M.is_extra("steel", "ASTM A36"):
+            FAIL.append("materiales: acero propio con E y ν")
+        if CM.FNV["A325-N"] != 54.0:
+            FAIL.append("materiales: no se puede sobrescribir un grado de AISC")
+        if "A354-BD-X" not in SPX.BOLT_GRADES or abs(CM.bolt_shear_rn(0.75, "A354-BD-X") - 84.0 * math.pi * 0.75 ** 2 / 4) > 1e-9:
+            FAIL.append("materiales: perno propio en las verificaciones")
+        if M.find(M.ELECTRODES, "E75XX", 0).FEXX != 75.0:
+            FAIL.append("materiales: electrodo propio")
+        nb_ = PRE.build(MODE_COL, "int1", "I", "tab")
+        nb_.operations[0].bolt_grade, nb_.members[0].steel = "A354-BD-X", "Acero T-70"
+        nb_.loads = [Load("U", "V1", Vz=40.0)]
+        qb_ = prj_of(CT_NODE, nb_)
+        cap_ = next(c2_.capacity for c2_ in solve_conn(qb_).checks if "excentricidad" in c2_.title)
+        nb_.operations[0].bolt_grade = "A325-N"
+        cap0_ = next(c2_.capacity for c2_ in solve_conn(qb_).checks if "excentricidad" in c2_.title)
+        if cap_ <= cap0_ * 1.2:
+            FAIL.append(f"materiales: el perno propio (Fnv 84) debe dar mas capacidad que A325-N (54): {cap_} / {cap0_}")
+        nb_.operations[0].bolt_grade = "A354-BD-X"
+        fm_ = os.path.join(tmp, "mats.scp")
+        save_book(fm_, [qb_])
+        emb = json.load(open(fm_, encoding="utf-8"))["materiales"]
+        if [x["name"] for x in emb["bolt"]] != ["A354-BD-X"] or [x["name"] for x in emb["steel"]] != ["Acero T-70"] or emb["steel"][0]["E"] != 29500.0:
+            FAIL.append(f"materiales: el proyecto debe llevar el perno y el acero propios que usa: {emb}")
+        print(f"{'materiales propios':34} acero con E/ν/ρ, perno (Fnt, Fnv) que cambia la capacidad {cap0_:.1f} -> {cap_:.1f} kip, electrodo, y el proyecto los lleva dentro: OK")
+    finally:
+        M._mat_file = old_mat
+        for k in M.USER_NAMES:
+            M.USER_NAMES[k] = set()
+        M.SHAPE_STEELS[:] = [x for x in M.SHAPE_STEELS if x.name != "Acero T-70"]
+        M.PLATE_STEELS[:] = [x for x in M.PLATE_STEELS if x.name != "Acero T-70"]
+        M.ELECTRODES[:] = [x for x in M.ELECTRODES if x.name != "E75XX"]
+        CM.FNT.pop("A354-BD-X", None)
+        CM.FNV.pop("A354-BD-X", None)
+        if "A354-BD-X" in SPX.BOLT_GRADES:
+            SPX.BOLT_GRADES.remove("A354-BD-X")
+
     # ---------------------------------------------------------------- exportacion de la geometria (STEP): Gmsh en un proceso aparte, sin malla ni analisis
     from steelconpro.conn.fem import driver as _drv
     sp = os.path.join(tmp, "nudo.step")
@@ -447,11 +581,11 @@ def run():
             lp._add_case()
             if not nd_.loads or {x.case for x in nd_.loads} != {"Caso 1"}:
                 FAIL.append(f"nudos UI {ct}: agregar caso de carga: {[x.case for x in nd_.loads]}")
-            lp.tbl.item(0, 7).setText("12.5")                           # Vz del primer miembro
+            lp.tbl.item(0, 4).setText("12.5")                           # Vz del primer miembro
             lp.store(win.prj)
-            if abs(nd_.loads[0].Vz - 12.5) > 1e-9:
+            if abs(nd_.loads[0].Vz - win.us.inn("F", 12.5)) > 1e-9:
                 FAIL.append(f"nudos UI {ct}: la carga editada no se guardo: {nd_.loads[0]}")
-            form.w(f"{ATTR_OF[ct]}.main_end").setCurrentIndex(1)
+            mp.w(f"{ATTR_OF[ct]}.main_end").setCurrentIndex(1)
             if nd_.end_index != 1:
                 FAIL.append(f"nudos UI {ct}: extremo del miembro principal")
             # VERIFICAR: llena la tabla, el veredicto y la memoria; cualquier cambio la deja desactualizada
@@ -464,7 +598,8 @@ def run():
                 FAIL.append(f"nudos UI {ct}: VERIFICAR no lleno la tabla / el veredicto / la memoria: '{win.lbl_verdict.text()}', {win.tbl.rowCount()} filas")
             if win.tabs_out.currentWidget() is not win.tab_res:
                 FAIL.append(f"nudos UI {ct}: VERIFICAR debe mostrar la pestaña Resultados")
-            nd_.loads[0].Vz = 99.0
+            lp.tbl.item(0, 4).setText("99")
+            lp.store(win.prj)
             win.recalc(); app.processEvents()
             if win._node_fresh() or "DESACTUALIZADO" not in win.lbl_verdict.text():
                 FAIL.append(f"nudos UI {ct}: tras editar, el resultado debe quedar DESACTUALIZADO: '{win.lbl_verdict.text()}'")
@@ -488,6 +623,81 @@ def run():
         dlg._pick_class(CT_BASEPLATE)
         if dlg.choice()["geom"] is not None:
             FAIL.append("nudos UI: la placa base no tiene geometria en el asistente")
+        # ---- biblioteca de secciones, Section Designer y biblioteca de materiales (ventanas)
+        from steelconpro.ui_sections import SectionLibrary, SectionDesigner
+        from steelconpro.ui_materials import MaterialsLibrary
+        from steelconpro import gl3d as _gl, shapes as _SH
+        old_db2, old_mat2 = _SH.USER_DB, M._mat_file
+        _SH.USER_DB = type(old_db2)(os.path.join(tmp, "shapes_ui.json"))
+        M._mat_file = lambda: type(old_db2)(os.path.join(tmp, "materials_ui.json"))
+        try:
+            if _gl.gl_wanted() or win.use_gl:
+                FAIL.append("visor: por omision debe usarse el visor clasico de matplotlib (el OpenGL es opcional)")
+            lib = SectionLibrary(win.us, None, pick=True, current="W14X90")
+            if lib.tbl.rowCount() > 500 or lib.cb_fam.currentData() != "W":
+                FAIL.append("biblioteca de secciones: debe abrir en la familia de la seccion actual")
+            lib.cb_fam.setCurrentIndex(0)
+            lib.ed_find.setText("")
+            lib._fill(select="W14X90")
+            if lib.tbl.rowCount() < 1000 or lib._rows[lib.tbl.currentRow()] != "W14X90" or lib.canvas.props.get("A", 0) <= 0:
+                FAIL.append(f"biblioteca de secciones: {lib.tbl.rowCount()} filas, seleccion {lib._rows[lib.tbl.currentRow()]}")
+            lib.ed_find.setText("HSS6X6X3/8")
+            if lib.tbl.rowCount() != 1:
+                FAIL.append(f"biblioteca de secciones: la busqueda debe dejar una fila: {lib.tbl.rowCount()}")
+            lib._use()
+            if lib.selected_label != "HSS6X6X3/8":
+                FAIL.append("biblioteca de secciones: Usar esta seccion")
+            dsg = SectionDesigner(win.us, None, CATALOG.get("W14X90"))
+            if len(dsg.comps) != 3 or abs(dsg.canvas.props["A"] - 26.1) > 0.5 or dsg.ed_name.text() != "W14X90-copia":
+                FAIL.append(f"section designer: copia de un perfil estandar: {len(dsg.comps)} componentes, A = {dsg.canvas.props.get('A')}, nombre {dsg.ed_name.text()}")
+            dsg.cb_tpl.setCurrentText("Cajón soldado"); dsg._apply_tpl()
+            n0_ = len(dsg.comps)
+            dsg._add("circ"); dsg._add("poly"); dsg._add("ring")
+            dsg._dup(); dsg._mirror(0); dsg._center()
+            if len(dsg.comps) != n0_ + 4 or not dsg.canvas.props:
+                FAIL.append(f"section designer: agregar / duplicar / espejo: {len(dsg.comps)} componentes")
+            dsg.tbl.selectRow(0)
+            dsg.fields["w"][1].setValue(20.0 / dsg.fl)                # el cambio de un campo se guarda en el componente y recalcula
+            if abs(dsg.comps[0]["w"] - 20.0) > 1e-9:
+                FAIL.append("section designer: edicion de un campo")
+            dsg.canvas.sel = 0
+            x0_ = dsg.comps[0]["x"]
+            dsg.canvas._drag = ("move", 0.0, 0.0, x0_, dsg.comps[0]["y"], copy.deepcopy(dsg.comps[0]))
+            dsg.comps[0]["x"] = x0_ + 1.0
+            dsg._canvas_moved()
+            dsg.ed_name.setText("DES-TEST")
+            dsg._ok()
+            sh_ = dsg.result_shape
+            if sh_ is None or sh_.kind != _SH.GEN or sh_.label != "DES-TEST" or sh_.A <= 0:
+                FAIL.append("section designer: guardar")
+            else:
+                CATALOG.add_free(sh_)
+                if CATALOG.get("DES-TEST") is None or "DES-TEST" not in CATALOG.by_family(_SH.FREE_FAMILY):
+                    FAIL.append("section designer: la seccion guardada debe estar en la familia libre")
+                from steelconpro.ui_nodes import SectionPicker
+                pk = SectionPicker()
+                if _SH.FREE_FAMILY not in [pk.fam.itemText(i) for i in range(pk.fam.count())]:
+                    FAIL.append("selector de seccion: debe listar la familia libre")
+                pk.set_label("DES-TEST")
+                if pk.label() != "DES-TEST":
+                    FAIL.append("selector de seccion: no encuentra la seccion libre")
+                CATALOG.remove("DES-TEST")
+            mlib = MaterialsLibrary(win.us)
+            mlib._new("bolt"); mlib._new("steel")
+            mlib.data["bolt"][0].update({"name": "UI-BOLT", "Fnt": 100.0, "Fnv": 60.0})
+            mlib.data["steel"][0].update({"name": "UI-STEEL", "Fy": 55.0, "Fu": 70.0})
+            mlib._save()
+            if M.find(M.SHAPE_STEELS, "UI-STEEL").Fy != 55.0 or "UI-BOLT" not in {b.name for b in M.bolt_grades()}:
+                FAIL.append("biblioteca de materiales: no registro los materiales nuevos")
+            mlib2 = MaterialsLibrary(win.us)
+            mlib2.data["bolt"] = []; mlib2.data["steel"] = []
+            mlib2._save()
+            if any(x.name == "UI-STEEL" for x in M.SHAPE_STEELS) or "UI-BOLT" in {b.name for b in M.bolt_grades()}:
+                FAIL.append("biblioteca de materiales: no retiro los materiales eliminados")
+        finally:
+            _SH.USER_DB, M._mat_file = old_db2, old_mat2
+            for k in M.USER_NAMES:
+                M.USER_NAMES[k] = set()
         print(f"{'interfaz (offscreen)':34} 3 modulos: miembros / operaciones / cargas, VERIFICAR llena Resultados y la memoria, resultado desactualizado al editar, "
               f"Analisis FEM desactivado, asistente con {len(dlg._cache)} miniaturas; la placa base conserva sus pestañas")
     except ImportError as e:
@@ -515,3 +725,5 @@ if __name__ == "__main__":
             print("  -", f)
         sys.exit(1)
     print("TODAS LAS PRUEBAS DE LOS NUDOS PASARON")
+    sys.stdout.flush()
+    os._exit(0)         # evita el cierre normal del interprete: con ventanas Qt creadas por las pruebas puede terminar en una falla de segmentacion

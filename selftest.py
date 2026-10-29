@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Autopruebas del motor de calculo (sin interfaz grafica)."""
-import sys, math, traceback
+import os, sys, math, traceback
 sys.path.insert(0, ".")
 for _st in (sys.stdout, sys.stderr):          # consolas de Windows (cp1252/cp850) no codifican φ, ° ni —
     try:
@@ -482,7 +482,7 @@ if "--3d" in sys.argv:
 
 
 # ====================================================================================================
-# MODULOS DE NUDO (steelconpro/conn): solo geometria y vista 3D; sus pruebas estan en selftest_nodes.py (tambien se corren solas)
+# MODULOS DE NUDO (steelconpro/conn): operaciones, verificaciones, secciones libres, materiales e interfaz; sus pruebas estan en selftest_nodes.py (tambien se corren solas)
 # ====================================================================================================
 import selftest_nodes as _sn
 FAIL += _sn.run()
@@ -496,3 +496,5 @@ if FAIL:
         print("  -", f)
     sys.exit(1)
 print("TODAS LAS PRUEBAS DEL MOTOR PASARON")
+sys.stdout.flush()
+os._exit(0)             # evita el cierre normal del interprete: con ventanas Qt creadas por las pruebas puede terminar en una falla de segmentacion

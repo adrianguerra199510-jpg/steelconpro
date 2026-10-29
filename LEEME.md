@@ -7,13 +7,14 @@ Diseño y verificación de **conexiones de acero** en cuatro módulos:
 | Módulo | Qué es | Estado |
 |---|---|---|
 | **Placa base** | placas base de columna (perfiles **W, HSS cuadrado/rectangular, HSS circular y Pipe**), anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis de elementos finitos sólido (Gmsh + CalculiX) | terminado |
-| **Nudo viga-columna** | cualquier columna, de extremo o intermedia, con vigas en cualquier ubicación y ángulo (y diagonales con cartela) | solo geometría y vista 3D |
-| **Viga a viga** | cualquier viga principal con vigas secundarias ubicadas respecto del nudo, a corte o a momento | solo geometría y vista 3D |
-| **Crucetas** | cordón (o viga) con diagonales y montantes en cualquier ángulo, con cartela | solo geometría y vista 3D |
+| **Nudo viga-columna** | cualquier columna, de extremo o intermedia, con vigas en cualquier ubicación y ángulo (y diagonales con cartela) | flujo por operaciones, verificación por código (AISC 360-22) y vista 3D; el análisis 3D por elementos finitos llega después |
+| **Viga a viga** | cualquier viga principal con vigas secundarias ubicadas respecto del nudo, a corte o a momento | ídem |
+| **Crucetas** | cordón (o viga) con diagonales y montantes en cualquier ángulo, con cartela | ídem |
 
-Los tres módulos de nudo no tienen todavía cálculo ni análisis: sus pestañas *Análisis FEM* y *Resultados* y el botón CALCULAR están desactivados, y no
-se corre nada. Con estos módulos se podrán generar todas las tipologías de conexión; las tipologías anteriores (placa de corte, doble ángulo, asiento,
-empalmes, placa extrema, cartela, HSS, RBS y puente) se retiraron.
+Los módulos de nudo se arman **por operaciones**, como en IDEA StatiCa Connection (*Miembros → Operaciones → Cargas → Análisis → Informe*), y se verifican
+**por código** con tablas de D/C por operación y memoria de cálculo, como en RAM Connection. Su pestaña *Análisis FEM* sigue desactivada hasta la etapa del análisis
+por elementos finitos. Las tipologías anteriores (placa de corte, doble ángulo, asiento, empalmes, placa extrema, cartela, HSS, RBS y puente) se retiraron como
+módulos independientes: ahora son operaciones de estos tres módulos.
 
 Normas de la placa base: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**.
 
@@ -31,31 +32,68 @@ Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestañ
 
 ## Módulos de nudo: viga-columna, viga a viga y crucetas
 
-**Nueva conexión** abre un asistente de tres pasos con miniaturas 3D, en el estilo de los programas de conexiones:
+**Nueva conexión** abre un asistente de tres pasos con miniaturas 3D:
 
 1. **Clase**: nudo viga-columna, viga a viga, crucetas o placa base.
 2. **Geometría**: la configuración inicial del nudo (columna de extremo con una viga, intermedia con dos o cuatro vigas, una o dos secundarias, V, N, cruz…) en
    perfil I, HSS rectangular o HSS circular.
-3. **Diseño**: la conexión que se asigna a todos los miembros — *momento* (placa extrema a ras o extendida; alas soldadas con alma atornillada y placas de
+3. **Diseño**: las operaciones que se crean para todos los miembros — *momento* (placa extrema a ras o extendida; alas soldadas con alma atornillada y placas de
    continuidad), *corte* (placa simple, doble ángulo, asiento), *truss* (cartela atornillada o con miembros soldados) o *en blanco*.
 
-Después todo se edita en la pestaña del módulo:
+Después el nudo se edita en cuatro pasos (pestañas dentro del módulo):
 
-- **Miembro principal** (la columna, la viga principal o el cordón): **cualquier sección del catálogo AISC** (I, canal, ángulo, te, HSS rectangular y circular, tubo,
-  y las que importe o defina), acero, giro de la sección sobre su eje, inclinación del eje (viga y cordón), y cómo termina en el nudo: *intermedio* (continúa a los
-  dos lados) o *extremo* (la columna termina en el nudo por arriba o nace en él), con el largo a cada lado.
-- **Miembros conectados**: una tabla con **Agregar, Duplicar y Quitar**; cada miembro tiene su propia sección y acero, su **azimut** (ángulo en planta, desde +X
-  hacia +Y), su **elevación** (inclinación sobre la horizontal: 0° viga, ±45° diagonal, ±90° montante), su **posición** respecto del nudo (altura sobre la columna, o
-  distancia al nudo a lo largo de la viga principal o del cordón: el nudo es el punto de aplicación de la carga), un desnivel de eje (viga y cordón), su largo, su giro
-  sobre el eje y su retranqueo. El miembro arranca donde su eje sale de la sección del principal, sea cual sea el ángulo.
-- **Conexión de cada miembro** (o la misma para todos con *Aplicar*): en blanco, placa simple, doble ángulo, asiento, placa extrema a ras o extendida, alas
-  soldadas con alma atornillada (con placas de continuidad si llega al ala de una columna I) y, para las diagonales, cartela atornillada o con el miembro soldado.
-  Parámetros: diámetro y calidad de los pernos, número y separación, espesor y acero de las placas, extensión de la placa extrema.
-  Las diagonales que comparten plano **comparten una sola cartela**.
-- **Vista**: *Modelo 3D* (gira con el ratón; con *Mostrar nombres* cada miembro lleva su nombre en el extremo) y *Planta y elevación* (esquema). *Exportar >
-  Modelo sólido 3D* escribe la geometría en **STEP**.
+1. **Miembros**: el **miembro principal** (columna, viga principal o cordón: **cualquier sección** del catálogo AISC, de la biblioteca de secciones o dibujada en el
+   Section Designer; acero, giro, inclinación del eje, extremo o intermedio y largos) y la tabla de **miembros conectados** (Agregar, Duplicar, Quitar) con su sección y
+   acero, **azimut**, **elevación**, **posición** respecto del nudo, desnivel, largo, giro y retranqueo. El miembro arranca donde su eje sale de la sección del principal.
+2. **Operaciones**: una lista ordenada que se aplica a los miembros (*Agregar operación*): **placa simple, doble ángulo, asiento, placa extrema a ras o extendida, alas
+   soldadas con alma atornillada, cartela atornillada o con miembro soldado, corte del extremo (cope) y placas de continuidad**. Cada operación tiene sus parámetros
+   (pernos: diámetro, calidad, número y separación; placas: espesor y acero; filetes; profundidades del corte). A lo sumo una operación de conexión por miembro; el 3D se
+   actualiza con cada cambio. Las diagonales que comparten plano comparten una sola cartela.
+3. **Cargas**: esfuerzos internos de cada miembro junto al nudo (N, Vy, Vz, T, My, Mz) por caso de carga, en los ejes locales del miembro; se verifican todos los casos y
+   gobierna el peor.
+4. **Análisis**: *Verificar por código* (también el botón **VERIFICAR (F8)**), *Análisis 3D por elementos finitos* (todavía no disponible) e *Informe del nudo* (PDF).
 
-Los herrajes son representaciones visuales (placas, ángulos, pernos con cabeza y tuerca) con proporciones razonables: **no están dimensionados ni verificados**.
+La pestaña **Resultados** muestra los casos de carga, la tabla de verificaciones de cada operación (demanda, capacidad, D/C y referencia AISC; para cada una se informa el
+caso que gobierna), los avisos, el veredicto y la memoria de cálculo con el desarrollo de las ecuaciones; si cambia cualquier dato aparece **DESACTUALIZADO** hasta volver a
+verificar. **Exportar** escribe la memoria en PDF o Word, y *Modelo sólido 3D* escribe la geometría en **STEP**. En modo por lotes: `python run.py archivo.scp --pdf memoria.pdf`.
+
+**Qué verifica** (AISC 360-22, motores de formulas cerradas): placa simple (pernos con excentricidad por centro instantáneo de rotación, aplastamiento, fluencia, rotura y bloque
+de cortante, flexión, soldadura, tamaño de filetes, alma de la viga), doble ángulo, asiento, placa extrema a ras o extendida (columna I por el ala), fuerza del ala en alas
+soldadas CJP, y cartelas (pernos, aplastamiento, ancho de Whitmore, bloque de cortante, fluencia y rotura del miembro, soldaduras).
+
+**Qué no verifica** (aparece como *NO EVALUADO*, hay que revisarlo aparte): reparto de fuerzas de la cartela (UFM), pandeo del miembro en compresión, flexión local del ala y
+alma de la columna (líneas de fluencia, J10), placas de continuidad, pandeo local del alma por el corte; las operaciones de placa simple, doble ángulo, asiento y placa extrema
+con miembros que no son perfiles I; el análisis de una cartela en compresión es simplificado. Los motores suponen miembros perpendiculares al soporte: en miembros esviados
+solo se usa el cortante vertical y se avisa del resto.
+
+## Biblioteca de secciones y Section Designer
+
+El menú **Secciones** abre la **biblioteca de secciones**: todas las secciones (catálogo AISC, personalizadas por dimensiones y libres), con búsqueda, familias, vista previa y
+propiedades (A, centroide, Ix, Iy, Ixy, ejes principales, Sx, Sy, Zx, Zy, rx, ry, J aproximada y peso). Desde cualquier selector de sección de los módulos de nudo, el botón **…**
+abre la misma biblioteca para elegir. Con doble clic (o *Abrir en el Section Designer*) se abre el **Section Designer**:
+
+- **Plantillas**: perfil I armado con alas distintas, I con cubreplacas, cajón soldado, canal, doble canal, te, ángulo, doble ángulo, tubo, barra maciza, cruz, polígono regular…
+- **Componentes** de cualquier forma: rectángulo (con giro), círculo, tubo y polígono; **se arrastran con el ratón** (con paso de rejilla opcional), y también se editan por campos.
+  Duplicar, quitar, espejo y centrar.
+- **Propiedades en vivo**, con aviso si hay componentes superpuestos (se contarían dos veces).
+- Un perfil estándar se abre como copia editable; la sección se guarda con otro nombre en la familia *Libre* (`shapes.json` de la carpeta de datos) y los proyectos que la usan
+  la llevan dentro.
+
+Las propiedades salen de las fórmulas exactas de polígonos y círculos y del eje neutro plástico. Las secciones libres funcionan en los módulos de nudo (3D, contacto del
+miembro y verificaciones); las verificaciones de placa simple, doble ángulo, asiento y placa extrema las marcan como *NO EVALUADO*. La placa base no las usa.
+
+## Biblioteca de materiales
+
+El menú **Materiales** abre la biblioteca, con cinco categorías: **aceros** (Fy, Fu, E, ν, ρ y G), **pernos de conexión** (Fnt y Fnv de AISC Tabla J3.2), **electrodos**,
+**varillas de anclaje** y **concretos**. Las filas grises son de la biblioteca (AISC / ASTM / ACI) y no se editan; los materiales propios se agregan, duplican, editan, eliminan,
+exportan e importan (JSON), quedan en todas las listas del programa (los pernos propios entran a las verificaciones de los nudos) y cada proyecto lleva dentro los que usa.
+
+## Visor 3D
+
+El visor por omisión es el **clásico de matplotlib** (el de PlacaBase Pro: gira con el ratón, zoom con la rueda, barra de herramientas, encuadre automático). El visor OpenGL es
+opcional: **Ver > Visor 3D OpenGL** (se aplica al reiniciar) o la variable de entorno `SCP_GL=1`. El programa **arranca maximizado**.
+
+Los herrajes del 3D son representaciones con proporciones razonables (placas, ángulos, pernos con cabeza y tuerca); las verificaciones se hacen con los datos de las operaciones.
 Los archivos de ejemplo `ejemplos/NC-01_nudo_viga_columna.scp`, `VV-01_viga_a_viga.scp` y `CR-01_crucetas.scp` se regeneran con `tools/make_examples.py`.
 
 **Archivos anteriores.** Los `.scp` que contengan conexiones de las tipologías retiradas se abren, pero esas conexiones se omiten (el programa avisa cuáles); las
@@ -346,7 +384,7 @@ Léalas antes de firmar nada con esto.
 ```
 run.py                  punto de entrada (GUI / lote / autopruebas)
 selftest.py             casos de prueba del motor (placa base); al final corre selftest_nodes.py
-selftest_nodes.py       pruebas de los módulos de nudo (solo geometría): `python selftest_nodes.py`
+selftest_nodes.py       pruebas de los módulos de nudo (operaciones, verificaciones, secciones libres, materiales, interfaz): `python selftest_nodes.py`
 tools/                  make_logo.py (logo e iconos), make_examples.py (ejemplos de los nudos)
 steelconpro/
   units.py              sistema de unidades configurable (UnitSet)
@@ -368,12 +406,16 @@ steelconpro/
   draw.py               planta, elevación y detalle del rigidizador
   report.py             PDF y DOCX
   weld3d.py             postproceso 3D: pernos, contacto y soldadura (fusionado)
-  dialogs.py            seccion personalizada y biblioteca de materiales
+  dialogs.py            sección personalizada (dimensiones)
+  sections.py           secciones libres: propiedades exactas (polígonos, círculos, plástico), plantillas
+  ui_sections.py        biblioteca de secciones y Section Designer
+  ui_materials.py       biblioteca de materiales
   data/aisc_shapes.json catalogo AISC integrado (1,660 perfiles)
   ui.py, ui_widgets.py  interfaz PySide6
-  ui_nodes.py           pestaña de entrada de los módulos de nudo (principal + tabla de miembros)
+  ui_nodes.py           pestaña de los módulos de nudo: Miembros / Operaciones / Cargas / Análisis
   ui_wizard.py          asistente Nueva conexión: Clase / Geometría / Diseño con miniaturas
-  conn/specs.py         datos de los módulos de nudo (Member, Nodo) y sus listas
+  conn/specs.py         datos de los módulos de nudo (Member, Operation, Load, Nodo) y sus listas
+  conn/checks/          verificaciones por código AISC 360-22 de cada operación (motores de fórmulas cerradas y adaptadores)
   conn/presets.py       geometrías y diseños del asistente
   conn/assembly.py      geometría 3D de los nudos: secciones, recorte contra el principal, herrajes, cartelas
   conn/nodes.py         los tres módulos vistos por la interfaz y su esquema de planta y elevación
@@ -396,9 +438,9 @@ completo por lotes.
 | `PB-01_W14X90.scp` | W14X90, 22×22×2", 8 pernos Ø1¼", llave de corte | 0.750 | distancia al borde |
 | `PB-02_HSS12_rigidizada.scp` | HSS12X12X½, 24×24×2", rigidizadores perimetrales, soldadura CJP | 0.949 | esbeltez del rigidizador |
 | `PB-03_poste_circular.scp` | Pipe/HSS16 sobre placa circular Ø30", 12 pernos Ø1½" con gancho en J | 1.000 | aplastamiento del concreto |
-| `NC-01_nudo_viga_columna.scp` | columna W14X90 intermedia con cuatro vigas (placa extrema extendida, doble ángulo, placa simple, alas soldadas) y una diagonal con cartela | — | solo geometría |
-| `VV-01_viga_a_viga.scp` | viga principal W24X55 con tres secundarias (placa extrema a ras, placa simple, doble ángulo esviada 60°) | — | solo geometría |
-| `CR-01_crucetas.scp` | cordón HSS10X10 con dos diagonales en V y un montante, cartela atornillada | — | solo geometría |
+| `NC-01_nudo_viga_columna.scp` | columna W14X90 intermedia con cuatro vigas (placa extrema extendida, doble ángulo, placa simple, alas soldadas) y una diagonal con cartela | — | verificación por código |
+| `VV-01_viga_a_viga.scp` | viga principal W24X55 con tres secundarias (placa extrema a ras, placa simple, doble ángulo esviada 60°) | — | verificación por código |
+| `CR-01_crucetas.scp` | cordón HSS10X10 con dos diagonales en V y un montante, cartela atornillada | — | verificación por código |
 
 ---
 

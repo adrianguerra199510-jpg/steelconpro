@@ -26,6 +26,14 @@ class Steel:
     Fy: float          # ksi
     Fu: float          # ksi
     note: str = ""
+    E: float = 29000.0     # modulo de elasticidad, ksi
+    nu: float = 0.30       # Poisson
+    rho: float = 7850.0    # densidad, kg/m³
+
+    @property
+    def G(self) -> float:
+        """Modulo de cortante, ksi."""
+        return self.E / (2.0 * (1.0 + self.nu))
 
 
 PLATE_STEELS = [
@@ -212,6 +220,22 @@ def find(lst, name, default_idx=0):
     return lst[default_idx]
 
 
+# ============================================================ PERNOS DE CONEXION (AISC 360-22 Tabla J3.2)
+@dataclass(frozen=True)
+class BoltGrade:
+    name: str
+    Fnt: float         # resistencia nominal a traccion, ksi
+    Fnv: float         # resistencia nominal a cortante (rosca incluida o excluida segun el nombre), ksi
+    note: str = ""
+
+
+BOLT_GRADE_NOTES = {"A325-N": "A325, rosca incluida en el plano de corte", "A325-X": "A325, rosca excluida del plano de corte",
+                    "A490-N": "A490, rosca incluida en el plano de corte", "A490-X": "A490, rosca excluida del plano de corte", "A307": "A307 (ASTM F3125 no aplica)"}
+
+
+BUILTIN_BOLTS = ("A325-N", "A325-X", "A490-N", "A490-X", "A307")
+
+
 # ====================================================== CONCRETOS Y BIBLIOTECA
 @dataclass
 class ConcreteMat:
@@ -229,13 +253,39 @@ def _mat_file():
     return data_dir("APPDATA", str(__import__("pathlib").Path.home())) / "materials.json"
 
 
+USER_NAMES = {"steel": set(), "bolt": set(), "electrode": set(), "anchor": set(), "concrete": set()}      # materiales de materials.json
+PROJECT_NAMES = {"steel": set(), "bolt": set(), "electrode": set(), "anchor": set(), "concrete": set()}   # materiales traidos por un proyecto
+
+
+def is_extra(kind: str, name: str) -> bool:
+    """True si el material no es de la biblioteca integrada (es del usuario o lo trajo un proyecto): se guarda dentro de los proyectos que lo usan."""
+    return name in USER_NAMES.get(kind, ()) or name in PROJECT_NAMES.get(kind, ())
+
+
 def _register(kind: str, d: dict, user=True):
     """Anade (o reemplaza) un material en su catalogo."""
     tag = "usuario" if user else "proyecto"
+    if d.get("name") and not (kind == "bolt" and d["name"] in BUILTIN_BOLTS):
+        (USER_NAMES if user else PROJECT_NAMES)[kind].add(d["name"])
     if kind == "steel":
-        m = Steel(d["name"], float(d["Fy"]), float(d["Fu"]), d.get("note") or tag)
+        m = Steel(d["name"], float(d["Fy"]), float(d["Fu"]), d.get("note") or tag, float(d.get("E", 29000.0)), float(d.get("nu", 0.30)),
+                  float(d.get("rho", 7850.0)))
         for lst in (PLATE_STEELS, SHAPE_STEELS):
             lst[:] = [x for x in lst if x.name != m.name] + [m]
+    elif kind == "bolt":
+        from .conn import common
+        name = d["name"]
+        if name in BUILTIN_BOLTS:
+            return
+        common.FNT[name], common.FNV[name] = float(d["Fnt"]), float(d["Fnv"])
+        BOLT_NOTES[name] = d.get("note") or tag
+        from .conn import specs as _sp
+        for lst in (_sp.BOLT_GRADES,) + ((__import__("steelconpro.conn.checks.specs", fromlist=["BOLT_GRADES"]).BOLT_GRADES,) if _checks_loaded() else ()):
+            if name not in lst:
+                lst.append(name)
+    elif kind == "electrode":
+        m = Electrode(d["name"], float(d["FEXX"]))
+        ELECTRODES[:] = [x for x in ELECTRODES if x.name != m.name] + [m]
     elif kind == "anchor":
         m = AnchorSteel(d["name"], float(d["Fy"]), float(d["Fu"]),
                         float(d.get("dmax", 4.0)), bool(d.get("ductile", True)),
@@ -247,6 +297,20 @@ def _register(kind: str, d: dict, user=True):
         CONCRETES[:] = [x for x in CONCRETES if x.name != m.name] + [m]
 
 
+BOLT_NOTES: dict = {}
+
+
+def _checks_loaded() -> bool:
+    import sys
+    return "steelconpro.conn.checks.specs" in sys.modules
+
+
+def bolt_grades() -> list:
+    """[BoltGrade] de todos los grados de pernos: los de AISC y los del usuario."""
+    from .conn import common
+    return [BoltGrade(n, common.FNT[n], common.FNV[n], BOLT_GRADE_NOTES.get(n) or BOLT_NOTES.get(n, "")) for n in common.FNT]
+
+
 def user_materials() -> dict:
     import json
     f = _mat_file()
@@ -255,7 +319,7 @@ def user_materials() -> dict:
             return json.loads(f.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {"steel": [], "anchor": [], "concrete": []}
+    return {"steel": [], "bolt": [], "electrode": [], "anchor": [], "concrete": []}
 
 
 def save_user_materials(data: dict):
@@ -278,7 +342,7 @@ def register_embedded(data: dict):
     """Materiales guardados dentro de un proyecto (para abrirlo en otra PC)."""
     for kind, lst in (data or {}).items():
         for d in lst:
-            names = {"steel": [x.name for x in PLATE_STEELS],
+            names = {"steel": [x.name for x in PLATE_STEELS], "bolt": list(BUILTIN_BOLTS), "electrode": [x.name for x in ELECTRODES],
                      "anchor": [x.name for x in ANCHOR_STEELS],
                      "concrete": [x.name for x in CONCRETES]}.get(kind, [])
             if d.get("name") not in names:

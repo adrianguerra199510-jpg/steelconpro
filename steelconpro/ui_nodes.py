@@ -41,7 +41,12 @@ class SectionPicker(QWidget):
         self.shp.setMinimumWidth(100)
         lay.addWidget(self.fam)
         lay.addWidget(self.shp, 1)
-        self.fam.addItems(CATALOG.families())
+        self.btn = QToolButton()
+        self.btn.setText("…")
+        self.btn.setToolTip("Biblioteca de secciones: buscar, ver propiedades y abrir el Section Designer (secciones de cualquier forma).")
+        self.btn.clicked.connect(self._open_library)
+        lay.addWidget(self.btn)
+        self.fam.addItems(CATALOG.families(free=True))
         self.fam.currentTextChanged.connect(self._on_family)
         self.shp.currentTextChanged.connect(self._on_shape)
         self._silent = False
@@ -65,6 +70,26 @@ class SectionPicker(QWidget):
 
     def _on_shape(self, _t):
         if not self._silent:
+            self.changed.emit()
+
+    def refresh(self):
+        """Vuelve a leer las familias y los perfiles del catalogo (despues de editar la biblioteca de secciones)."""
+        cur = self.label()
+        self._silent = True
+        self.fam.clear()
+        self.fam.addItems(CATALOG.families(free=True))
+        self._silent = False
+        self.set_label(cur)
+
+    def _open_library(self):
+        from .ui_sections import SectionLibrary
+        from .units import UnitSet
+        us = getattr(self.window(), "us", None) or UnitSet()
+        d = SectionLibrary(us, self, pick=True, current=self.label())
+        ok = d.exec()
+        self.refresh()
+        if ok and d.selected_label:
+            self.set_label(d.selected_label)
             self.changed.emit()
 
     def set_label(self, label):
@@ -363,21 +388,22 @@ OP_HELP = {OP_TAB: "Placa soldada al miembro principal y atornillada al alma del
            OP_CONT: "Placas horizontales dentro de la columna I, a la altura de las alas del miembro conectado."}
 
 
-def op_summary(o: Operation) -> str:
+def op_summary(o: Operation, us=None) -> str:
+    L = (lambda v: us.q("L", v)) if us is not None else (lambda v: f"{v:g} in")
     if o.kind in (OP_TAB, OP_DANG, OP_WELD):
-        return f"{o.n_bolts} pernos Ø{o.bolt_size} {o.bolt_grade}, e = {o.plate_t:g} in"
+        return f"{o.n_bolts} pernos Ø{o.bolt_size} {o.bolt_grade}, e = {L(o.plate_t)}"
     if o.kind == OP_SEAT:
-        return f"ángulo e = {o.plate_t:g} in, pernos Ø{o.bolt_size}"
+        return f"ángulo e = {L(o.plate_t)}, pernos Ø{o.bolt_size}"
     if o.kind in (OP_EP_FLUSH, OP_EP_EXT):
-        return f"placa e = {o.plate_t:g} in, pernos Ø{o.bolt_size} {o.bolt_grade}" + (f", extensión {o.ep_ext:g} in" if o.kind == OP_EP_EXT else "")
+        return f"placa e = {L(o.plate_t)}, pernos Ø{o.bolt_size} {o.bolt_grade}" + (f", extensión {L(o.ep_ext)}" if o.kind == OP_EP_EXT else "")
     if o.kind == OP_GUSSET:
-        return f"cartela e = {o.plate_t:g} in, {o.n_bolts} filas de pernos Ø{o.bolt_size}"
+        return f"cartela e = {L(o.plate_t)}, {o.n_bolts} filas de pernos Ø{o.bolt_size}"
     if o.kind == OP_GUSSET_W:
-        return f"cartela e = {o.plate_t:g} in, filete {o.weld_size:g} in"
+        return f"cartela e = {L(o.plate_t)}, filete {L(o.weld_size)}"
     if o.kind == OP_COPE:
-        return f"superior {o.cope_top:g} in, inferior {o.cope_bot:g} in, largo {o.cope_len:g} in"
+        return f"superior {L(o.cope_top)}, inferior {L(o.cope_bot)}, largo {L(o.cope_len)}"
     if o.kind == OP_CONT:
-        return f"placas e = {o.cont_t:g} in"
+        return f"placas e = {L(o.cont_t)}"
     return ""
 
 
@@ -488,7 +514,7 @@ class OperationsPage(Form):
         self.tbl.blockSignals(True)
         self.tbl.setRowCount(len(nd.operations))
         for i, o in enumerate(nd.operations):
-            for j, txt in enumerate((str(i + 1), o.kind, o.member, op_summary(o))):
+            for j, txt in enumerate((str(i + 1), o.kind, o.member, op_summary(o, self.us))):
                 self.tbl.setItem(i, j, QTableWidgetItem(txt))
         if nd.operations:
             self.tbl.selectRow(max(0, min(self._sel, len(nd.operations) - 1)))
@@ -653,7 +679,7 @@ class LoadsPage(Form):
         self.group("Cargas")
         self.note("Esfuerzos internos del miembro junto al nudo, en sus ejes locales: x a lo largo del miembro (desde el nudo hacia fuera; N > 0 = tracción), "
                   "z en el peralte (vertical en una viga) e y = z × x. Cada fila es un miembro en un caso de carga; los casos se verifican todos y gobierna el peor.")
-        self.tbl = _table(["Caso", "Miembro"] + [n for n, _k in LOAD_COLS], (70, 60) + (52,) * 6, (170, 280))
+        self.tbl = _table(["Caso", "Miembro"] + [n for n, _k in LOAD_COLS], (64, 64) + (60,) * 6, (170, 280))
         self.tbl.itemChanged.connect(lambda *_: self._edited())
         self._lay.addRow(self.tbl)
         _buttons(self, (("Agregar caso", self._add_case), ("Agregar fila", self._add_row), ("Quitar", self._del)))
@@ -664,7 +690,7 @@ class LoadsPage(Form):
 
     def _labels(self):
         u = self.us
-        self.tbl.setHorizontalHeaderLabels(["Caso", "Miembro"] + [f"{n} ({u.label(k)})" if u else n for n, k in LOAD_COLS])
+        self.tbl.setHorizontalHeaderLabels(["Caso", "Miembro"] + [f"{n}\n{u.label(k)}" if u else n for n, k in LOAD_COLS])
 
     def load(self, prj):
         self._prj = prj
@@ -685,7 +711,7 @@ class LoadsPage(Form):
             self.tbl.setCellWidget(i, 1, cb)
             for j, (n, k) in enumerate(LOAD_COLS):
                 v = getattr(x, n)
-                self.tbl.setItem(i, 2 + j, QTableWidgetItem(f"{(u.out(k, v) if u else v):.6g}"))
+                self.tbl.setItem(i, 2 + j, QTableWidgetItem(f"{(u.out(k, v) if u else v):.5g}"))
         self.tbl.blockSignals(False)
         self._busy = False
 
@@ -782,8 +808,9 @@ class AnalysisPage(QWidget):
                          "bloque de cortante, flexión) y soldaduras. Los resultados aparecen en la pestaña <b>Resultados</b>.")
 
     def set_state(self, text, ok):
-        col = {True: "#006100", False: "#9c0006", None: "#595959"}[ok]
-        self.lbl_state.setText(f"<span style='color:{col}'>{text}</span>")
+        bg, fg = {True: ("#c6efce", "#006100"), False: ("#ffc7ce", "#9c0006"), None: ("#e4e7eb", "#44546a")}[ok]
+        self.lbl_state.setText(text)
+        self.lbl_state.setStyleSheet(f"background:{bg}; color:{fg}; border-radius:4px; padding:4px 8px;")
 
 
 # ====================================================================================================== contenedor
@@ -806,10 +833,10 @@ class NodeForm(Form):
         self.steps = QTabWidget()
         self.steps.setDocumentMode(True)
         self.steps.setUsesScrollButtons(False)
-        from .ui_widgets import scroll
+        for pg in self.pages:
+            pg.finish(with_help=False)                       # el espacio sobrante va al final de la pagina, no entre sus grupos
         for title, pg in (("1  Miembros", self.members_pg), ("2  Operaciones", self.ops_pg), ("3  Cargas", self.loads_pg), ("4  Análisis", self.an_pg)):
-            self.steps.addTab(scroll(pg) if isinstance(pg, Form) else pg, title)
-        self.steps.setMinimumHeight(560)
+            self.steps.addTab(pg, title)
         self.outer.addWidget(self.steps)
         for pg in self.pages:
             pg.changed.connect(self._on_page_changed)
@@ -859,6 +886,24 @@ class NodeForm(Form):
         for pg in self.pages:
             pg.us = self.us
             pg.store(prj)
+
+    def refresh_materials(self):
+        """Vuelve a llenar las listas de aceros y de pernos despues de editar la biblioteca de materiales."""
+        lists = {"steel": _steel_names(), "plate_steel": _plate_names(), "bolt_grade": list(BOLT_GRADES)}
+        forms = [self.members_pg, self.members_pg.mf, self.ops_pg.of]
+        for fm in forms:
+            for path, w, typ, _uk in fm.fields:
+                key = path.split(".")[-1]
+                names = lists.get("plate_steel" if key == "plate_steel" else ("steel" if key in ("steel", "main_steel") else key))
+                if typ == "c" and names is not None:
+                    cur = w.currentText()
+                    w.blockSignals(True)
+                    w.clear()
+                    w.addItems(names)
+                    if cur and w.findText(cur) < 0:
+                        w.addItem(cur)
+                    w.setCurrentText(cur)
+                    w.blockSignals(False)
 
     def go_step(self, i):
         self.steps.setCurrentIndex(i)

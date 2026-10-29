@@ -29,7 +29,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
 from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, FIXITY, LoadCombo, REBAR
-from .dialogs import SectionDialog, MaterialsDialog
+from .dialogs import SectionDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
 from .units import parse_xy_clipboard
@@ -196,8 +196,7 @@ class MainWindow(QMainWindow):
         self.raw_cache = {}          # (id(conexion), combinacion) -> (firma, resultado crudo del 3D para dibujar)
         self.pairs = []              # [(proyecto de la combinacion, Results)] de la conexion actual
         self.res = None
-        self.node_res = None                     # verificaciones por codigo del nudo actual (modulos de nudo)
-        self.node_sig = ""                        # huella del nudo al verificar: si cambia, el resultado esta desactualizado
+        self._node_cache = {}                     # id(conexion) -> (huella, Results): verificaciones por codigo de cada nudo del libro
         self.worker = None
         self.path = None
         self._loading = False
@@ -257,6 +256,12 @@ class MainWindow(QMainWindow):
         self._ready = True
 
     # =============================================================== acciones
+    def _set_gl_viewer(self, on):
+        from PySide6.QtCore import QSettings
+        QSettings("SteelConPro", "SteelConPro").setValue("viewer_gl", bool(on))
+        QMessageBox.information(self, "Visor 3D", ("Visor OpenGL activado" if on else "Visor clasico (matplotlib) activado")
+                                + ": el cambio se aplica al reiniciar el programa.")
+
     def _build_actions(self):
         tb = QToolBar("Principal")
         tb.setMovable(False)
@@ -265,7 +270,9 @@ class MainWindow(QMainWindow):
         m_file = mb.addMenu("&Archivo")
         m_calc = mb.addMenu("&Calculo")
         m_exp = mb.addMenu("&Exportar")
+        m_sec = mb.addMenu("&Secciones")
         m_mat = mb.addMenu("&Materiales")
+        m_view = mb.addMenu("&Ver")
         m_help = mb.addMenu("A&yuda")
         self.sw_theme = ThemeSwitch(_theme_dark())
         self.sw_theme.toggled.connect(self._set_dark)
@@ -300,7 +307,14 @@ class MainWindow(QMainWindow):
         act(m_exp, "Imagenes (.png)...", self.export_png)
         m_exp.addSeparator()
         act(m_exp, "Modelo solido 3D (placa base: .geo para Gmsh; otras conexiones: .step)...", self.export_3d)
+        a_gl = QAction("Visor 3D OpenGL (experimental; el clasico es el de matplotlib)", self)
+        a_gl.setCheckable(True)
+        a_gl.setChecked(gl3d.gl_wanted())
+        a_gl.toggled.connect(self._set_gl_viewer)
+        m_view.addAction(a_gl)
         act(m_help, "Acerca de", self.about)
+        act(m_sec, "Biblioteca de secciones...", self.sections_dialog)
+        act(m_sec, "Section Designer (nueva sección libre)...", lambda: self.sections_dialog(new=True))
         act(m_mat, "Biblioteca de materiales...", self.materials_dialog)
         m_exp.addSeparator()
         act(m_exp, "Reportes PDF de TODAS las conexiones...", lambda: self.export_all("pdf"))
@@ -1166,17 +1180,37 @@ class MainWindow(QMainWindow):
             self._after_custom("W14X90")
 
     # ------------------------------------------------------------- materiales
+    def sections_dialog(self, new=False):
+        """Biblioteca de secciones (con el Section Designer).  Despues se actualizan los selectores de seccion de los modulos de nudo."""
+        from .ui_sections import SectionLibrary
+        self.store_ui()
+        d = SectionLibrary(self.us, self)
+        if new:
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, d._new)
+        d.exec()
+        for f in self.forms:
+            if hasattr(f, "members_pg"):
+                f.members_pg.main_pick.refresh()
+                f.members_pg.m_pick.refresh()
+        self.load_ui()
+        self.on_change()
+
     def materials_dialog(self):
-        d = MaterialsDialog(self.us, self)
+        from .ui_materials import MaterialsLibrary
+        d = MaterialsLibrary(self.us, self)
         if d.exec():
             self.store_ui()
             self._refresh_material_combos()
+            for f in self.forms:
+                if hasattr(f, "refresh_materials"):
+                    f.refresh_materials()
             self.load_ui()
             self.on_change()
 
     def _refresh_material_combos(self):
         lists = {"section.steel": [x.name for x in M.SHAPE_STEELS] +
-                 [x.name for x in M.PLATE_STEELS if x.note == "usuario"],
+                 [x.name for x in M.PLATE_STEELS if M.is_extra("steel", x.name)],
                  "plate.steel": [x.name for x in M.PLATE_STEELS],
                  "lug.steel": [x.name for x in M.PLATE_STEELS],
                  "stiff.steel": [x.name for x in M.PLATE_STEELS],
@@ -1663,16 +1697,32 @@ class MainWindow(QMainWindow):
         canvas.cv.draw_idle()
 
     def _draw_geom_conn(self):
-        """Modelo 3D de un modulo de nudo: miembros, placas, angulos y pernos; el nombre de cada miembro en su extremo."""
+        """Modelo 3D de un modulo de nudo: miembros, placas, angulos y pernos; el nombre de cada miembro en su extremo.  Con OpenGL activo usa el
+        visor OpenGL; por omision usa el visor clasico de matplotlib (el mismo de la placa base)."""
         from .conn.fem.builders import build_model
         u = self.us
         try:
             mdl = build_model(self.prj)
-            sc = cfem_scene.scene_model(mdl, loads=False, scale=1.0 / u.fl, tags=self.chk_loads_geom.isChecked())
             n_pl = sum(1 for p in mdl.parts if p.kind in ("plate", "angle", "gusset", "stiff"))
             self.lbl_geom.setText(f"<b>Modelo 3D — {connpkg.module_for(self.prj.ctype).TAB}</b>"
                                   + f"   —   {len(mdl.parts) - n_pl} perfiles, {n_pl} placas/ángulos, {len(mdl.bolts)} pernos"
                                   + (f"   —   <span style='color:{self.tc('#9c0006')}'>{mdl.notes[0]}</span>" if mdl.notes else ""))
+            if not self.use_gl:
+                import math as _m
+                try:                                    # conserva la orientacion de la camara
+                    elev, azim = self.cv_3d.ax.elev, self.cv_3d.ax.azim
+                    if not (_m.isfinite(elev) and _m.isfinite(azim)):
+                        elev = azim = None
+                except Exception:
+                    elev = azim = None
+                self.cv_3d.reset(cbar=False)
+                view3d.plot_model(self.cv_3d.ax, mdl, scale=1.0 / u.fl, tags=self.chk_loads_geom.isChecked())
+                if elev is not None:
+                    self.cv_3d.ax.view_init(elev=elev, azim=azim)
+                view3d.fit_to_axes(self.cv_3d.ax)
+                self.cv_3d.cv.draw_idle()
+                return
+            sc = cfem_scene.scene_model(mdl, loads=False, scale=1.0 / u.fl, tags=self.chk_loads_geom.isChecked())
         except Exception as e:
             log = self._log_error("draw_geom (conexion)", e)
             sc = self._scene_message(f"No se pudo armar el modelo 3D:\n{type(e).__name__}: {str(e)[:160]}\n\nDetalle en: {log}", "#9c0006")
@@ -2086,6 +2136,16 @@ class MainWindow(QMainWindow):
             "cortante.")
 
     # ------------------------------------------------------------ modulos de nudo: verificaciones por codigo
+    @property
+    def node_res(self):
+        """Verificaciones por codigo del nudo actual (None si no se han corrido)."""
+        return self._node_cache.get(id(self.prj), ("", None))[1]
+
+    @property
+    def node_sig(self) -> str:
+        """Huella del nudo al verificar: si cambia, el resultado esta desactualizado."""
+        return self._node_cache.get(id(self.prj), ("", None))[0]
+
     def _node_sig_now(self) -> str:
         return self._cur_mod().signature(self.prj)
 
@@ -2098,8 +2158,7 @@ class MainWindow(QMainWindow):
         self.store_ui()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self.node_res = connpkg.solve_conn(self.prj)
-            self.node_sig = self._node_sig_now()
+            self._node_cache[id(self.prj)] = (self._node_sig_now(), connpkg.solve_conn(self.prj))
         except Exception as e:
             QApplication.restoreOverrideCursor()
             log = self._log_error("run_node_checks", e)
@@ -2578,7 +2637,7 @@ def main():
         splash.show()
         app.processEvents()
     w = MainWindow()
-    w.show()
+    w.showMaximized()                         # arranca maximizado; el tamaño de la ventana restaurada es el de resize()
     if splash is not None:
         splash.finish(w)
     return app.exec()

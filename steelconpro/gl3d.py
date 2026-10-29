@@ -51,13 +51,26 @@ _AVAIL = None
 SOFTWARE = False
 
 
+def gl_wanted() -> bool:
+    """El visor OpenGL es opcional: por omision se usa el visor clasico de matplotlib (el de PlacaBase Pro).  Se activa con la casilla
+    «Ver > Visor 3D OpenGL» (se guarda en la configuracion y se aplica al reiniciar) o con la variable de entorno SCP_GL=1."""
+    if os.environ.get("SCP_GL") == "1":
+        return True
+    try:
+        from PySide6.QtCore import QSettings
+        v = QSettings("SteelConPro", "SteelConPro").value("viewer_gl", False)
+        return str(v).lower() in ("true", "1")
+    except Exception:
+        return False
+
+
 def available() -> bool:
-    """True si se puede abrir un contexto OpenGL >= 2.1 y compilar el shader (se comprueba una sola vez)."""
+    """True si se pidio el visor OpenGL y se puede abrir un contexto OpenGL >= 2.1 y compilar el shader (se comprueba una sola vez)."""
     global _AVAIL
     if _AVAIL is not None:
         return _AVAIL
     _AVAIL = False
-    if os.environ.get("SCP_NO_GL") == "1":
+    if os.environ.get("SCP_NO_GL") == "1" or not gl_wanted():
         return False
     try:
         from PySide6.QtWidgets import QApplication
