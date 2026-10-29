@@ -18,7 +18,9 @@ from .. import materials as M
 from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN
 from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, unit
-from .specs import (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
+from . import ops as OPS
+from .ops import member_faces, FaceFrame
+from .specs import (OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
                     OP_COPE, OP_CONT, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
 
 EMBED = 0.35            # las placas entran un poco en el miembro principal para que no quede una rendija en las uniones esviadas
@@ -644,6 +646,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
         if o.member not in names and not (o.kind == OP_BASE and o.member == nd.main_name):
             mdl.notes.append(f"Operación «{o.kind}»: el miembro «{o.member}» no existe.")
     ctxs = []
+    reg = {}                                            # elementos con caras para las operaciones generales: nombre -> {type, faces, part, t, Fy, Fu}
+    reg[nd.main_name] = {"type": "miembro", "part": nd.main_name, "t": mshape.tw, "Fy": Fy, "Fu": Fu,
+                         "faces": member_faces(mshape, A * (-lneg), A * lpos, A, msx, msy)}
     free_ends, frames = {}, {}                          # nombre -> (inicio, fin, direccion) y nombre -> marco de la seccion, para la placa base
     axes = []                                           # (nombre, inicio, fin, punto sobre el eje principal, posicion) de cada miembro conectado, para las cotas
     for i, m in enumerate(nd.members):
@@ -690,11 +695,15 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
                     mdl.notes.append(f"{m.name}: las placas de continuidad solo se dibujan en una columna I a la que llega el miembro por la cara del ala.")
                 mdl.parts += pl
         Fy_m, Fu_m = _steel(m.steel)
-        cope = next((o for o in ops if o.kind == OP_COPE), None)
+        cope = next((o for o in nd.operations if o.kind in (OP_COPE, OP_CUT) and (o.member == m.name or m.name in (o.targets or []))), None)
         if cope is not None and shp.kind == W_SHAPE and (cope.cope_top > 0 or cope.cope_bot > 0):
             if 0 < cope.cope_top < shp.tf or 0 < cope.cope_bot < shp.tf:
                 mdl.notes.append(f"{m.name}: el corte es menos profundo que el espesor del ala ({shp.tf:g} in): el ala no queda eliminada.")
-            prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0), cope.cope_top, cope.cope_bot, cope.cope_len)
+            if cope.kind == OP_CUT and cope.cut_at == "Fin":                  # corte en el extremo libre: se recorta el miembro visto desde su otro extremo
+                end_pt = Q + dirv * (ms + max(m.L, 1.0))
+                prisms = cope_prisms(shp, end_pt, sx, -sy, -dirv, 0.0, max(m.L, 1.0), cope.cope_bot, cope.cope_top, cope.cope_len)
+            else:
+                prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0), cope.cope_top, cope.cope_bot, cope.cope_len)
         else:
             if cope is not None and shp.kind != W_SHAPE:
                 mdl.notes.append(f"{m.name}: el corte solo se dibuja en perfiles I.")
@@ -708,6 +717,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
         mdl.tags.append((tuple(map(float, end)), m.name))
         axes.append((m.name, Q + dirv * ms, end, P0, float(m.pos)))
         free_ends[m.name], frames[m.name] = (Q + dirv * ms, end, dirv), (dirv, sx, sy)
+        reg[m.name] = {"type": "miembro", "part": m.name, "t": shp.tw, "Fy": Fy_m, "Fu": Fu_m, "faces": member_faces(shp, Q + dirv * ms, end, dirv, sx, sy)}
         ctxs.append(c)
     _build_gussets(ctxs, nd, mdl)
     bop = nd.base_op()
@@ -718,7 +728,18 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
             mdl.notes.append(f"Placa base: el miembro «{bop.member}» no existe o no tiene extremo libre de ese lado.")
         else:
             E, A_in, bsx, bsy = place
-            mdl.extra += BP.plate_faces(BP.derive(prj, nd), E, A_in, bsx, bsy)
+            bpd = BP.derive(prj, nd)
+            mdl.extra += BP.plate_faces(bpd, E, A_in, bsx, bsy)
+            Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
+            tpb = float(bpd.plate.tp)
+            Bw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.B)
+            Nw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.N)
+            Fy_b, Fu_b = _steel(bpd.plate.steel, True)
+            reg["Placa base"] = {"type": "placa base", "part": "Placa base", "t": tpb, "Fy": Fy_b, "Fu": Fu_b, "faces": {
+                "Cara superior": FaceFrame(Ob + Fb @ np.array([0.0, 0.0, tpb]) - Fb[:, 0] * Bw / 2.0, Fb[:, 0], Fb[:, 2], Bw, Nw / 2.0, tpb),
+                "Cara inferior": FaceFrame(Ob - Fb[:, 0] * Bw / 2.0, Fb[:, 0], -Fb[:, 2], Bw, Nw / 2.0, tpb)}}
+    mdl.generic = OPS.build_generic(mdl, nd, reg, hw)
+    mdl.elems = reg
     _node_dims(mdl, A * (-lneg), A * lpos, axes)
     return mdl
 

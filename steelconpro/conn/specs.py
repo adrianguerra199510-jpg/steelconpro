@@ -50,14 +50,29 @@ OP_GUSSET_W = "Cartela con miembro soldado (diagonal)"
 OP_COPE = "Corte del extremo (cope)"
 OP_CONT = "Placas de continuidad"
 OP_BASE = "Placa base (apoyo sobre concreto)"
-OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE]
+# operaciones generales: eligen los elementos sobre los que actuan (miembros y placas creadas por otras operaciones) y pueden depender unas de otras
+OP_PLATE = "Placa (refuerzo, cartela o rigidizador)"
+OP_BOLTS = "Pernos entre elementos"
+OP_FILLET = "Soldadura de filete entre elementos"
+OP_CUT = "Corte de elementos"
+OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT]
+GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT)
 # grupos del menu "Agregar operacion" (como la cinta de IDEA)
 OP_GROUPS = [("Conexión de corte", [OP_TAB, OP_DANG, OP_SEAT]),
              ("Conexión de momento", [OP_EP_FLUSH, OP_EP_EXT, OP_WELD]),
              ("Conexión de diagonal", [OP_GUSSET, OP_GUSSET_W]),
-             ("Modificar el miembro", [OP_COPE]),
+             ("Placas, pernos y soldaduras", [OP_PLATE, OP_BOLTS, OP_FILLET]),
+             ("Modificar elementos", [OP_COPE, OP_CUT]),
              ("Rigidizar el miembro principal", [OP_CONT]),
              ("Apoyo del miembro", [OP_BASE])]
+PLATE_ROLES = ["Refuerzo", "Cartela", "Rigidizador"]
+PLATE_ORIENTS = ["Paralela a la cara", "Perpendicular, transversal", "Perpendicular, longitudinal"]
+PLATE_SHAPES = ["Rectangular", "Triangular", "Con esquina recortada"]
+ATTACHES = ["Soldada", "Atornillada"]
+FACES_I = ["Ala superior", "Ala inferior", "Alma +", "Alma −"]
+FACES_BOX = ["Cara +X", "Cara −X", "Cara +Y", "Cara −Y"]
+FACES_PLATE = ["Cara +", "Cara −"]
+FACE_LABELS = {"I": FACES_I, "box": FACES_BOX, "plate": FACES_PLATE}
 CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
 MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD)
 SHEAR_OPS = (OP_TAB, OP_DANG, OP_SEAT)
@@ -116,10 +131,36 @@ class Operation:
     # ---- placa base: extremo del miembro principal donde va (−1 = lado −, +1 = lado +); en un miembro conectado va en su extremo libre.
     #      Sus datos (placa, anclajes, llave, rigidizadores, soldadura, concreto, cargas) estan en los bloques de la conexion (ver conn/baseplate.py)
     end: int = -1
+    # ---- operaciones generales (placa, pernos, soldadura, corte): elementos sobre los que actuan y parametros
+    name: str = ""               # nombre del elemento que crea (placa) o rotulo de la operacion
+    parent: str = ""             # elemento al que se une / de cuya cara depende (miembro o placa de otra operacion)
+    face: str = ""               # cara del elemento padre (ver FACE_LABELS)
+    targets: list = field(default_factory=list)      # otros elementos que toca: pernos (capas que atraviesan), soldadura (placas que une), corte (miembros que corta)
+    role: str = PLATE_ROLES[0]
+    orient: str = PLATE_ORIENTS[0]
+    shape: str = PLATE_SHAPES[0]
+    attach: str = ATTACHES[0]
+    pl_L: float = 8.0            # largo de la placa (a lo largo del miembro, o ancho transversal si es perpendicular), in
+    pl_W: float = 6.0            # ancho de la placa (a lo ancho de la cara) o altura sobre la cara (perpendicular), in
+    pl_s: float = 12.0           # posicion del centro de la placa a lo largo del elemento padre desde su inicio, in
+    pl_u: float = 0.0            # desplazamiento transversal del centro respecto del centro de la cara, in
+    pl_rot: float = 0.0          # giro de la placa en el plano de la cara, grados
+    pl_clip: float = 1.0         # lado del recorte de la esquina (forma recortada), in
+    weld_all: bool = True        # soldadura en todo el contorno (si no, solo los lados largos)
+    rows: int = 2                # pernos en la direccion del elemento padre
+    cols: int = 2                # pernos en la direccion transversal
+    bolt_g: float = 3.0          # separacion transversal de los pernos, in
+    cut_at: str = "Inicio"       # extremo donde se corta: Inicio | Fin
+    force_V: float = 0.0         # fuerza cortante de diseño de la operacion (kip), opcional
+    force_T: float = 0.0         # fuerza de traccion de diseño de la operacion (kip), opcional
 
     @property
     def is_connection(self) -> bool:
         return self.kind in CONNECTION_OPS
+
+    @property
+    def makes_element(self) -> bool:
+        return self.kind == OP_PLATE
 
 
 @dataclass
@@ -201,6 +242,20 @@ class Nodo:
         """La operacion de conexion (a lo sumo una) del miembro, o None."""
         return next((o for o in self.operations if o.member == name and o.is_connection), None)
 
+    def element_names(self) -> list:
+        """Nombres de todos los elementos: miembros (el principal primero) y placas creadas por operaciones, en el orden de las operaciones."""
+        return self.names() + [o.name for o in self.operations if o.makes_element and o.name]
+
+    def dependents(self, name: str) -> list:
+        """Indices de las operaciones que dependen del elemento `name` (lo usan como padre, objetivo o miembro)."""
+        out = []
+        for i, o in enumerate(self.operations):
+            if o.makes_element and o.name == name:
+                continue
+            if o.parent == name or name in (o.targets or []) or (o.member == name and o.kind != OP_BASE and o.kind in GENERIC_OPS):
+                out.append(i)
+        return out
+
     def base_op(self):
         """La operacion de placa base (a lo sumo una por conexion) o None."""
         return next((o for o in self.operations if o.kind == OP_BASE), None)
@@ -210,6 +265,9 @@ class Nodo:
         for o in self.operations:
             if o.member == old:
                 o.member = new
+            if o.parent == old:
+                o.parent = new
+            o.targets = [new if x == old else x for x in (o.targets or [])]
         for x in self.loads:
             if x.member == old:
                 x.member = new
@@ -219,6 +277,9 @@ class Nodo:
         for o in self.operations:
             if o.member == old:
                 o.member = new
+            if o.parent == old:
+                o.parent = new
+            o.targets = [new if x == old else x for x in (o.targets or [])]
         for x in self.loads:
             if x.member == old:
                 x.member = new

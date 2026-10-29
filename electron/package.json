@@ -1,0 +1,49 @@
+{
+  "name": "steelconpro",
+  "productName": "SteelConPro",
+  "version": "1.1.0",
+  "description": "SteelConPro: diseño de conexiones de acero por operaciones (AISC 360-22, ACI 318)",
+  "main": "main.js",
+  "author": "SteelConPro",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/smoke.js",
+    "dist": "electron-builder --win portable --publish never"
+  },
+  "devDependencies": {
+    "electron": "^41.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.steelconpro.app",
+    "productName": "SteelConPro",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/engine",
+        "to": "engine"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "SteelConPro-${version}-portable.exe"
+    }
+  }
+}

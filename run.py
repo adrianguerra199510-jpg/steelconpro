@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Punto de entrada de SteelConPro.
 
-    SteelConPro.exe                       -> interfaz grafica
+    SteelConPro.exe --serve [--port N]    -> motor local de la aplicacion Electron (HTTP en 127.0.0.1)
     SteelConPro.exe --selftest            -> autopruebas del motor (sin interfaz)
     SteelConPro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
     SteelConPro.exe --meshm a.json b.npz  -> (interno) malla del modelo 3D de una conexion
@@ -154,6 +154,9 @@ def main():
     if args and args[0] == "--meshm":
         from steelconpro.conn.fem.mesher import child
         return child(args[1], args[2])
+    if args and args[0] == "--serve":                  # motor para la aplicacion Electron
+        from steelconpro.server import main as serve_main
+        return serve_main(args[1:])
     if args and args[0] == "--selftest":
         import runpy
         st = os.path.join(BUNDLE, "selftest.py")
@@ -162,8 +165,11 @@ def main():
         return 0
     if args and not args[0].startswith("-"):
         return batch(args)
-    from steelconpro.ui import main as gui
-    return gui()
+    if args and args[0] == "--qt":                     # interfaz anterior (Qt), en retiro
+        from steelconpro.ui import main as gui
+        return gui()
+    sys.stderr.write("SteelConPro: la interfaz es la aplicacion Electron; este programa es su motor (use --serve) o calcula por lotes: run.py proyecto.scp --pdf memoria.pdf\n")
+    return 1
 
 
 if __name__ == "__main__":

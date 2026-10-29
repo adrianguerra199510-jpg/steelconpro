@@ -137,16 +137,19 @@ def add_checks(prj, nd: Nodo, R, rec, fem_map=None):
             best = (Ri, i, cb.name)
     Rb, ib, cname = best
     multi = len(rows) > 1
+    oi = next((k for k, x in enumerate(nd.operations) if x is op), 0)
     for c in Rb.checks:
-        R.checks.append(Check(f"bp_{c.key}", f"[Placa base — {name}] {c.title}" + (f"  ({cname})" if multi and not c.skip else ""), c.demand, c.capacity, c.unit,
-                              c.ref, c.note, c.skip, c.steps))
+        c2 = Check(f"bp_{c.key}", f"[Placa base — {name}] {c.title}" + (f"  ({cname})" if multi and not c.skip else ""), c.demand, c.capacity, c.unit,
+                   c.ref, c.note, c.skip, c.steps)
+        c2.group = f"{oi + 1}. {op.kind} — {name}"
+        R.checks.append(c2)
     for w in Rb.warnings:
         if w.startswith("REALIZAR ANALISIS 3D"):                    # el aviso del motor remite a F8 de la placa base; aqui lo da la nota de abajo
             continue
         R.warnings.append(("** " if w.startswith("**") else "") + "Placa base: " + w.lstrip("* ").strip())
     if Rb.fem is None:
         R.warnings.append("Placa base: verificada con el calculo cerrado (DG1 + ACI 318); el analisis 3D por elementos finitos de la placa base se corre aparte "
-                          "(paso 4, Analisis).")
+                          "(pestana Elementos finitos).")
     if Rb.rec is not None and rec is not None:
         rec.section(f"OPERACION: PLACA BASE — {name}  (combinación {cname})")
         rec.sections.extend(Rb.rec.sections)

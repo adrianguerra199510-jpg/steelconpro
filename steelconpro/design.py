@@ -26,6 +26,7 @@ class Check:
     note: str = ""
     skip: bool = False
     steps: list = field(default_factory=list)
+    group: str = ""              # operacion a la que pertenece la verificacion (nudos): «n. operacion — elemento»
 
     KINDS = {"in": "L", "in²": "A", "kip": "F", "ksi": "S", "kip·in": "M",
              "kip/in": "LF", "-": "-", "": "-"}

@@ -267,6 +267,8 @@ class Model3D:
     dims: list = field(default_factory=list)      # cotas para el visor: (a, b, desplazamiento, texto, vistas)
     tags: list = field(default_factory=list)      # etiquetas de miembros para el visor: (punto, texto)
     extra: list = field(default_factory=list)     # piezas ya hechas de caras en el mundo (placa base): (etiqueta, caras, color, alfa)
+    generic: list = field(default_factory=list)   # entradas de las operaciones generales (placas, pernos, soldaduras) para sus verificaciones
+    elems: dict = field(default_factory=dict)     # elementos con caras (miembros, placas, placa base): nombre -> datos
 
     def part(self, name):
         return next((p for p in self.parts if p.name == name), None)

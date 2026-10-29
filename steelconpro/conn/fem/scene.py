@@ -46,7 +46,7 @@ def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label
                 tags: bool = False, dim_fmt=None):
     """Escena de la geometria. `scale` convierte las coordenadas (in) a las unidades mostradas.  gray: todas las piezas en gris (miniaturas de
     geometria); bolts: dibujar los pernos; tags: nombre de cada miembro en su extremo."""
-    from .. .gl3d import Scene
+    from ...scene3d import Scene
     sc = Scene()
     pts = []
     for p in mdl.parts:
@@ -166,7 +166,7 @@ def part_choices(R):
 
 def scene_fem(R, prj, field="vm", scale=0.0, part="all", loads=False, bolts=True):
     """Escena (gl3d.Scene) del campo de resultados sobre la piel del solido; `scale` amplifica los desplazamientos."""
-    from ...gl3d import Scene
+    from ...scene3d import Scene
     from ...view3d import _soft_cmap
     sc = Scene()
     u = prj.units()

@@ -151,6 +151,14 @@ def _units_prj(prj):
     return SimpleNamespace(units=lambda: prj.units())
 
 
+def _grp(nd, op, label) -> str:
+    """Rotulo del grupo de resultados de una operacion: «n. operacion — miembro»."""
+    try:
+        return f"{next(i for i, x in enumerate(nd.operations) if x is op) + 1}. {label}"
+    except StopIteration:
+        return label
+
+
 def run(prj, nd: Nodo, fem_map=None):
     """Verifica todas las operaciones de conexion con todos los casos de carga.  Devuelve un `solver.Results` (D/C por verificacion)."""
     from ...solver import Results
@@ -189,7 +197,9 @@ def run(prj, nd: Nodo, fem_map=None):
     memo = {}
     for ii, it in enumerate(items):
         if it.engine is None:
-            R.checks.append(Check(f"na_{ii}", f"{it.label} — NO EVALUADO", 0.0, 1.0, "-", "", " ".join(it.notes), skip=True))
+            c3 = Check(f"na_{ii}", f"{it.label} — NO EVALUADO", 0.0, 1.0, "-", "", " ".join(it.notes), skip=True)
+            c3.group = _grp(nd, it.op, it.label)
+            R.checks.append(c3)
             continue
         keys = [k for k in best if k[0] == ii]
         gov_case = max((best[k] for k in keys if not best[k][2].skip), key=lambda t: t[0], default=None)
@@ -202,18 +212,26 @@ def run(prj, nd: Nodo, fem_map=None):
             ratio, cn, c = best[k]
             c2 = Check(f"op{ii}_{c.key}", f"[{ii + 1}. {it.m.name}] {c.title}" + (f"  ({cn})" if multi and not c.skip else ""), c.demand, c.capacity, c.unit,
                        c.ref, c.note, c.skip, c.steps)
+            c2.group = _grp(nd, it.op, it.label)
             R.checks.append(c2)
         rec.section(f"OPERACION {ii + 1}: {it.op.kind.upper()} — {it.m.name}  (caso {cname})")
         _solve(prj, nd, it, vals, rec)
         for w in _solve_warnings(it):
             R.warnings.append(f"{it.m.name}: {w}")
-    for o in nd.operations:
+    for oi, o in enumerate(nd.operations):
         if o.kind == OP_CONT:
-            R.checks.append(Check(f"cont_{o.member}", f"[Placas de continuidad — {o.member}] Verificación de la placa de continuidad — NO EVALUADO", 0.0, 1.0, "-",
-                                  "AISC 360-22 J10", "Flexión local del ala, fluencia y aplastamiento del alma de la columna: verifíquelo aparte.", skip=True))
+            c4 = Check(f"cont_{o.member}", f"[Placas de continuidad — {o.member}] Verificación de la placa de continuidad — NO EVALUADO", 0.0, 1.0, "-",
+                       "AISC 360-22 J10", "Flexión local del ala, fluencia y aplastamiento del alma de la columna: verifíquelo aparte.", skip=True)
+            c4.group = f"{oi + 1}. {o.kind} — {o.member}"
+            R.checks.append(c4)
         if o.kind == OP_COPE:
-            R.checks.append(Check(f"cope_{o.member}", f"[Corte (cope) — {o.member}] Pandeo local del alma por el corte — NO EVALUADO", 0.0, 1.0, "-", "AISC Manual Parte 9",
-                                  "Las verificaciones de la conexión sí consideran el corte (sección del alma, bloque de cortante).", skip=True))
+            c5 = Check(f"cope_{o.member}", f"[Corte (cope) — {o.member}] Pandeo local del alma por el corte — NO EVALUADO", 0.0, 1.0, "-", "AISC Manual Parte 9",
+                       "Las verificaciones de la conexión sí consideran el corte (sección del alma, bloque de cortante).", skip=True)
+            c5.group = f"{oi + 1}. {o.kind} — {o.member}"
+            R.checks.append(c5)
+    from .. import ops as GOPS
+    from ..assembly import build_model
+    GOPS.add_checks(prj, nd, R, rec, build_model(prj))
     from .. import baseplate
     baseplate.add_checks(prj, nd, R, rec, fem_map)
     R.rec = rec
