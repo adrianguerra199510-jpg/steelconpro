@@ -551,9 +551,25 @@ def _safe(root: Path, rel: str) -> Path:
     return p
 
 
+def _examples_dir():
+    import sys
+    for base in (Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "_MEIPASS", "") else None, Path(__file__).resolve().parent.parent):
+        if base is not None and (base / "ejemplos").is_dir():
+            return base / "ejemplos"
+    return None
+
+
 def ws_default(_=None) -> dict:
+    """Carpeta de trabajo por omision (Documentos/SteelConPro; SCP_WORKSPACE la cambia).  La primera vez se llena con los proyectos de ejemplo."""
     root = Path(os.environ.get("SCP_WORKSPACE") or Path.home() / "Documents" / "SteelConPro")
+    first = not root.exists()
     root.mkdir(parents=True, exist_ok=True)
+    ex = _examples_dir()
+    if first and ex is not None:
+        dst = root / "Ejemplos"
+        dst.mkdir(exist_ok=True)
+        for f in sorted(ex.glob("*.scp")):
+            shutil.copy2(str(f), str(dst / f.name))
     return {"root": str(root)}
 
 

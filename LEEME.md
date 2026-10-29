@@ -2,164 +2,119 @@
 
 # SteelConPro 1.1
 
-Diseño y verificación de **conexiones de acero** con **un solo tipo de conexión**, que se arma por operaciones:
+Diseño y verificación de **conexiones de acero** con **un solo tipo de conexión**, que se arma por operaciones. Es una **aplicación de escritorio Electron** (interfaz web local) que usa
+el motor de cálculo en Python como servicio local; el visor 3D es three.js.
 
 | Elemento | Qué es |
 |---|---|
 | **Miembros** | cualquier número (columnas, vigas, diagonales; cualquier sección y ángulo); **uno es el principal, que usted designa** (el que recibe a los demás, como el miembro de apoyo de IDEA StatiCa) |
-| **Operaciones** | placa simple, doble ángulo, asiento, placa extrema, alas soldadas, cartelas, corte del extremo, placas de continuidad y **placa base** (anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis 3D por elementos finitos sólido con Gmsh + CalculiX), sobre cualquier miembro |
+| **Operaciones** | las de conexión (placa simple, doble ángulo, asiento, placa extrema, alas soldadas, cartelas), **placa** (refuerzo soldado o atornillado, cartela o rigidizador, sobre la cara de un miembro, de la placa base o de **otra placa**), **pernos**, **soldadura de filete**, **corte de elementos**, corte del extremo, placas de continuidad y **placa base** (anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis 3D por elementos finitos sólido con Gmsh + CalculiX) |
 | **Cargas y análisis** | esfuerzos por miembro y caso de carga (y las combinaciones de la placa base), verificación por código (AISC 360-22, AISC DG1, ACI 318), vista 3D, memoria de cálculo; análisis FEM 3D de la placa base |
 
-**No hay un módulo de placa base aparte.** Una placa base es una operación más: se crea una conexión, se agregan los miembros (o solo el principal), y a la columna se le asigna la operación *Placa base*.
-Los archivos y plantillas de placa base de las versiones anteriores abren como una conexión de nudo con esa operación (mismos resultados).
-
-No hay «tipologías» de nudo (viga-columna, viga a viga, crucetas): el tipo de nudo lo define lo que usted arma. El nudo se arma **por operaciones**, como en IDEA StatiCa Connection (*Miembros → Operaciones → Cargas → Análisis → Informe*), y se verifican
-**por código** con tablas de D/C por operación y memoria de cálculo, como en RAM Connection. La pestaña *Análisis FEM* es el análisis de elementos finitos sólido de la **placa base** (solo se activa si la conexión la lleva; el resto de las operaciones se verifica por código,
-sin FEM por ahora). Las tipologías anteriores (placa de corte, doble ángulo, asiento, empalmes, placa extrema, cartela, HSS, RBS y puente) se retiraron como
-módulos independientes: ahora son operaciones de la conexión de nudo.
+**No hay un módulo de placa base aparte** ni «tipologías» de nudo: se crea una conexión, se le agregan miembros y las operaciones que se necesiten, y el tipo de nudo lo define lo que usted arma.
+Los archivos y plantillas de placa base de las versiones anteriores abren como una conexión con la operación *Placa base* (mismos resultados).
 
 Normas: **AISC 360-22**, **AISC 358/341** donde aplique; placa base: **AISC Design Guide 1 (2ª Ed.)** y **ACI 318-19 Cap. 17**.
 
-> **Cambio de nombre (1.1).** El programa antes tenía otro nombre y otra numeración de versiones; la de SteelConPro empieza en 1.1. Los proyectos se guardan ahora como `.scp`; los archivos `.pbase` y el formato de libro de las
-> versiones anteriores se siguen abriendo (al guardar quedan como `.scp`), y los materiales y perfiles importados de la carpeta de datos anterior se copian solos a la
-> carpeta `SteelConPro` la primera vez que se abre el programa.
+> **Cambio de nombre (1.1).** El programa antes tenía otro nombre y otra numeración de versiones; la de SteelConPro empieza en 1.1. Los proyectos se guardan como `.scp`; los archivos `.pbase` y el
+> formato de libro de las versiones anteriores se siguen abriendo (al guardar quedan como `.scp`).
 
-**Unidades configurables**: longitud en in / ft / mm / cm / m, fuerza en kip / lbf /
-kN / N / tonf / kgf, momento y esfuerzo por separado. Se aplican a las entradas, a la
-tabla de resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi,
-que son las unidades nativas de AISC v14 y de los pernos en pulgadas.
+**Unidades configurables**: longitud en in / ft / mm / cm / m, fuerza en kip / lbf / kN / N / tonf / kgf, momento y esfuerzo por separado, para cada proyecto (clic en el título del proyecto).
+Se aplican a las entradas, a los resultados y a los reportes. El cálculo interno siempre corre en in-kip-ksi. Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (o en el conjunto que se elija al crearlos).
 
-Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestaña Proyecto; los archivos guardados conservan sus unidades).
+## Pantalla de inicio (proyectos)
 
+Como el panel de proyectos de Terrastruct: los proyectos son archivos `.scp` en una **carpeta de trabajo** (por omisión `Documentos\SteelConPro`; se cambia abajo a la izquierda) y se organizan en **carpetas**
+(anidadas), con **favoritos**, **recientes**, búsqueda, orden (más recientes, nombre) y vista en tarjetas con **miniatura 3D** o en lista. Desde cada tarjeta se abre, renombra, duplica, mueve a una carpeta,
+marca como favorito, muestra en el explorador o elimina. *Nuevo proyecto* pide nombre, carpeta y unidades y abre una conexión en blanco; *Abrir archivo* importa un `.scp` o `.pbase` a la carpeta de trabajo.
+La primera vez, la carpeta `Ejemplos` trae los proyectos de ejemplo. También están aquí las bibliotecas de **secciones** (con Section Designer), **materiales** y **plantillas**.
 
-## Conexión de nudo y miembro principal
+## Editor
 
-**Nueva conexión** (botón *Nueva*, `Ctrl+Mayús+N`) elige el módulo y el punto de partida. **No hay plantillas predefinidas**: la conexión nueva empieza **en blanco**
-(solo el miembro principal; usted agrega los miembros, las operaciones y las cargas) o desde una **plantilla propia**.
+Barra superior: volver al inicio, nombre del proyecto y **pestañas de conexiones** (un proyecto puede tener varias; clic derecho para renombrar, duplicar o eliminar), deshacer / rehacer (`Ctrl+Z` / `Ctrl+Y`),
+bibliotecas, informe (PDF, Word, STEP) y **Calcular**. El proyecto se guarda solo (y con `Ctrl+S`). A la izquierda el **árbol**: *Miembros* (★ = principal), *Operaciones* (con la barra de D/C de cada una; las que dependen de una placa
+cuelgan de ella) y *Cargas*. Al centro el **visor 3D** (Iso / Planta / Frontal / Lateral, ajustar, cotas, etiquetas, mostrar herrajes, guardar imagen); clic en una pieza la selecciona en el árbol. A la derecha, **Resultados**, **Memoria** y,
+si hay placa base, **FEM**.
 
-**Plantillas propias.** Con la conexión terminada, el botón **Plantilla** (o *Archivo > Guardar la conexión como plantilla*) la guarda con un nombre, una descripción y, en los
-nudos, con o sin las cargas. Después aparece en *Nueva conexión*, con vista previa en 3D, y se puede **renombrar o eliminar** desde ahí. Sirve para cualquier módulo
-(con placa base o sin ella). Cada plantilla es un archivo `.json` en `%APPDATA%\SteelConPro\plantillas` con la conexión completa y las secciones y materiales propios que usa; se puede
-copiar a otra PC. Guardar con el mismo nombre la reemplaza.
+**Cada operación se edita en su propia ventana.** Al elegir *Agregar operación* se crea la operación con valores típicos y se **abre su ventana**; los cambios se ven en vivo en el 3D y en los resultados, *Cancelar* los revierte y
+*Agregar* / *Aceptar* los conserva. Doble clic en una operación del árbol la vuelve a abrir.
 
-Después la conexión se edita en cuatro pasos (pestañas dentro de *Conexión de nudo*):
+- **Placa**: función (*Refuerzo*, *Cartela* o *Rigidizador*), **elemento al que se une** (un miembro, la placa base u otra placa creada antes) y **cara**; orientación (paralela a la cara o perpendicular, transversal o
+  longitudinal), forma (rectangular, triangular o con esquina recortada), largo, ancho, posición y giro, espesor y acero; **unión soldada** (cateto y contorno) o **atornillada** (diámetro, calidad, filas, columnas y separaciones).
+  Una placa nueva es un elemento al que otras operaciones pueden unirse: *una placa que rigidiza otra placa* es una placa cuyo elemento padre es la primera. Al borrar una placa se borran en cascada las que dependen de ella (se avisa antes).
+- **Pernos**: elemento y cara de partida, **elementos que atraviesan** (se marcan en la lista), diámetro, calidad, filas, columnas, separaciones y posición.
+- **Soldadura de filete**: se marcan **qué placas se sueldan** (cordón de filete adicional entre cada placa y la cara a la que está unida).
+- **Corte de elementos / corte del extremo**: se marcan **los miembros que se cortan**, el extremo, las profundidades superior e inferior y el largo del corte.
+- **Placa base**: miembro y extremo, y todos sus datos en pestañas (*Cargas*, *Orientación*, *Placa*, *Pernos*, *Llave de corte*, *Rigidizadores*, *Soldadura*, *Concreto*, *Elementos finitos*). El perfil es el del miembro que la lleva.
 
-1. **Miembros**: la tabla lista **todos los miembros del nudo**; el **principal lleva ★** en la primera fila. Al seleccionar una fila se edita ese miembro (*Agregar*,
-   *Duplicar*, *Quitar*), con **cualquier sección** del catálogo AISC, de la biblioteca de secciones o dibujada en el Section Designer.
-   - **Miembro principal**: nombre, sección, acero, **azimut y elevación de su eje** (90° = vertical, como una columna; 0° = horizontal, como una viga o un cordón; cualquier
-     valor intermedio = inclinado), giro, extremo (*continuo* o *termina en el nudo* por el lado + o −) y largos de cada lado.
-   - **Miembros conectados**: sección y acero, **azimut**, **elevación**, **posición** sobre el eje del principal (medida desde el nudo), desplazamiento lateral en los dos
-     sentidos de la sección del principal, largo, giro y retranqueo. El miembro arranca donde su eje sale de la sección del principal.
-   - **★ Designar como principal**: con un miembro conectado seleccionado, ese miembro pasa a ser el principal (sección, acero, eje y giro) y el principal anterior queda como
-     miembro conectado (como dos miembros si pasaba por el nudo). **La geometría del nudo no se mueve**: el origen se traslada al punto donde el miembro llegaba y los demás
-     miembros conservan su posición (si ya no tocan al nuevo principal, quedan con un retranqueo). Las operaciones y las cargas del miembro designado se descartan, porque eran su
-     conexión al principal anterior; el programa lo avisa antes de hacerlo y hay que definirlas de nuevo en los miembros que ahora llegan al principal.
-2. **Operaciones**: una lista ordenada que se aplica a los miembros (*Agregar operación*): **placa simple, doble ángulo, asiento, placa extrema a ras o extendida, alas
-   soldadas con alma atornillada, cartela atornillada o con miembro soldado, corte del extremo (cope), placas de continuidad y placa base**. Cada operación tiene sus parámetros
-   (pernos: diámetro, calidad, número y separación; placas: espesor y acero; filetes; profundidades del corte). A lo sumo una operación de conexión por miembro; el 3D se
-   actualiza con cada cambio. Las diagonales que comparten plano comparten una sola cartela.
-   **Placa base**: va en el extremo libre de un miembro, el principal (lado − o +) o uno conectado, y solo hay una por conexión. Al agregarla aparece la pestaña **Placa base** con
-   sus datos de siempre (*Cargas* con las combinaciones, *Perfil* —giro y descentrado de la columna sobre la placa, inclinación—, *Placa*, *Pernos*, *Llave de corte*,
-   *Rigidizadores*, *Soldadura*, *Concreto* y *Elementos finitos*). El perfil es el del miembro que la lleva. La placa queda perpendicular al eje del miembro (la inclinación de la
-   columna respecto de la placa se indica en *Perfil*). Si se designa otro miembro como principal, la placa sigue en el mismo extremo libre.
-3. **Cargas**: esfuerzos internos de cada miembro junto al nudo (N, Vy, Vz, T, My, Mz) por caso de carga, en los ejes locales del miembro; se verifican todos los casos y
-   gobierna el peor.
-4. **Análisis**: *Verificar por código* (también el botón **VERIFICAR (F8)**), *Análisis 3D por elementos finitos* (todavía no disponible) e *Informe del nudo* (PDF).
+Las operaciones generales (placa, pernos, soldadura) se verifican con las **fuerzas de diseño que usted escriba en la operación** (cortante y tracción): placa (fluencia y rotura en tracción, fluencia por cortante, esbeltez del rigidizador),
+pernos (separación, distancia al borde, cortante, tracción, aplastamiento y desgarramiento por capa) y soldadura (cateto mínimo y máximo, resistencia). Con las fuerzas en cero solo se comprueban las condiciones geométricas.
 
-La pestaña **Resultados** muestra los casos de carga, la tabla de verificaciones de cada operación (demanda, capacidad, D/C y referencia AISC; para cada una se informa el
-caso que gobierna), los avisos, el veredicto y la memoria de cálculo con el desarrollo de las ecuaciones; si cambia cualquier dato aparece **DESACTUALIZADO** hasta volver a
-verificar. **Exportar** escribe la memoria en PDF o Word, y *Modelo sólido 3D* escribe la geometría en **STEP**. En modo por lotes: `python run.py archivo.scp --pdf memoria.pdf`.
+### Resultados por operación
 
-**Qué verifica** (AISC 360-22, motores de formulas cerradas): placa simple (pernos con excentricidad por centro instantáneo de rotación, aplastamiento, fluencia, rotura y bloque
+La pestaña **Resultados** agrupa las verificaciones **por operación** (`n. operación — elemento`), cada grupo con su barra de D/C (verde < 0.80, ámbar hasta 1.00, rojo arriba); los grupos que no cumplen se abren solos,
+y al elegir una operación en el árbol se lleva al grupo correspondiente. Arriba, el veredicto y las tarjetas de D/C máximo, qué gobierna y número de verificaciones; si cambia cualquier dato aparece *Desactualizado* hasta que termina el recálculo.
+La pestaña **Memoria** trae el desarrollo de las ecuaciones. En modo por lotes: `python run.py archivo.scp --pdf memoria.pdf`.
+
+**Qué verifica** (AISC 360-22, motores de fórmulas cerradas): placa simple (pernos con excentricidad por centro instantáneo de rotación, aplastamiento, fluencia, rotura y bloque
 de cortante, flexión, soldadura, tamaño de filetes, alma de la viga), doble ángulo, asiento, placa extrema a ras o extendida (columna I por el ala), fuerza del ala en alas
-soldadas CJP, y cartelas (pernos, aplastamiento, ancho de Whitmore, bloque de cortante, fluencia y rotura del miembro, soldaduras).
+soldadas CJP, cartelas (pernos, aplastamiento, ancho de Whitmore, bloque de cortante, fluencia y rotura del miembro, soldaduras) y placa base completa (DG1 + ACI 318-19 + FEM opcional).
 
-**Qué no verifica** (aparece como *NO EVALUADO*, hay que revisarlo aparte): reparto de fuerzas de la cartela (UFM), pandeo del miembro en compresión, flexión local del ala y
-alma de la columna (líneas de fluencia, J10), placas de continuidad, pandeo local del alma por el corte; las operaciones de placa simple, doble ángulo, asiento y placa extrema
-con miembros que no son perfiles I; el análisis de una cartela en compresión es simplificado. Los motores suponen miembros perpendiculares al soporte: en miembros esviados
-solo se usa el cortante vertical y se avisa del resto.
-
-## Interfaz
-
-Hoja de estilo común refinada (pestañas con acento, grupos con filete, tablas con filas alternas, barras de desplazamiento finas, botones y menús redondeados) en los dos temas.
-En los nudos: las **operaciones** llevan un icono de color por grupo (corte, momento, diagonal, modificar el miembro, rigidizar); el paso **Análisis** muestra una lista de
-preparación (miembros, operaciones, cargas: lo que está listo, lo que falta y los avisos) y desactiva *Verificar* si falta algo; la pestaña **Resultados** abre con tarjetas de
-resumen (veredicto, D/C máximo, qué gobierna, verificaciones y NO EVALUADAS) y una tabla **agrupada por operación** con barras de D/C (verde < 0.80, ámbar hasta 1.00, rojo arriba)
-y un filtro (todas / críticas / no cumplen / no evaluadas); clic en una fila lleva a su cálculo en la memoria.
+**Qué no verifica** (aparece como *NO EVALUADO*, hay que revisarlo aparte): reparto de fuerzas de la cartela (UFM), pandeo del miembro en compresión, flexión local del ala y alma de la columna (J10), placas de continuidad,
+pandeo local del alma por el corte; las operaciones de conexión con miembros que no son perfiles I; el análisis de una cartela en compresión es simplificado. **Las operaciones generales usan las fuerzas que usted escribe: el programa
+no las obtiene de un análisis de la conexión (no hay CBFEM).** El análisis FEM sólido existe solo para la placa base. No hay operación de *huecos* (agujeros libres): los de los pernos se consideran en sus verificaciones, pero no se dibujan en las placas.
+La soldadura entre elementos une placas con la cara a la que están unidas; no une dos miembros cualesquiera.
 
 ## Biblioteca de secciones y Section Designer
 
-El menú **Secciones** abre la **biblioteca de secciones**: todas las secciones (catálogo AISC, personalizadas por dimensiones y libres), con búsqueda, familias, vista previa y
-propiedades (A, centroide, Ix, Iy, Ixy, ejes principales, Sx, Sy, Zx, Zy, rx, ry, J aproximada y peso). Desde cualquier selector de sección de los módulos de nudo, el botón **…**
-abre la misma biblioteca para elegir. Con doble clic (o *Abrir en el Section Designer*) se abre el **Section Designer**:
+*Bibliotecas > Secciones* (o desde la pantalla de inicio) lista todas las secciones: catálogo AISC (1 660 perfiles), personalizadas y libres, con búsqueda por familia y propiedades. *Nueva sección* abre el **Section Designer**:
 
 - **Plantillas**: perfil I armado con alas distintas, I con cubreplacas, cajón soldado, canal, doble canal, te, ángulo, doble ángulo, tubo, barra maciza, cruz, polígono regular…
-- **Componentes** de cualquier forma: rectángulo (con giro), círculo, tubo y polígono; **se arrastran con el ratón** (con paso de rejilla opcional), y también se editan por campos.
-  Duplicar, quitar, espejo y centrar.
-- **Propiedades en vivo**, con aviso si hay componentes superpuestos (se contarían dos veces).
-- Un perfil estándar se abre como copia editable; la sección se guarda con otro nombre en la familia *Libre* (`shapes.json` de la carpeta de datos) y los proyectos que la usan
-  la llevan dentro.
-
-Las propiedades salen de las fórmulas exactas de polígonos y círculos y del eje neutro plástico. Las secciones libres funcionan en los módulos de nudo (3D, contacto del
-miembro y verificaciones); las verificaciones de placa simple, doble ángulo, asiento y placa extrema las marcan como *NO EVALUADO*. La placa base no las usa.
+- **Componentes** de cualquier forma: rectángulo (con giro), círculo, tubo y polígono (vértices pegables desde Excel); se editan por campos y se ven en el dibujo (clic para seleccionar). Duplicar y quitar.
+- **Propiedades en vivo** (A, anchos, Ix, Iy, J, Sx, Sy, Zx, Zy, rx, ry y peso), con aviso si hay componentes superpuestos (se contarían dos veces).
+- Un perfil estándar se abre como copia editable; la sección se guarda en la familia *Libre* y los proyectos que la usan la llevan dentro.
 
 ## Biblioteca de materiales
 
-El menú **Materiales** abre la biblioteca, con cinco categorías: **aceros** (Fy, Fu, E, ν, ρ y G), **pernos de conexión** (Fnt y Fnv de AISC Tabla J3.2), **electrodos**,
-**varillas de anclaje** y **concretos**. Las filas grises son de la biblioteca (AISC / ASTM / ACI) y no se editan; los materiales propios se agregan, duplican, editan, eliminan,
-exportan e importan (JSON), quedan en todas las listas del programa (los pernos propios entran a las verificaciones de los nudos) y cada proyecto lleva dentro los que usa.
+*Bibliotecas > Materiales*: **aceros**, **pernos de conexión** (Fnt y Fnv de AISC Tabla J3.2), **electrodos**, **varillas de anclaje** y **concretos**. Los de la biblioteca (AISC / ASTM / ACI) no se editan; los propios se agregan,
+quedan en todas las listas y cada proyecto lleva dentro los que usa.
+
+## Plantillas
+
+*Bibliotecas > Plantillas de conexión*: guarda la conexión actual (miembros, operaciones y, si se quiere, cargas) con un nombre y la aplica a otra conexión (se puede deshacer). Cada plantilla es un `.json` en la carpeta de datos con las secciones y materiales propios que usa.
 
 ## Visor 3D
 
-Toda conexión usa el **visor OpenGL de la última versión de PlacaBase Pro** (un solo visor con Iso, Planta, Frontal y Lateral y el interruptor **Cotas**: en los nudos
-acota los largos del miembro principal y de cada miembro conectado y su posición; con OpenGL no hay pestaña «Planta y elevación») (`gl3d.py`: sombreado plano con aristas vivas, órbita con el ratón,
-etiquetas) cuando el equipo ofrece OpenGL; si no, usan el visor clásico de matplotlib. Se puede forzar el clásico con **Ver > Visor 3D OpenGL** (desmarcar; se aplica al reiniciar)
-o con la variable de entorno `SCP_GL=0`. El programa **arranca maximizado**.
-
+El visor usa three.js (WebGL) con sombreado plano de dos caras y aristas vivas, órbita con el ratón, etiquetas HTML y cotas en las unidades del proyecto. El programa arranca maximizado; hay tema claro y oscuro (abajo a la izquierda en la pantalla de inicio).
 Los herrajes del 3D son representaciones con proporciones razonables (placas, ángulos, pernos con cabeza y tuerca); las verificaciones se hacen con los datos de las operaciones.
-Los archivos de ejemplo `ejemplos/CN-01_columna_con_vigas.scp`, `CN-02_viga_con_secundarias.scp` y `CN-03_cordon_con_diagonales.scp` son proyectos normales (no plantillas); se regeneran con `tools/make_examples.py`, que usa los nudos de prueba de `tools/node_presets.py`.
+Los archivos `ejemplos/CN-01…CN-04.scp` son proyectos normales; se regeneran con `tools/make_examples.py`, que usa los nudos de prueba de `tools/node_presets.py`.
 
-**Archivos anteriores.** Los `.scp` con nudos de la versión con tipologías (*Nudo viga-columna*, *Viga a viga*, *Crucetas*) y las plantillas que se guardaron con ellas se abren como
-conexión de nudo: el principal queda orientado como estaba (vertical en el nudo viga-columna, horizontal en los otros dos), con la misma geometría y los mismos resultados. Los
-`.scp` con conexiones de las tipologías retiradas antes (placa de corte, doble ángulo, asiento...) se abren, pero esas conexiones se omiten (el programa avisa cuáles); las placas
-base se abren igual que siempre.
-
-**Para modificar o ampliar un módulo**: los datos están en `conn/specs.py` (`Member`, `Nodo`), el nudo en blanco y el miembro nuevo en `conn/presets.py`, la geometría
-3D (secciones, recorte de cada miembro contra el principal, herrajes, cartelas) en `conn/assembly.py` y la pestaña de entrada en `ui_nodes.py`; el asistente es
-`ui_wizard.py`. `selftest_nodes.py` prueba la geometría con valores calculados a mano, 225 nudos de ejemplo de `tools/node_presets.py` y 300 nudos al azar.
+**Archivos anteriores.** Los `.scp` con nudos de la versión con tipologías y las plantillas que se guardaron con ellas se abren como conexión de nudo con la misma geometría y los mismos resultados. Los `.scp` con conexiones de las
+tipologías retiradas antes (placa de corte, doble ángulo, asiento...) se abren, pero esas conexiones se omiten (se avisa cuáles); las placas base se abren como conexión con la operación de placa base.
 
 ---
 
 ## 1. Usar y compartir
 
-**Si recibio `SteelConPro_portable.zip`:** descomprimalo donde quiera y abra
-`SteelConPro\SteelConPro.exe`. No hay que instalar nada: Gmsh va dentro del
-programa y CalculiX en `solvers\calculix`. No separe el `.exe` de su carpeta.
+**Si recibió `SteelConPro-1.1.0-portable.exe`:** ábralo (un solo archivo, no hay que instalar nada): lleva dentro Electron, el motor con Gmsh y CalculiX. La primera vez tarda unos segundos en desempaquetarse.
 
-**Para compilarlo desde este codigo fuente (Windows):**
+**Para compilarlo desde este código fuente (Windows):** instale **Python 3.11+** y **Node.js 20+** y haga doble clic en **`build_portable.bat`**: crea un entorno virtual, instala las dependencias, corre las autopruebas,
+compila el motor con PyInstaller (`dist\engine`), copia `solvers\` y arma con electron-builder `electron\dist\SteelConPro-1.1.0-portable.exe`. El flujo de GitHub Actions (`.github/workflows/build-windows.yml`) hace lo mismo
+y deja el `.exe` como artefacto.
 
-1. Tenga **Python 3.10 o superior** instalado.
-2. Doble clic en **`build_portable.bat`**.
+**Para probarlo sin compilar:** `ejecutar_sin_compilar.bat` (o, en cualquier sistema, `cd electron && npm install && npm start`; el motor se lanza con `python run.py --serve`; `SCP_PYTHON` elige otro intérprete).
 
-El script crea un entorno virtual, instala las dependencias (incluida la libreria
-de Gmsh), corre las autopruebas, compila, copia `solvers\` y deja:
-
-- `dist\SteelConPro\SteelConPro.exe` — el programa listo para usar.
-- `SteelConPro_portable.zip` — la misma carpeta comprimida, para compartir.
-
-`ejecutar_sin_compilar.bat` corre la aplicacion directamente con Python, util
-mientras se prueba.
+**Pruebas:** `python selftest.py` (motor, operaciones, API y servidor) y, con el motor y Playwright, `cd electron && node tests/smoke.js` (abre la aplicación real, el proyecto de ejemplo, el visor y la ventana de una operación).
 
 ### Uso por línea de comandos
 
 ```
-SteelConPro.exe                                      interfaz gráfica
-SteelConPro.exe --selftest                           autopruebas del motor
-SteelConPro.exe PB-01.scp --pdf m.pdf --docx m.docx --inp m.inp
+SteelConPro-engine.exe --serve [--port N] [--token T]   servidor local del motor (lo lanza la aplicación)
+SteelConPro-engine.exe --selftest                       autopruebas del motor
+SteelConPro-engine.exe PB-01.scp --pdf m.pdf --docx m.docx --inp m.inp
 ```
 
-En modo lote devuelve código de salida 0 si cumple y 2 si no cumple, así que se
-puede encadenar en un script para verificar muchas placas de golpe.
+En modo lote devuelve código de salida 0 si cumple y 2 si no cumple, así que se puede encadenar en un script para verificar muchas conexiones de golpe.
 
 ---
 
@@ -259,7 +214,7 @@ tamaño, electrodo y si va a uno o ambos lados.
 
 ### 2.7 Elementos finitos
 
-Pestaña **Elementos finitos** (opciones) y pestaña **Modelo 3D** (analisis y resultados). El programa tiene
+Las opciones están en la pestaña *Elementos finitos* de la operación *Placa base*; el análisis se corre y se ve en la pestaña **FEM** del panel derecho del editor. El programa tiene
 un solo analisis de elementos finitos: el **modelo SOLIDO 3D**, dentro del programa (boton *Ejecutar
 analisis 3D* o `Cálculo > Análisis SÓLIDO 3D`, F8). Escribe un `.geo` con kernel OpenCASCADE que construye
 
@@ -287,7 +242,7 @@ como filas `fem_*` y a la memoria (secciones 6 y 7, con la placa aislada en plan
 
 Junto al `.geo` se deja tambien **`correr_3d.py`** por si prefiere lanzarlo fuera de la aplicacion, y todos
 los archivos quedan en la carpeta del proyecto, listos para abrir en PrePoMax o CGX. Gmsh y CalculiX vienen
-incluidos; indique otras rutas en la pestaña Elementos finitos si quiere.
+incluidos; indique otras rutas en la pestaña *Elementos finitos* de la operación si quiere.
 
 Una advertencia de lectura: los picos de von Mises PUNTUALES en aristas vivas — borde del agujero,
 encuentro perfil-placa — son **singularidades de malla**: crecen al refinar y no deben interpretarse como
@@ -342,7 +297,7 @@ y descuento de la fricción placa-mortero del cortante en pernos.
 
 ## 3.bis  Memoria detallada (el "modo CalcPad")
 
-La pestaña **Memoria detallada** muestra el cálculo completo paso a paso. Cada línea
+La pestaña **Memoria** muestra el cálculo completo paso a paso. Cada línea
 tiene cuatro partes:
 
 ```
@@ -356,8 +311,7 @@ de la tabla de verificaciones no pueden divergir. Todo sale en las unidades de
 trabajo del proyecto, y las verificaciones aparecen marcadas con su D/C en verde o
 rojo dentro de la sección que les corresponde.
 
-Se incluye como anexo en los tres reportes (se puede desactivar con la casilla de la
-pestaña) y hay un botón para copiarla al portapapeles.
+Se incluye como anexo en los reportes (PDF y Word).
 
 ## 4. Salidas
 
@@ -407,49 +361,35 @@ Léalas antes de firmar nada con esto.
 ## 6. Estructura del código
 
 ```
-run.py                  punto de entrada (GUI / lote / autopruebas)
-selftest.py             casos de prueba del motor (placa base); al final corre selftest_nodes.py
-selftest_nodes.py       pruebas de los módulos de nudo (operaciones, verificaciones, secciones libres, materiales, interfaz): `python selftest_nodes.py`
-tools/                  make_logo.py (logo e iconos), make_examples.py (ejemplos de los nudos)
+run.py                  punto de entrada del motor (--serve / lote / autopruebas)
+selftest.py             casos de prueba del motor (placa base); al final corre selftest_nodes.py y selftest_ops.py
+selftest_nodes.py       pruebas de los nudos (operaciones, verificaciones, secciones libres, materiales, plantillas)
+selftest_ops.py         pruebas de las operaciones generales, la API JSON, el espacio de trabajo y el servidor local
+tools/                  make_logo.py (logo e iconos), make_examples.py (ejemplos), node_presets.py (nudos de prueba)
+electron/
+  main.js, preload.js   proceso principal (arranca el motor, ventana, diálogos de archivo) y puente seguro
+  renderer/             interfaz: index.html, css/app.css, js/ (home, editor, opdialog, bpform, libraries, viewer…), vendor/ (three.js)
+  tests/smoke.js        prueba de humo con la aplicación real (Playwright)
 steelconpro/
-  units.py              sistema de unidades configurable (UnitSet)
-  materials.py          aceros, varillas, electrodos, geometría de pernos
-  shapes.py             catálogo AISC integrado + importador de la base oficial
-  model.py              dataclasses del proyecto, serialización .scp
-  geometry.py           contornos, rotación, disposición de pernos, llave,
-                        rigidizadores, detección de interferencias
-  design.py             aplastamiento, espesor, soldadura, llave, rigidizadores
-  anchors.py            ACI 318-19 Cap. 17 y AISC J3
-  params3d.py           brazo del cortante, modulo de balasto y rigidez del perno del modelo 3D
-  fem_checks.py         verificaciones FEM a partir del 3D (Fem3D, fem_bolt/press/vm/weld)
-  mesh3d.py             modelo sólido 3D: .geo de Gmsh, .inp de CalculiX y pipeline
-  view3d.py             lectura del .frd, dibujo 3D y von Mises promediado
-  plan3d.py             placa aislada en planta (mapas de la memoria)
-  rep3d.py              empaqueta el resultado 3D (Fem3D, imagenes) para el veredicto
-  weldfe.py             soldadura como conectores entre cuerpos separados
-  explain.py            registro de ecuaciones para la memoria detallada
-  draw.py               planta, elevación y detalle del rigidizador
-  report.py             PDF y DOCX
-  weld3d.py             postproceso 3D: pernos, contacto y soldadura (fusionado)
-  dialogs.py            sección personalizada (dimensiones)
-  sections.py           secciones libres: propiedades exactas (polígonos, círculos, plástico), plantillas
-  ui_sections.py        biblioteca de secciones y Section Designer
-  ui_materials.py       biblioteca de materiales
-  data/aisc_shapes.json catalogo AISC integrado (1,660 perfiles)
-  ui.py, ui_widgets.py  interfaz PySide6
-  ui_nodes.py           pestaña de los módulos de nudo: Miembros / Operaciones / Cargas / Análisis
-  ui_wizard.py          asistente Nueva conexión (en blanco o desde plantilla) y guardado de plantillas
-  templates.py          plantillas del usuario (guardar, listar, cargar, renombrar, eliminar)
-  conn/specs.py         datos de los módulos de nudo (Member, Operation, Load, Nodo) y sus listas
+  api.py                funciones que expone el motor a la interfaz (libros, operaciones, malla 3D, verificación, FEM, informes, espacio de trabajo)
+  server.py             servidor HTTP local (127.0.0.1, con token) que despacha api.py
+  scene3d.py            escenas 3D (mallas por pieza) que el visor three.js dibuja
+  units.py, materials.py, shapes.py, model.py, geometry.py, design.py, anchors.py   núcleo de la placa base (DG1, ACI 318)
+  mesh3d.py, weldfe.py, weld3d.py, fem_checks.py, view3d.py, rep3d.py, params3d.py  modelo sólido 3D (Gmsh + CalculiX) y su postproceso
+  explain.py, draw.py, report.py   memoria detallada, dibujos, PDF y DOCX
+  sections.py           secciones libres: propiedades exactas (polígonos, círculos, plástico), plantillas del Section Designer
+  templates.py          plantillas del usuario
+  conn/specs.py         datos del nudo (Member, Operation, Load, Nodo) y listas de operaciones
+  conn/ops.py           operaciones generales: placa, pernos, soldadura, corte (geometría, dependencias, verificaciones)
+  conn/assembly.py      geometría 3D del nudo: secciones, recorte contra el principal, herrajes, cartelas
+  conn/baseplate.py     la placa base como operación (proyecto derivado para el motor DG1/ACI/FEM)
   conn/checks/          verificaciones por código AISC 360-22 de cada operación (motores de fórmulas cerradas y adaptadores)
-  conn/presets.py       nudo en blanco de cada módulo y miembro nuevo
-  conn/assembly.py      geometría 3D de los nudos: secciones, recorte contra el principal, herrajes, cartelas
-  conn/nodes.py         los tres módulos vistos por la interfaz y su esquema de planta y elevación
-  conn/fem/             modelo 3D y escena (visor y miniaturas); malla, CalculiX y resultados quedan sin uso hasta reactivar el análisis
-ejemplos/               tres placas base resueltas y un ejemplo de cada módulo de nudo
+  conn/fem/             modelo 3D y escena (miniaturas); malla, CalculiX y resultados
+  data/                 catálogo AISC (1,660 perfiles), esquema de los datos de la placa base, logotipos e iconos
+ejemplos/               tres placas base resueltas y cuatro conexiones de nudo
 ```
 
-Para tocar el motor sin abrir la GUI: `python run.py --selftest` corre los casos y
+Para tocar el motor sin abrir la interfaz: `python run.py --selftest` corre los casos y
 verifica, entre otras cosas, que sin 3D el veredicto sea PENDIENTE y que con 3D (simulado) las fuerzas de
 los pernos salgan de el; con `--3d` (o `python selftest.py --3d`) corre ademas el analisis solido de PB-01, la traccion pura
 y el respaldo fusionado. `python run.py proyecto.scp --3d carpeta --pdf memoria.pdf` hace el calculo
