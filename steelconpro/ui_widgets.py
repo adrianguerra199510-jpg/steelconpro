@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Widgets auxiliares para construir formularios enlazados al modelo."""
 from __future__ import annotations
-from PySide6.QtWidgets import (QWidget, QFormLayout, QDoubleSpinBox, QSpinBox,
+from PySide6.QtWidgets import (QWidget, QFormLayout, QDoubleSpinBox, QSpinBox, QStyledItemDelegate, QStyle, QHBoxLayout,
                                QComboBox, QCheckBox, QLineEdit, QLabel, QGroupBox,
                                QVBoxLayout, QScrollArea, QFrame, QTableWidget, QApplication, QAbstractButton,
                                QTextBrowser)
@@ -299,3 +299,65 @@ class ThemeSwitch(QAbstractButton):
 
     def sizeHint(self):
         return self.size()
+
+
+# ====================================================================================================== resultados de los nudos
+class DCBarDelegate(QStyledItemDelegate):
+    """Celda de D/C como barra de utilizacion: el valor va en Qt.UserRole (None = verificacion no evaluada).  Verde < 0.80, ambar hasta 1.00, rojo arriba."""
+
+    def paint(self, painter, option, index):
+        v = index.data(Qt.UserRole)
+        sel = bool(option.state & QStyle.State_Selected)
+        painter.save()
+        if sel:
+            painter.fillRect(option.rect, option.palette.highlight())
+        dark = option.palette.window().color().lightness() < 128
+        r = option.rect.adjusted(5, 5, -5, -5)
+        track = QColor("#2c3541" if dark else "#e3e8ee")
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(track)
+        painter.drawRoundedRect(r, 3, 3)
+        if v is None:
+            painter.setPen(QColor("#9aa3ae"))
+            painter.drawText(r, Qt.AlignCenter, "—")
+        else:
+            col = QColor("#5fb36a" if v < 0.8 else ("#f0b34a" if v <= 1.0 + 1e-9 else "#e0605a"))
+            w = int(r.width() * min(max(v, 0.0) / 1.2, 1.0))
+            if w > 0:
+                painter.setBrush(col)
+                painter.drawRoundedRect(r.x(), r.y(), max(w, 4), r.height(), 3, 3)
+            f = painter.font()
+            f.setBold(True)
+            painter.setFont(f)
+            painter.setPen(QColor("#12171e") if not dark or v >= 0.8 else QColor("#ffffff"))
+            painter.drawText(r, Qt.AlignCenter, f"{v:.3f}")
+        painter.restore()
+
+
+class KpiCard(QFrame):
+    """Tarjeta de resumen: titulo pequeno y valor grande, con color opcional de fondo."""
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setFrameShape(QFrame.NoFrame)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 6, 10, 6)
+        lay.setSpacing(0)
+        self.lt = QLabel(title)
+        self.lv = QLabel("—")
+        self.lt.setStyleSheet("font-size:8pt; color:#6b7684;")
+        f = self.lv.font()
+        f.setPointSizeF(f.pointSizeF() * 1.45)
+        f.setBold(True)
+        self.lv.setFont(f)
+        self.lv.setWordWrap(False)
+        lay.addWidget(self.lt)
+        lay.addWidget(self.lv)
+        self.set("—")
+
+    def set(self, value, bg="#eef1f5", fg="#12171e", tip=""):
+        self.lv.setText(value)
+        self.lv.setStyleSheet(f"color:{fg};")
+        self.setStyleSheet(f"KpiCard{{background:{bg}; border-radius:7px;}}")
+        self.setToolTip(tip or value)

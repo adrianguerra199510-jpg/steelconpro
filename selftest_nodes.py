@@ -539,6 +539,7 @@ def run():
     # ---------------------------------------------------------------- interfaz (offscreen, solo si hay Qt)
     try:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
         from steelconpro import ui
         from steelconpro.ui_wizard import NewConnectionDialog
@@ -598,6 +599,16 @@ def run():
             if not win._node_fresh() or win.tbl.rowCount() == 0 or ("CUMPLE" not in win.lbl_verdict.text()) or not win.node_res.checks \
                     or "OPERACION" not in win.txt_mem.toPlainText():
                 FAIL.append(f"nudos UI {ct}: VERIFICAR no lleno la tabla / el veredicto / la memoria: '{win.lbl_verdict.text()}', {win.tbl.rowCount()} filas")
+            n_hdr = sum(1 for r_ in range(win.tbl.rowCount()) if win.tbl.columnSpan(r_, 0) > 1)
+            n_chk = sum(1 for r_ in range(win.tbl.rowCount()) if win.tbl.item(r_, 0) is not None and win.tbl.item(r_, 0).data(Qt.UserRole) is not None)
+            if n_hdr < 1 or n_chk != len(win.node_res.checks) or not win.kpi["ver"].lv.text() in ("CUMPLE", "NO CUMPLE"):
+                FAIL.append(f"nudos UI {ct}: tabla agrupada ({n_hdr} grupos, {n_chk} filas de {len(win.node_res.checks)}) o tarjetas")
+            win._goto_calc(next(r_ for r_ in range(win.tbl.rowCount()) if win.tbl.item(r_, 0).data(Qt.UserRole) is not None))
+            win.cb_filter.setCurrentIndex(3)                                     # solo las no evaluadas
+            n_na = sum(1 for r_ in range(win.tbl.rowCount()) if win.tbl.item(r_, 0) is not None and win.tbl.item(r_, 0).data(Qt.UserRole) is not None)
+            if n_na != sum(1 for c_ in win.node_res.checks if c_.skip):
+                FAIL.append(f"nudos UI {ct}: el filtro «No evaluadas» muestra {n_na} filas de {sum(1 for c_ in win.node_res.checks if c_.skip)}")
+            win.cb_filter.setCurrentIndex(0)
             if win.tabs_out.currentWidget() is not win.tab_res:
                 FAIL.append(f"nudos UI {ct}: VERIFICAR debe mostrar la pestaña Resultados")
             lp.tbl.item(0, 4).setText("99")

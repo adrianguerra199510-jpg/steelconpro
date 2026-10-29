@@ -66,6 +66,14 @@ alma de la columna (líneas de fluencia, J10), placas de continuidad, pandeo loc
 con miembros que no son perfiles I; el análisis de una cartela en compresión es simplificado. Los motores suponen miembros perpendiculares al soporte: en miembros esviados
 solo se usa el cortante vertical y se avisa del resto.
 
+## Interfaz
+
+Hoja de estilo común refinada (pestañas con acento, grupos con filete, tablas con filas alternas, barras de desplazamiento finas, botones y menús redondeados) en los dos temas.
+En los nudos: las **operaciones** llevan un icono de color por grupo (corte, momento, diagonal, modificar el miembro, rigidizar); el paso **Análisis** muestra una lista de
+preparación (miembros, operaciones, cargas: lo que está listo, lo que falta y los avisos) y desactiva *Verificar* si falta algo; la pestaña **Resultados** abre con tarjetas de
+resumen (veredicto, D/C máximo, qué gobierna, verificaciones y NO EVALUADAS) y una tabla **agrupada por operación** con barras de D/C (verde < 0.80, ámbar hasta 1.00, rojo arriba)
+y un filtro (todas / críticas / no cumplen / no evaluadas); clic en una fila lleva a su cálculo en la memoria.
+
 ## Biblioteca de secciones y Section Designer
 
 El menú **Secciones** abre la **biblioteca de secciones**: todas las secciones (catálogo AISC, personalizadas por dimensiones y libres), con búsqueda, familias, vista previa y

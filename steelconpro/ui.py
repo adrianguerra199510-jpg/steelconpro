@@ -14,9 +14,9 @@ matplotlib.use("QtAgg")
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject, QEvent
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject, QEvent, QSize
 from PySide6.QtGui import QAction, QKeySequence, QColor, QFont, QIcon, QPixmap
-from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QMainWindow, QWidget, QTabWidget, QSplitter,
+from PySide6.QtWidgets import (QStyle, QAbstractSpinBox, QApplication, QMainWindow, QWidget, QTabWidget, QSplitter,
                                QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
                                QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox,
                                QComboBox, QPushButton, QTextEdit, QToolBar, QCheckBox,
@@ -35,7 +35,7 @@ from .solver import solve
 from .units import parse_xy_clipboard
 from . import draw, report, mesh3d, view3d, brand, appdata
 from .rep3d import make_fem
-from .ui_widgets import Form, scroll, PasteTable, ThemeSwitch
+from .ui_widgets import DCBarDelegate, KpiCard, Form, scroll, PasteTable, ThemeSwitch
 from .ui_nodes import NodeForm
 from .conn.specs import CONN_TYPES, CT_BASEPLATE
 from . import conn as connpkg
@@ -196,6 +196,8 @@ class MainWindow(QMainWindow):
         self.raw_cache = {}          # (id(conexion), combinacion) -> (firma, resultado crudo del 3D para dibujar)
         self.pairs = []              # [(proyecto de la combinacion, Results)] de la conexion actual
         self.res = None
+        from PySide6.QtWidgets import QStyledItemDelegate
+        self._dc_delegate, self._plain_delegate = DCBarDelegate(self), QStyledItemDelegate(self)
         self._node_cache = {}                     # id(conexion) -> (huella, Results): verificaciones por codigo de cada nudo del libro
         self.worker = None
         self.path = None
@@ -265,6 +267,8 @@ class MainWindow(QMainWindow):
     def _build_actions(self):
         tb = QToolBar("Principal")
         tb.setMovable(False)
+        tb.setIconSize(QSize(18, 18))
+        tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(tb)
         mb = self.menuBar()
         m_file = mb.addMenu("&Archivo")
@@ -289,9 +293,10 @@ class MainWindow(QMainWindow):
                 tb.addAction(a)
             return a
 
-        act(m_file, "Nuevo", self.new, "Ctrl+N", True)
-        act(m_file, "Abrir...", self.open, "Ctrl+O", True)
-        act(m_file, "Guardar", self.save, "Ctrl+S", True)
+        sty = self.style()
+        for a_, ic_ in ((act(m_file, "Nuevo", self.new, "Ctrl+N", True), QStyle.SP_FileIcon), (act(m_file, "Abrir...", self.open, "Ctrl+O", True), QStyle.SP_DialogOpenButton),
+                        (act(m_file, "Guardar", self.save, "Ctrl+S", True), QStyle.SP_DialogSaveButton)):
+            a_.setIcon(sty.standardIcon(ic_))
         act(m_file, "Guardar como...", self.save_as, "Ctrl+Shift+S")
         m_file.addSeparator()
         act(m_file, "Importar base de datos AISC v14.1...", self.import_aisc)
@@ -835,8 +840,24 @@ class MainWindow(QMainWindow):
         self.chk_mem = QCheckBox("Incluir la memoria detallada en los reportes")
         self.chk_mem.setChecked(True)
         top.addWidget(self.chk_mem)
+        self.lbl_filter = QLabel("Mostrar:")
+        self.cb_filter = QComboBox()
+        for txt in ("Todas las verificaciones", "Criticas (D/C ≥ 0.80)", "Solo las que no cumplen", "No evaluadas"):
+            self.cb_filter.addItem(txt)
+        self.cb_filter.currentIndexChanged.connect(lambda *_: self._fill_table_conn() if self.is_conn else None)
+        top.insertWidget(0, self.lbl_filter)
+        top.insertWidget(1, self.cb_filter)
         l2.addLayout(top)
-        l2.addWidget(QLabel("<b>Combinaciones de carga</b>"))
+        self.kpi_row = QWidget()                              # resumen de un nudo: veredicto, D/C maximo, lo que gobierna y lo que falta evaluar
+        kl = QHBoxLayout(self.kpi_row)
+        kl.setContentsMargins(0, 0, 0, 0)
+        kl.setSpacing(8)
+        self.kpi = {k: KpiCard(t) for k, t in (("ver", "VEREDICTO"), ("dc", "D/C MAXIMO"), ("gov", "GOBIERNA"), ("n", "VERIFICACIONES"), ("na", "NO EVALUADAS"))}
+        for k, c in self.kpi.items():
+            kl.addWidget(c, 3 if k == "gov" else 1)
+        l2.addWidget(self.kpi_row)
+        self.lbl_cases = QLabel("<b>Combinaciones de carga</b>")
+        l2.addWidget(self.lbl_cases)
         self.tbl_cmb = QTableWidget(0, 5)
         self.tbl_cmb.setHorizontalHeaderLabels(["Combinacion", "D/C max", "Gobierna", "Estado", "Mostrada"])
         self.tbl_cmb.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -912,9 +933,11 @@ class MainWindow(QMainWindow):
 
     def _goto_calc(self, row, _col=0):
         """Despliega los calculos detallados y salta al paso de la verificacion elegida."""
-        if self.res is None or not (0 <= row < len(self.res.checks)):
+        it0 = self.tbl.item(row, 0)
+        idx = it0.data(Qt.UserRole) if it0 is not None and it0.data(Qt.UserRole) is not None else row     # los nudos agrupan filas: el indice va en el item
+        if self.res is None or not (0 <= idx < len(self.res.checks)):
             return
-        ch = self.res.checks[row]
+        ch = self.res.checks[idx]
         self.btn_mem.setChecked(True)
         doc = self.txt_mem.document()
         from PySide6.QtGui import QTextDocument, QTextCursor
@@ -1385,6 +1408,14 @@ class MainWindow(QMainWindow):
             self.spv_plan.setVisible(not conn)
         self.lbl_combo2.setVisible(not conn)               # los nudos verifican todos los casos de carga a la vez
         self.cb_combo2.setVisible(not conn)
+        for w_ in (self.kpi_row, self.lbl_filter, self.cb_filter):
+            w_.setVisible(conn)
+        self.lbl_cases.setText("<b>Casos de carga</b>" if conn else "<b>Combinaciones de carga</b>")
+        self.tbl.setItemDelegateForColumn(4, self._dc_delegate if conn else self._plain_delegate)
+        hh_ = self.tbl.horizontalHeader()
+        hh_.setSectionResizeMode(4, QHeaderView.Fixed if conn else QHeaderView.ResizeToContents)
+        if conn:
+            hh_.resizeSection(4, 120)
         self.btn3d.setText("VERIFICAR  (F8)" if conn else "CALCULAR  (F8)")
         self.btn3d.setEnabled(not visual)
         self.btn3d.setToolTip("Verifica por codigo (AISC 360-22) cada operacion del nudo con los casos de carga y entrega el veredicto en la pestaña Resultados." if conn else
@@ -2202,17 +2233,24 @@ class MainWindow(QMainWindow):
                                  "la memoria de calculo de cada operacion.</p>")
         self._set_node_state()
 
+    _OP_COLORS = {"corte": "#4a90d9", "momento": "#e8731a", "diagonal": "#4fae6a", "modificar": "#8a94a0", "rigidizar": "#9b6fc9"}
+
     def _fill_table_conn(self):
-        """Resultados de un nudo: casos de carga, verificaciones por operacion (la mas desfavorable de todos los casos), avisos y veredicto."""
+        """Resultados de un nudo: tarjetas de resumen, casos de carga y verificaciones agrupadas por operacion (con barras de D/C y filtro)."""
+        import re
+        self.tbl.clearSpans()
         self.tbl.setRowCount(0)
         self.tbl_cmb.setRowCount(0)
-        red, green, grey = QColor("#ffc7ce"), QColor("#c6efce"), QColor("#eeeeee")
+        red, green, amber = QColor("#ffc7ce"), QColor("#c6efce"), QColor("#ffeb9c")
+        dark = self._dark if hasattr(self, "_dark") else False
         r = self.node_res
         if r is None or not self._node_fresh():
             stale = r is not None
             self.lbl_verdict.setText("  DESACTUALIZADO  " if stale else "  SIN VERIFICAR  ")
             self.lbl_verdict.setToolTip("Presione VERIFICAR (F8).")
             self.lbl_verdict.setStyleSheet("background:#ffeb9c; color:#9c5700; border-radius:4px; padding:2px 8px;")
+            for k, c in self.kpi.items():
+                c.set("—" if k != "ver" else ("DESACTUALIZADO" if stale else "SIN VERIFICAR"), "#ffeb9c" if k == "ver" else "#eef1f5", "#9c5700" if k == "ver" else "#12171e")
             self.txt_info.setHtml("<b>%s</b> Presione <b>VERIFICAR (F8)</b> (barra superior): se verifica cada operacion del paso 2 con las cargas del paso 3 "
                                   "y aparecen aqui las verificaciones, el D/C y la memoria de calculo." %
                                   ("Los datos cambiaron despues de la ultima verificacion." if stale else "Sin verificar."))
@@ -2228,34 +2266,85 @@ class MainWindow(QMainWindow):
                     it.setBackground(green if cr["ok"] else red)
                     it.setForeground(QColor("#1b1b1b"))
                 self.tbl_cmb.setItem(k, j, it)
-        self.lbl_res_ck.setText("<b>Verificaciones de cada operacion</b> (para cada una, el caso de carga que gobierna)")
-        for ch in r.checks:
-            i = self.tbl.rowCount()
-            self.tbl.insertRow(i)
-            dv, cv, ul = report.ck_vals(self.us, ch)
-            vals = [ch.title, f"{dv:,.3f}", f"{cv:,.3f}", ul, "—" if ch.skip else f"{ch.ratio:.3f}", ch.ref + ("  —  " + ch.note if ch.note else "")]
-            for j, v in enumerate(vals):
-                it = QTableWidgetItem(v)
-                if j in (1, 2, 4):
-                    it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if j == 4:
-                    it.setBackground(grey if ch.skip else (green if ch.ok else red))
-                    it.setForeground(QColor("#1b1b1b"))
-                    f_ = it.font(); f_.setBold(True); it.setFont(f_)
-                it.setToolTip(v)
-                self.tbl.setItem(i, j, it)
+        self.lbl_res_ck.setText("<b>Verificaciones por operacion</b> (para cada una, el caso de carga que gobierna)")
+        self.tbl_cmb.setMaximumHeight(34 + 26 * max(len(rows), 1))
+
+        # ---- agrupar por operacion: el titulo trae «[n. miembro] texto» o «[texto] ...» (verificaciones no evaluadas de continuidad y corte)
+        labels = getattr(r, "item_labels", [])
+        groups, order = {}, []
+        for i, ch in enumerate(r.checks):
+            m = re.match(r"^\[(\d+)\. ([^\]]+)\]\s*(.*)$", ch.title)
+            if m:
+                n = int(m.group(1))
+                key = f"{n}. {labels[n - 1]}" if 0 < n <= len(labels) else f"{n}. {m.group(2)}"
+                txt = m.group(3)
+            else:
+                m2 = re.match(r"^\[([^\]]+)\]\s*(.*)$", ch.title)
+                key, txt = (m2.group(1), m2.group(2)) if m2 else ("Otras", ch.title)
+            txt = re.sub(r"\s+—\s+NO EVALUADO$", "", txt)
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            groups[key].append((i, ch, txt))
+        flt = self.cb_filter.currentIndex()
+
+        def keep(ch):
+            return (flt == 0 or (flt == 1 and not ch.skip and ch.ratio >= 0.8) or (flt == 2 and not ch.skip and ch.ratio > 1.0 + 1e-9) or (flt == 3 and ch.skip))
+        hdr_bg = QColor("#2c3541" if dark else "#e8edf3")
+        f_b = None
+        for key in order:
+            items = [(i, ch, txt) for i, ch, txt in groups[key] if keep(ch)]
+            if not items:
+                continue
+            vals_ = [ch.ratio for _i, ch, _t in groups[key] if not ch.skip]
+            worst = max(vals_) if vals_ else None
+            ri = self.tbl.rowCount()
+            self.tbl.insertRow(ri)
+            hi = QTableWidgetItem(f"  {key}" + (f"        D/C max {worst:.3f}" if worst is not None else "        no evaluada"))
+            f_b = hi.font(); f_b.setBold(True); hi.setFont(f_b)
+            hi.setBackground(hdr_bg)
+            hi.setForeground(QColor("#cfe0f5" if dark else "#1f3864"))
+            hi.setFlags(Qt.ItemIsEnabled)
+            hi.setData(Qt.UserRole, None)
+            self.tbl.setItem(ri, 0, hi)
+            self.tbl.setSpan(ri, 0, 1, 6)
+            for i, ch, txt in items:
+                ri = self.tbl.rowCount()
+                self.tbl.insertRow(ri)
+                dv, cv, ul = report.ck_vals(self.us, ch)
+                vals = ["    " + txt + (" — NO EVALUADO" if ch.skip else ""), f"{dv:,.3f}" if not ch.skip else "", f"{cv:,.3f}" if not ch.skip else "", ul, "",
+                        ch.ref + ("  —  " + ch.note if ch.note else "")]
+                for j, v in enumerate(vals):
+                    it = QTableWidgetItem(v)
+                    if j in (1, 2):
+                        it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    if j == 0:
+                        it.setData(Qt.UserRole, i)
+                    if j == 4:
+                        it.setData(Qt.UserRole, None if ch.skip else float(ch.ratio))
+                    it.setToolTip(v)
+                    self.tbl.setItem(ri, j, it)
+        if self.tbl.rowCount() == 0:
+            self.tbl.insertRow(0)
+            e = QTableWidgetItem("  Ninguna verificacion cumple el filtro elegido.")
+            e.setFlags(Qt.ItemIsEnabled)
+            self.tbl.setItem(0, 0, e)
+            self.tbl.setSpan(0, 0, 1, 6)
         gov = r.governing
         nskip = sum(1 for c in r.checks if c.skip)
+        ok = r.ok
+        # ---- tarjetas
+        self.kpi["ver"].set("CUMPLE" if ok else "NO CUMPLE", "#c6efce" if ok else "#ffc7ce", "#006100" if ok else "#9c0006")
+        self.kpi["dc"].set(f"{r.max_ratio:.3f}", "#c6efce" if r.max_ratio < 0.8 else ("#ffeb9c" if r.max_ratio <= 1.0 else "#ffc7ce"), "#12171e")
+        gtxt = re.sub(r"^\[[^\]]+\]\s*", "", gov.title) if gov else "—"
+        self.kpi["gov"].set(gtxt if len(gtxt) < 48 else gtxt[:46] + "…", "#eef1f5", "#12171e", gov.title if gov else "")
+        self.kpi["n"].set(f"{len(r.checks) - nskip}  ·  {len(order)} grupos", "#eef1f5", "#12171e")
+        self.kpi["na"].set(str(nskip), "#ffeb9c" if nskip else "#c6efce", "#9c5700" if nskip else "#006100", "Verificaciones que el programa no evalua: hay que revisarlas aparte.")
         html = [f"<b>{self.prj.ctype}</b> — verificaciones por codigo (AISC 360-22); el analisis 3D por elementos finitos todavia no esta disponible."]
-        if nskip:
-            html.append(f"{nskip} verificacion(es) <b>NO EVALUADA(S)</b> (filas grises): hay que revisarlas aparte.")
-        if gov:
-            html.append(f"Gobierna: <b>{gov.title}</b>  (D/C = {gov.ratio:.3f})")
         for w in r.warnings:
             col = self.tc("#9c0006" if w.startswith("**") else "#7f6000")
             html.append(f"<span style='color:{col}'>• {w}</span>")
         self.txt_info.setHtml("<br>".join(html))
-        ok = r.ok
         self.lbl_verdict.setText(f"  {'CUMPLE' if ok else 'NO CUMPLE'}   D/C max = {r.max_ratio:.3f}"
                                  + (f"  ({rows[r.combo_gov]['name']})" if len(rows) > 1 else "") + "  ")
         bg, fg = ("#c6efce", "#006100") if ok else ("#ffc7ce", "#9c0006")
@@ -2266,6 +2355,7 @@ class MainWindow(QMainWindow):
         if self.is_conn:
             return self._fill_table_conn()
         r = self.res
+        self.tbl.clearSpans()
         self.tbl.setRowCount(0)
         self.tbl_cmb.setRowCount(0)
         red, green, grey = QColor("#ffc7ce"), QColor("#c6efce"), QColor("#eeeeee")

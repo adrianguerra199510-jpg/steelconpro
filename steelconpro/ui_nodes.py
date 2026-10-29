@@ -388,6 +388,28 @@ OP_HELP = {OP_TAB: "Placa soldada al miembro principal y atornillada al alma del
            OP_CONT: "Placas horizontales dentro de la columna I, a la altura de las alas del miembro conectado."}
 
 
+_GROUP_COLORS = {"Conexión de corte": "#4a90d9", "Conexión de momento": "#e8731a", "Conexión de diagonal": "#4fae6a", "Modificar el miembro": "#8a94a0",
+                 "Rigidizar el miembro principal": "#9b6fc9"}
+_ICON_CACHE = {}
+
+
+def op_icon(kind: str):
+    """Icono (cuadrado de color por grupo de operacion) para la lista de operaciones."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
+    if kind not in _ICON_CACHE:
+        col = next((_GROUP_COLORS.get(g, "#8a94a0") for g, kinds in OP_GROUPS if kind in kinds), "#8a94a0")
+        pm = QPixmap(14, 14)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(col))
+        p.drawRoundedRect(1, 1, 12, 12, 3, 3)
+        p.end()
+        _ICON_CACHE[kind] = QIcon(pm)
+    return _ICON_CACHE[kind]
+
+
 def op_summary(o: Operation, us=None) -> str:
     L = (lambda v: us.q("L", v)) if us is not None else (lambda v: f"{v:g} in")
     if o.kind in (OP_TAB, OP_DANG, OP_WELD):
@@ -515,7 +537,11 @@ class OperationsPage(Form):
         self.tbl.setRowCount(len(nd.operations))
         for i, o in enumerate(nd.operations):
             for j, txt in enumerate((str(i + 1), o.kind, o.member, op_summary(o, self.us))):
-                self.tbl.setItem(i, j, QTableWidgetItem(txt))
+                it = QTableWidgetItem(txt)
+                if j == 1:
+                    it.setIcon(op_icon(o.kind))
+                it.setToolTip(txt)
+                self.tbl.setItem(i, j, it)
         if nd.operations:
             self.tbl.selectRow(max(0, min(self._sel, len(nd.operations) - 1)))
         self.tbl.blockSignals(False)
@@ -776,7 +802,7 @@ class LoadsPage(Form):
 
 # ====================================================================================================== 4. analisis
 class AnalysisPage(QWidget):
-    """Lanza las verificaciones por codigo y el analisis 3D, y muestra el estado."""
+    """Lanza las verificaciones por codigo y el analisis 3D, y muestra la lista de lo que falta para poder verificar."""
     check_requested = Signal()
     fem_requested = Signal()
     report_requested = Signal()
@@ -786,18 +812,27 @@ class AnalysisPage(QWidget):
         self.mod = mod
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
-        lay.addWidget(QLabel("<b>Análisis del nudo</b>"))
+        t = QLabel("Análisis del nudo")
+        f = t.font()
+        f.setBold(True)
+        t.setFont(f)
+        lay.addWidget(t)
         self.lbl = QLabel("")
         self.lbl.setWordWrap(True)
         lay.addWidget(self.lbl)
+        self.lbl_list = QLabel("")                                   # lista de preparacion: miembros, operaciones, cargas
+        self.lbl_list.setWordWrap(True)
+        self.lbl_list.setTextFormat(Qt.RichText)
+        lay.addWidget(self.lbl_list)
         self.btn_chk = QPushButton("Verificar por código (AISC 360-22)")
+        self.btn_chk.setStyleSheet("QPushButton{background:#e85d0c;color:white;font-weight:bold;border:0;} QPushButton:hover{background:#c44a06;}")
         self.btn_chk.clicked.connect(self.check_requested.emit)
-        self.btn_fem = QPushButton("Análisis 3D por elementos finitos")
+        self.btn_fem = QPushButton("Análisis 3D por elementos finitos  (próximamente)")
         self.btn_fem.clicked.connect(self.fem_requested.emit)
         self.btn_rep = QPushButton("Informe del nudo (PDF)")
         self.btn_rep.clicked.connect(self.report_requested.emit)
         for b in (self.btn_chk, self.btn_fem, self.btn_rep):
-            b.setMinimumHeight(30)
+            b.setMinimumHeight(32)
             lay.addWidget(b)
         self.lbl_state = QLabel("")
         self.lbl_state.setWordWrap(True)
@@ -811,6 +846,13 @@ class AnalysisPage(QWidget):
         bg, fg = {True: ("#c6efce", "#006100"), False: ("#ffc7ce", "#9c0006"), None: ("#e4e7eb", "#44546a")}[ok]
         self.lbl_state.setText(text)
         self.lbl_state.setStyleSheet(f"background:{bg}; color:{fg}; border-radius:4px; padding:4px 8px;")
+
+    def set_checklist(self, rows):
+        """rows: [(estado, texto)] con estado True (listo), False (falta) o None (aviso)."""
+        mark = {True: ("✔", "#2e9d57"), False: ("✖", "#d9534f"), None: ("●", "#e0a030")}
+        self.lbl_list.setText("".join(f"<div style='margin:2px 0'><span style='color:{mark[st][1]}; font-weight:bold'>{mark[st][0]}</span>&nbsp; {txt}</div>"
+                                      for st, txt in rows))
+        self.btn_chk.setEnabled(all(st is not False for st, _t in rows))
 
 
 # ====================================================================================================== contenedor
@@ -859,7 +901,31 @@ class NodeForm(Form):
             pg.us = v
 
     def _on_page_changed(self):
+        self._refresh_checklist()
         self.changed.emit()
+
+    def _refresh_checklist(self):
+        """Lista de preparacion del paso Analisis: que hay en cada paso y que falta."""
+        if not hasattr(self, "_prj"):
+            return
+        nd = getattr(self._prj, self.attr)
+        conn = [o for o in nd.operations if o.is_connection]
+        names = {m.name for m in nd.members}
+        sin_conn = [m.name for m in nd.members if nd.connection_of(m.name) is None]
+        cases = sorted({x.case for x in nd.loads})
+        cargados = {x.member for x in nd.loads if any(abs(getattr(x, k)) > 1e-12 for k in ("N", "Vy", "Vz", "T", "My", "Mz"))}
+        rows = [(bool(nd.members), f"<b>1 Miembros:</b> {len(nd.members)} conectado(s) al principal ({nd.main_shape})" if nd.members else "<b>1 Miembros:</b> no hay miembros conectados")]
+        if not conn:
+            rows.append((False, "<b>2 Operaciones:</b> agregue al menos una operación de conexión"))
+        else:
+            rows.append((True if not sin_conn else None, f"<b>2 Operaciones:</b> {len(nd.operations)} ({len(conn)} de conexión)"
+                         + (f"; sin conexión: {', '.join(sin_conn)}" if sin_conn else "")))
+        if not cases:
+            rows.append((False, "<b>3 Cargas:</b> defina al menos un caso de carga"))
+        else:
+            faltan = [n for n in (names & {o.member for o in conn}) if n not in cargados]
+            rows.append((True if not faltan else None, f"<b>3 Cargas:</b> {len(cases)} caso(s)" + (f"; miembros sin carga: {', '.join(sorted(faltan))}" if faltan else "")))
+        self.an_pg.set_checklist(rows)
 
     def _after_rename(self):
         self.load(self._prj)
@@ -880,6 +946,7 @@ class NodeForm(Form):
         for pg in self.pages:
             pg.us = self.us
             pg.load(prj)
+        self._refresh_checklist()
 
     def store(self, prj):
         self._prj = prj

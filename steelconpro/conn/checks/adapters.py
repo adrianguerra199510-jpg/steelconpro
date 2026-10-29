@@ -215,6 +215,7 @@ def run(prj, nd: Nodo):
             R.checks.append(Check(f"cope_{o.member}", f"[Corte (cope) — {o.member}] Pandeo local del alma por el corte — NO EVALUADO", 0.0, 1.0, "-", "AISC Manual Parte 9",
                                   "Las verificaciones de la conexión sí consideran el corte (sección del alma, bloque de cortante).", skip=True))
     R.rec = rec
+    R.item_labels = [it.label for it in items]                 # «operacion — miembro» de cada elemento verificado (para agrupar la tabla de resultados)
     return R
 
 
