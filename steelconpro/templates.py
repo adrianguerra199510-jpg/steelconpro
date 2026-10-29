@@ -92,7 +92,8 @@ def load_template(path: str):
             CATALOG.shapes[sd["label"]] = Shape(**sd)
     CATALOG._reindex()
     M.register_embedded(d.get("materiales", {}))
-    return Project.from_json(json.dumps(d["conexion"]))
+    from .conn.baseplate import unify
+    return unify(Project.from_json(json.dumps(d["conexion"])))
 
 
 def delete_template(path: str):

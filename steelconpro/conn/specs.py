@@ -49,13 +49,15 @@ OP_GUSSET = "Cartela atornillada (diagonal)"
 OP_GUSSET_W = "Cartela con miembro soldado (diagonal)"
 OP_COPE = "Corte del extremo (cope)"
 OP_CONT = "Placas de continuidad"
-OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT]
+OP_BASE = "Placa base (apoyo sobre concreto)"
+OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE]
 # grupos del menu "Agregar operacion" (como la cinta de IDEA)
 OP_GROUPS = [("Conexión de corte", [OP_TAB, OP_DANG, OP_SEAT]),
              ("Conexión de momento", [OP_EP_FLUSH, OP_EP_EXT, OP_WELD]),
              ("Conexión de diagonal", [OP_GUSSET, OP_GUSSET_W]),
              ("Modificar el miembro", [OP_COPE]),
-             ("Rigidizar el miembro principal", [OP_CONT])]
+             ("Rigidizar el miembro principal", [OP_CONT]),
+             ("Apoyo del miembro", [OP_BASE])]
 CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
 MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD)
 SHEAR_OPS = (OP_TAB, OP_DANG, OP_SEAT)
@@ -111,6 +113,9 @@ class Operation:
     cope_len: float = 4.5        # longitud del corte desde el extremo, in
     # ---- placas de continuidad
     cont_t: float = 0.5          # espesor, in
+    # ---- placa base: extremo del miembro principal donde va (−1 = lado −, +1 = lado +); en un miembro conectado va en su extremo libre.
+    #      Sus datos (placa, anclajes, llave, rigidizadores, soldadura, concreto, cargas) estan en los bloques de la conexion (ver conn/baseplate.py)
+    end: int = -1
 
     @property
     def is_connection(self) -> bool:
@@ -195,6 +200,20 @@ class Nodo:
     def connection_of(self, name):
         """La operacion de conexion (a lo sumo una) del miembro, o None."""
         return next((o for o in self.operations if o.member == name and o.is_connection), None)
+
+    def base_op(self):
+        """La operacion de placa base (a lo sumo una por conexion) o None."""
+        return next((o for o in self.operations if o.kind == OP_BASE), None)
+
+    def rename_main(self, new):
+        old = self.main_name
+        for o in self.operations:
+            if o.member == old:
+                o.member = new
+        for x in self.loads:
+            if x.member == old:
+                x.member = new
+        self.main_name = new
 
     def rename_member(self, old, new):
         for o in self.operations:

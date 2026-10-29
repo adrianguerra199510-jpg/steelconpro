@@ -34,10 +34,10 @@ class NodeModule:
         d["_u"] = [prj.u_len, prj.u_force, prj.u_stress, prj.u_moment]
         return hashlib.sha1(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()
 
-    def solve(self, prj, detail: bool = True):
-        """Verificaciones por codigo de todas las operaciones con todos los casos de carga."""
+    def solve(self, prj, detail: bool = True, fem_map=None):
+        """Verificaciones por codigo de todas las operaciones con todos los casos de carga (y la placa base con todas sus combinaciones)."""
         from .checks import adapters
-        return adapters.run(prj, self.spec(prj))
+        return adapters.run(prj, self.spec(prj), fem_map)
 
     def input_rows(self, prj, us):
         from .assembly import shape_of
@@ -47,6 +47,12 @@ class NodeModule:
             ops = "; ".join(o.kind for o in nd.ops_of(m.name)) or "sin operaciones"
             rows.append((m.name, f"{m.shape} ({m.steel}), azimut {m.az:g}°, elevación {m.el:g}°, posición {us.q('L', m.pos)}: {ops}"))
         for o in nd.operations:
+            if o.kind == "Placa base (apoyo sobre concreto)":
+                p_, b_ = prj.plate, prj.bolts
+                dim = f"Ø{us.q('L', p_.Dp)}" if p_.shape == "Circular" else f"{us.q('L', p_.N)} × {us.q('L', p_.B)}"
+                rows.append((f"{o.member} — {o.kind}", f"placa {dim} × {us.q('L', p_.tp)} ({p_.steel}), {b_.n_total} anclajes Ø{b_.size} {b_.steel}, hef = {us.q('L', b_.hef)}; "
+                             f"concreto f'c = {us.q('S', prj.conc.fc)}"))
+                continue
             if o.is_connection and "Cartela" not in o.kind and "Corte" not in o.kind:
                 rows.append((f"{o.member} — {o.kind}", f"pernos {o.n_bolts} × Ø{o.bolt_size} {o.bolt_grade}, separación {us.q('L', o.bolt_s)}, "
                              f"placa/ángulo t = {us.q('L', o.plate_t)} ({o.plate_steel}), soldadura {us.q('L', o.weld_size)}"))

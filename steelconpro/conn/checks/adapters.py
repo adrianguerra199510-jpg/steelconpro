@@ -151,7 +151,7 @@ def _units_prj(prj):
     return SimpleNamespace(units=lambda: prj.units())
 
 
-def run(prj, nd: Nodo):
+def run(prj, nd: Nodo, fem_map=None):
     """Verifica todas las operaciones de conexion con todos los casos de carga.  Devuelve un `solver.Results` (D/C por verificacion)."""
     from ...solver import Results
     R = Results()
@@ -159,7 +159,7 @@ def run(prj, nd: Nodo):
     items, warns = build_items(nd)
     R.warnings = list(warns)
     cases = _load_cases(nd)
-    if not items:
+    if not items and nd.base_op() is None:
         R.warnings.append("El nudo no tiene operaciones de conexión: agregue una en el paso 2 (Operaciones).")
     if items and not cases:
         R.warnings.append("** No hay cargas definidas: agregue los esfuerzos de los miembros en el paso 3 (Cargas). **")
@@ -214,6 +214,8 @@ def run(prj, nd: Nodo):
         if o.kind == OP_COPE:
             R.checks.append(Check(f"cope_{o.member}", f"[Corte (cope) — {o.member}] Pandeo local del alma por el corte — NO EVALUADO", 0.0, 1.0, "-", "AISC Manual Parte 9",
                                   "Las verificaciones de la conexión sí consideran el corte (sección del alma, bloque de cortante).", skip=True))
+    from .. import baseplate
+    baseplate.add_checks(prj, nd, R, rec, fem_map)
     R.rec = rec
     R.item_labels = [it.label for it in items]                 # «operacion — miembro» de cada elemento verificado (para agrupar la tabla de resultados)
     return R

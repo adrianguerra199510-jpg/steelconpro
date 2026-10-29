@@ -25,8 +25,8 @@ def modules() -> list:
     return [(ct, module_for(ct)) for ct in _ORDER]
 
 
-def solve_conn(prj, detail: bool = True):
-    return module_for(prj.ctype).solve(prj, detail)
+def solve_conn(prj, detail: bool = True, fem_map=None):
+    return module_for(prj.ctype).solve(prj, detail, fem_map)
 
 
 def save_figures(prj, res, folder: str) -> list:

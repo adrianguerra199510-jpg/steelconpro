@@ -1,0 +1,354 @@
+{
+ "formato": "SteelConPro-libro",
+ "version": 2,
+ "conexiones": [
+  {
+   "name": "Ejemplo: columna sobre placa base con vigas",
+   "element": "CN-04",
+   "author": "",
+   "date": "",
+   "metric": false,
+   "u_len": "in",
+   "u_force": "kip",
+   "u_stress": "ksi",
+   "u_moment": "kip·in",
+   "ctype": "Conexión de nudo",
+   "node": {
+    "main_name": "Columna",
+    "main_shape": "W14X90",
+    "main_steel": "ASTM A992",
+    "main_az": 0.0,
+    "main_el": 90.0,
+    "main_roll": 0.0,
+    "main_end": "Termina en el nudo (el cuerpo queda del lado +)",
+    "main_len_neg": 60.0,
+    "main_len_pos": 120.0,
+    "members": [
+     {
+      "name": "V1",
+      "shape": "W16X31",
+      "steel": "ASTM A992",
+      "az": 0.0,
+      "el": 0.0,
+      "pos": 96.0,
+      "off": 0.0,
+      "off2": 0.0,
+      "L": 48.0,
+      "roll": 0.0,
+      "gap": 0.5
+     },
+     {
+      "name": "V2",
+      "shape": "W16X31",
+      "steel": "ASTM A992",
+      "az": 180.0,
+      "el": 0.0,
+      "pos": 96.0,
+      "off": 0.0,
+      "off2": 0.0,
+      "L": 48.0,
+      "roll": 0.0,
+      "gap": 0.5
+     },
+     {
+      "name": "D1",
+      "shape": "HSS4X4X1/4",
+      "steel": "ASTM A500 Gr.C (HSS rect.)",
+      "az": 0.0,
+      "el": -45.0,
+      "pos": 84.0,
+      "off": 0.0,
+      "off2": 0.0,
+      "L": 60.0,
+      "roll": 0.0,
+      "gap": 0.5
+     }
+    ],
+    "operations": [
+     {
+      "kind": "Placa simple (corte)",
+      "member": "V2",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.375,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5,
+      "end": -1
+     },
+     {
+      "kind": "Placa extrema a ras (momento)",
+      "member": "V1",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.375,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5,
+      "end": -1
+     },
+     {
+      "kind": "Cartela atornillada (diagonal)",
+      "member": "D1",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.5,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5,
+      "end": -1
+     },
+     {
+      "kind": "Placa base (apoyo sobre concreto)",
+      "member": "Columna",
+      "bolt_size": "3/4",
+      "bolt_grade": "A325-N",
+      "n_bolts": 3,
+      "bolt_s": 3.0,
+      "plate_t": 0.375,
+      "plate_steel": "ASTM A36",
+      "weld_size": 0.25,
+      "ep_ext": 3.0,
+      "cope_top": 2.0,
+      "cope_bot": 0.0,
+      "cope_len": 4.5,
+      "cont_t": 0.5,
+      "end": -1
+     }
+    ],
+    "loads": [
+     {
+      "case": "Caso 1",
+      "member": "V1",
+      "N": 0.0,
+      "Vy": 0.0,
+      "Vz": -20.0,
+      "T": 0.0,
+      "My": 0.0,
+      "Mz": 0.0
+     },
+     {
+      "case": "Caso 1",
+      "member": "V2",
+      "N": 0.0,
+      "Vy": 0.0,
+      "Vz": -20.0,
+      "T": 0.0,
+      "My": 0.0,
+      "Mz": 0.0
+     },
+     {
+      "case": "Caso 1",
+      "member": "D1",
+      "N": 25.0,
+      "Vy": 0.0,
+      "Vz": 0.0,
+      "T": 0.0,
+      "My": 0.0,
+      "Mz": 0.0
+     }
+    ],
+    "show_hw": true
+   },
+   "section": {
+    "label": "W14X90",
+    "steel": "ASTM A992",
+    "rotation": 0.0,
+    "double": false,
+    "cx": 0.0,
+    "cy": 0.0,
+    "gap": 0.375
+   },
+   "plate": {
+    "shape": "Rectangular",
+    "N": 22.0,
+    "B": 22.0,
+    "Dp": 26.0,
+    "tp": 2.0,
+    "steel": "ASTM A572 Gr.50",
+    "grout": 1.5
+   },
+   "bolts": {
+    "size": "1-1/4",
+    "steel": "ASTM F1554 Gr.55",
+    "atype": "Con cabeza (hex pesada)",
+    "pattern": "Perimetral (4 lados)",
+    "n_major": 3,
+    "n_minor": 3,
+    "n_circ": 8,
+    "ex": 2.5,
+    "ey": 2.5,
+    "hef": 24.0,
+    "eh": 0.0,
+    "Abrg_user": 0.0,
+    "washer_d": 0.0,
+    "washer_t": -1.0,
+    "hole_rule": "AISC Tabla 14-2 (maximo recomendado)",
+    "standoff": 0.0,
+    "fixity": "Doble empotramiento (placa restringida)",
+    "install": "Preinstalado (vaciado en sitio)",
+    "adh_env": "Interior, concreto seco (Tabla 17.6.5.2.5)",
+    "tau_cr": 0.3,
+    "tau_uncr": 1.0,
+    "adh_cat": "Categoria 1",
+    "sustained": 0.0,
+    "coords": [
+     [
+      -8.5,
+      -8.5
+     ],
+     [
+      8.5,
+      -8.5
+     ],
+     [
+      8.5,
+      8.5
+     ],
+     [
+      -8.5,
+      8.5
+     ]
+    ]
+   },
+   "lug": {
+    "enabled": true,
+    "ltype": "Placa",
+    "label": "W8X31",
+    "rotation": 0.0,
+    "direction": "Eje X (paralelo a B)",
+    "W": 10.0,
+    "H": 6.0,
+    "t": 1.25,
+    "steel": "ASTM A572 Gr.50",
+    "weld_size": 0.375,
+    "electrode": "E70XX"
+   },
+   "stiff": {
+    "enabled": false,
+    "position": "Alas (paralelo a Y)",
+    "count": 4,
+    "L": 3.5,
+    "h": 8.0,
+    "t": 0.625,
+    "steel": "ASTM A572 Gr.50",
+    "weld_size": 0.5,
+    "electrode": "E70XX",
+    "spacing_mode": "Automatico (repartido)",
+    "spacing": 6.0,
+    "offset": 0.0,
+    "offset_angle": 0.0,
+    "shape": "Rectangular",
+    "clip_h": 1.5,
+    "clip_v": 1.5,
+    "clip_root": 0.75
+   },
+   "welds": {
+    "flange": {
+     "wtype": "Filete",
+     "size": 0.5,
+     "electrode": "E70XX",
+     "both_sides": true
+    },
+    "web": {
+     "wtype": "Filete",
+     "size": 0.3125,
+     "electrode": "E70XX",
+     "both_sides": true
+    },
+    "perimeter": {
+     "wtype": "Filete",
+     "size": 0.375,
+     "electrode": "E70XX",
+     "both_sides": false
+    },
+    "directional": true
+   },
+   "conc": {
+    "material": "(personalizado)",
+    "fc": 4.0,
+    "N2": 48.0,
+    "B2": 48.0,
+    "ha": 48.0,
+    "cracked": true,
+    "lam": 1.0,
+    "cond_A": false,
+    "seismic": false,
+    "u_on": false,
+    "u_type": "Opcion A — barras U (patas rectas, ld)",
+    "u_size": "#4",
+    "u_n": 2,
+    "u_fy": 60.0,
+    "u_depth": 2.0,
+    "u_leg": 0.0
+   },
+   "loads": {
+    "Pu": 400.0,
+    "Mux": 1800.0,
+    "Muy": 0.0,
+    "Vux": 30.0,
+    "Vuy": 0.0,
+    "friction": false,
+    "mu_fric": 0.4,
+    "tilt_x": 0.0,
+    "tilt_y": 0.0,
+    "Tz": 0.0
+   },
+   "fea": {
+    "ks_mode": "Ec/hped",
+    "ks_manual": 1000.0,
+    "ccx_path": "ccx",
+    "gmsh_path": "gmsh",
+    "mesh3d": 0.0,
+    "mesh3d_mode": "Rapida (recomendada, ~30 s)",
+    "shear_arm": -1.0,
+    "vm_avg_factor": 1.0,
+    "plastic": true,
+    "plastic_limit": 5.0,
+    "weld_peak_factor": 1.5,
+    "weld_model": "Conectores (cordon como resortes entre cuerpos separados)",
+    "weld_criterion": "Plastico 5 % (Ghimire et al. 2023)",
+    "weld_plastic_limit": 5.0,
+    "weld_mesh": 0.0,
+    "weld_long_reduction": true
+   },
+   "combos": [
+    {
+     "name": "Comb 1",
+     "Pu": 400.0,
+     "Mux": 1800.0,
+     "Muy": 0.0,
+     "Vux": 30.0,
+     "Vuy": 0.0
+    }
+   ],
+   "combo_idx": 0
+  }
+ ],
+ "perfiles": [],
+ "materiales": {
+  "steel": [],
+  "bolt": [],
+  "electrode": [],
+  "anchor": [],
+  "concrete": []
+ }
+}

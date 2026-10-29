@@ -79,7 +79,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      },
      {
       "kind": "Cartela atornillada (diagonal)",
@@ -95,7 +96,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      },
      {
       "kind": "Cartela atornillada (diagonal)",
@@ -111,7 +113,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      }
     ],
     "loads": [

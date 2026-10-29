@@ -2,19 +2,23 @@
 
 # SteelConPro 1.1
 
-Diseño y verificación de **conexiones de acero** en dos módulos:
+Diseño y verificación de **conexiones de acero** con **un solo tipo de conexión**, que se arma por operaciones:
 
-| Módulo | Qué es | Estado |
-|---|---|---|
-| **Placa base** | placas base de columna (perfiles **W, HSS cuadrado/rectangular, HSS circular y Pipe**), anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis de elementos finitos sólido (Gmsh + CalculiX) | terminado |
-| **Conexión de nudo** | un nudo con **cualquier número de miembros** (columnas, vigas, diagonales; cualquier sección y ángulo) y **un miembro principal que usted designa** (el que recibe a los demás, como el miembro de apoyo de IDEA StatiCa) | flujo por operaciones, verificación por código (AISC 360-22) y vista 3D; el análisis 3D por elementos finitos llega después |
+| Elemento | Qué es |
+|---|---|
+| **Miembros** | cualquier número (columnas, vigas, diagonales; cualquier sección y ángulo); **uno es el principal, que usted designa** (el que recibe a los demás, como el miembro de apoyo de IDEA StatiCa) |
+| **Operaciones** | placa simple, doble ángulo, asiento, placa extrema, alas soldadas, cartelas, corte del extremo, placas de continuidad y **placa base** (anclajes ACI 318-19, llave de corte, rigidizadores, soldadura; cálculo cerrado y análisis 3D por elementos finitos sólido con Gmsh + CalculiX), sobre cualquier miembro |
+| **Cargas y análisis** | esfuerzos por miembro y caso de carga (y las combinaciones de la placa base), verificación por código (AISC 360-22, AISC DG1, ACI 318), vista 3D, memoria de cálculo; análisis FEM 3D de la placa base |
+
+**No hay un módulo de placa base aparte.** Una placa base es una operación más: se crea una conexión, se agregan los miembros (o solo el principal), y a la columna se le asigna la operación *Placa base*.
+Los archivos y plantillas de placa base de las versiones anteriores abren como una conexión de nudo con esa operación (mismos resultados).
 
 No hay «tipologías» de nudo (viga-columna, viga a viga, crucetas): el tipo de nudo lo define lo que usted arma. El nudo se arma **por operaciones**, como en IDEA StatiCa Connection (*Miembros → Operaciones → Cargas → Análisis → Informe*), y se verifican
-**por código** con tablas de D/C por operación y memoria de cálculo, como en RAM Connection. La pestaña *Análisis FEM* del nudo sigue desactivada hasta la etapa del análisis
-por elementos finitos. Las tipologías anteriores (placa de corte, doble ángulo, asiento, empalmes, placa extrema, cartela, HSS, RBS y puente) se retiraron como
+**por código** con tablas de D/C por operación y memoria de cálculo, como en RAM Connection. La pestaña *Análisis FEM* es el análisis de elementos finitos sólido de la **placa base** (solo se activa si la conexión la lleva; el resto de las operaciones se verifica por código,
+sin FEM por ahora). Las tipologías anteriores (placa de corte, doble ángulo, asiento, empalmes, placa extrema, cartela, HSS, RBS y puente) se retiraron como
 módulos independientes: ahora son operaciones de la conexión de nudo.
 
-Normas de la placa base: **AISC 360-22**, **AISC Design Guide 1 (2ª Ed.)**, **ACI 318-19 Cap. 17**.
+Normas: **AISC 360-22**, **AISC 358/341** donde aplique; placa base: **AISC Design Guide 1 (2ª Ed.)** y **ACI 318-19 Cap. 17**.
 
 > **Cambio de nombre (1.1).** El programa antes tenía otro nombre y otra numeración de versiones; la de SteelConPro empieza en 1.1. Los proyectos se guardan ahora como `.scp`; los archivos `.pbase` y el formato de libro de las
 > versiones anteriores se siguen abriendo (al guardar quedan como `.scp`), y los materiales y perfiles importados de la carpeta de datos anterior se copian solos a la
@@ -34,11 +38,11 @@ Los proyectos nuevos arrancan en **mm, kN, MPa, kN·m** (se cambia en la pestañ
 (solo el miembro principal; usted agrega los miembros, las operaciones y las cargas) o desde una **plantilla propia**.
 
 **Plantillas propias.** Con la conexión terminada, el botón **Plantilla** (o *Archivo > Guardar la conexión como plantilla*) la guarda con un nombre, una descripción y, en los
-nudos, con o sin las cargas. Después aparece en *Nueva conexión* dentro de su módulo, con vista previa en 3D, y se puede **renombrar o eliminar** desde ahí. Sirve para cualquier módulo
-(también la placa base). Cada plantilla es un archivo `.json` en `%APPDATA%\SteelConPro\plantillas` con la conexión completa y las secciones y materiales propios que usa; se puede
+nudos, con o sin las cargas. Después aparece en *Nueva conexión*, con vista previa en 3D, y se puede **renombrar o eliminar** desde ahí. Sirve para cualquier módulo
+(con placa base o sin ella). Cada plantilla es un archivo `.json` en `%APPDATA%\SteelConPro\plantillas` con la conexión completa y las secciones y materiales propios que usa; se puede
 copiar a otra PC. Guardar con el mismo nombre la reemplaza.
 
-Después el nudo se edita en cuatro pasos (pestañas dentro del módulo):
+Después la conexión se edita en cuatro pasos (pestañas dentro de *Conexión de nudo*):
 
 1. **Miembros**: la tabla lista **todos los miembros del nudo**; el **principal lleva ★** en la primera fila. Al seleccionar una fila se edita ese miembro (*Agregar*,
    *Duplicar*, *Quitar*), con **cualquier sección** del catálogo AISC, de la biblioteca de secciones o dibujada en el Section Designer.
@@ -51,9 +55,13 @@ Después el nudo se edita en cuatro pasos (pestañas dentro del módulo):
      miembros conservan su posición (si ya no tocan al nuevo principal, quedan con un retranqueo). Las operaciones y las cargas del miembro designado se descartan, porque eran su
      conexión al principal anterior; el programa lo avisa antes de hacerlo y hay que definirlas de nuevo en los miembros que ahora llegan al principal.
 2. **Operaciones**: una lista ordenada que se aplica a los miembros (*Agregar operación*): **placa simple, doble ángulo, asiento, placa extrema a ras o extendida, alas
-   soldadas con alma atornillada, cartela atornillada o con miembro soldado, corte del extremo (cope) y placas de continuidad**. Cada operación tiene sus parámetros
+   soldadas con alma atornillada, cartela atornillada o con miembro soldado, corte del extremo (cope), placas de continuidad y placa base**. Cada operación tiene sus parámetros
    (pernos: diámetro, calidad, número y separación; placas: espesor y acero; filetes; profundidades del corte). A lo sumo una operación de conexión por miembro; el 3D se
    actualiza con cada cambio. Las diagonales que comparten plano comparten una sola cartela.
+   **Placa base**: va en el extremo libre de un miembro, el principal (lado − o +) o uno conectado, y solo hay una por conexión. Al agregarla aparece la pestaña **Placa base** con
+   sus datos de siempre (*Cargas* con las combinaciones, *Perfil* —giro y descentrado de la columna sobre la placa, inclinación—, *Placa*, *Pernos*, *Llave de corte*,
+   *Rigidizadores*, *Soldadura*, *Concreto* y *Elementos finitos*). El perfil es el del miembro que la lleva. La placa queda perpendicular al eje del miembro (la inclinación de la
+   columna respecto de la placa se indica en *Perfil*). Si se designa otro miembro como principal, la placa sigue en el mismo extremo libre.
 3. **Cargas**: esfuerzos internos de cada miembro junto al nudo (N, Vy, Vz, T, My, Mz) por caso de carga, en los ejes locales del miembro; se verifican todos los casos y
    gobierna el peor.
 4. **Análisis**: *Verificar por código* (también el botón **VERIFICAR (F8)**), *Análisis 3D por elementos finitos* (todavía no disponible) e *Informe del nudo* (PDF).
@@ -103,7 +111,7 @@ exportan e importan (JSON), quedan en todas las listas del programa (los pernos 
 
 ## Visor 3D
 
-Todos los módulos (placa base y nudos) usan el **visor OpenGL de la última versión de PlacaBase Pro** (un solo visor con Iso, Planta, Frontal y Lateral y el interruptor **Cotas**: en los nudos
+Toda conexión usa el **visor OpenGL de la última versión de PlacaBase Pro** (un solo visor con Iso, Planta, Frontal y Lateral y el interruptor **Cotas**: en los nudos
 acota los largos del miembro principal y de cada miembro conectado y su posición; con OpenGL no hay pestaña «Planta y elevación») (`gl3d.py`: sombreado plano con aristas vivas, órbita con el ratón,
 etiquetas) cuando el equipo ofrece OpenGL; si no, usan el visor clásico de matplotlib. Se puede forzar el clásico con **Ver > Visor 3D OpenGL** (desmarcar; se aplica al reiniciar)
 o con la variable de entorno `SCP_GL=0`. El programa **arranca maximizado**.
@@ -453,12 +461,13 @@ completo por lotes.
 
 | Archivo | Caso | D/C | Gobierna |
 |---|---|---|---|
-| `PB-01_W14X90.scp` | W14X90, 22×22×2", 8 pernos Ø1¼", llave de corte | 0.750 | distancia al borde |
+| `PB-01_W14X90.scp` | placa base: W14X90, 22×22×2", 8 pernos Ø1¼", llave de corte (archivo de la versión anterior: abre como conexión con la operación de placa base) | 0.750 | distancia al borde |
 | `PB-02_HSS12_rigidizada.scp` | HSS12X12X½, 24×24×2", rigidizadores perimetrales, soldadura CJP | 0.949 | esbeltez del rigidizador |
 | `PB-03_poste_circular.scp` | Pipe/HSS16 sobre placa circular Ø30", 12 pernos Ø1½" con gancho en J | 1.000 | aplastamiento del concreto |
 | `CN-01_columna_con_vigas.scp` | columna W14X90 intermedia con cuatro vigas (placa extrema extendida, doble ángulo, placa simple, alas soldadas) y una diagonal con cartela | — | verificación por código |
 | `CN-02_viga_con_secundarias.scp` | viga principal W24X55 con tres secundarias (placa extrema a ras, placa simple, doble ángulo esviada 60°) | — | verificación por código |
 | `CN-03_cordon_con_diagonales.scp` | cordón HSS10X10 con dos diagonales en V y un montante, cartela atornillada | — | verificación por código |
+| `CN-04_columna_con_placa_base.scp` | columna W14X90 sobre placa base (datos de PB-01) con una viga a cada lado y una diagonal con cartela | 0.800 | verificación por código |
 
 ---
 

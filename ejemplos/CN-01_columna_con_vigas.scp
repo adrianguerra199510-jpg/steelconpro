@@ -105,7 +105,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      },
      {
       "kind": "Placa extrema extendida (momento)",
@@ -121,7 +122,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      },
      {
       "kind": "Doble ángulo (corte)",
@@ -137,7 +139,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      },
      {
       "kind": "Alas soldadas y alma atornillada (momento)",
@@ -153,7 +156,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      },
      {
       "kind": "Placas de continuidad",
@@ -169,7 +173,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      },
      {
       "kind": "Cartela atornillada (diagonal)",
@@ -185,7 +190,8 @@
       "cope_top": 2.0,
       "cope_bot": 0.0,
       "cope_len": 4.5,
-      "cont_t": 0.5
+      "cont_t": 0.5,
+      "end": -1
      }
     ],
     "loads": [

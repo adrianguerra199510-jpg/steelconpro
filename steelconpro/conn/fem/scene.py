@@ -58,6 +58,13 @@ def scene_model(mdl: Model3D, loads: bool = True, scale: float = 1.0, load_label
         pts += [q for f in faces for q in f]
         sc.group = "g_" + p.kind
         sc.add_faces(faces, _rgb(GRAY if gray else COLORS.get(p.kind, COLORS["other"])), 1.0 if p.kind not in ("support",) else 0.55, edges=True)
+    for tag, faces, color, alpha in getattr(mdl, "extra", []):             # placa base: anclajes, llave, rigidizadores y el pedestal (translucido)
+        if gray and tag != "plate":
+            continue
+        fs = [[tuple(np.asarray(q) * scale) for q in f] for f in faces]
+        pts += [q for f in fs for q in f]
+        sc.group = "g_" + tag if tag != "conc" else "g_support"
+        sc.add_faces(fs, _rgb(GRAY if gray else color), alpha, edges=tag != "conc")
     for w in (mdl.welds if not gray else []):
         pr = weld_prism(w)
         fs = [[tuple(np.asarray(q) * scale) for q in f] for f in pr.faces()]

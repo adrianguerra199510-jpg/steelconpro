@@ -23,7 +23,7 @@ from .ui_widgets import Form
 from .conn import presets as PRE
 from .conn.specs import (END_LABELS, POS_LABEL, OFF_LABEL, OFF2_LABEL, BOLT_GRADES,
                          SHEAR_BOLT_SIZES, OPERATIONS, OP_GROUPS, Operation, Load, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET,
-                         OP_GUSSET_W, OP_COPE, OP_CONT, CONNECTION_OPS, GUSSET_OPS)
+                         OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, CONNECTION_OPS, GUSSET_OPS)
 
 
 class SectionPicker(QWidget):
@@ -269,7 +269,12 @@ class MembersPage(Form):
         new = nd.main_name.strip()
         if not new or new in {m.name for m in nd.members}:      # el nombre del principal no puede estar vacio ni repetir el de un miembro
             new = self._old_main or "M1"
+        old = self._old_main
         nd.main_name = new
+        if old and new != old:                                  # la placa base y las cargas que llevan el nombre del principal lo siguen
+            nd.main_name = old
+            nd.rename_main(new)
+            self.renamed.emit(old, new)
         self._old_main = new
         wn = self.w(f"{self.attr}.main_name")
         if wn.text() != new:
@@ -450,7 +455,7 @@ class MembersPage(Form):
 
 
 # ====================================================================================================== 2. operaciones
-OP_DEFAULTS = {OP_TAB: dict(plate_t=0.375, n_bolts=3), OP_DANG: dict(plate_t=0.375, n_bolts=3), OP_SEAT: dict(plate_t=0.5, n_bolts=2),
+OP_DEFAULTS = {OP_BASE: dict(end=-1), OP_TAB: dict(plate_t=0.375, n_bolts=3), OP_DANG: dict(plate_t=0.375, n_bolts=3), OP_SEAT: dict(plate_t=0.5, n_bolts=2),
                OP_EP_FLUSH: dict(plate_t=0.75), OP_EP_EXT: dict(plate_t=0.75, ep_ext=3.0), OP_WELD: dict(plate_t=0.375, n_bolts=3),
                OP_GUSSET: dict(plate_t=0.5, n_bolts=3), OP_GUSSET_W: dict(plate_t=0.5), OP_COPE: dict(cope_top=2.0, cope_len=4.5), OP_CONT: dict(cont_t=0.5)}
 OP_HELP = {OP_TAB: "Placa soldada al miembro principal y atornillada al alma del miembro conectado (una fila vertical de pernos).",
@@ -462,11 +467,14 @@ OP_HELP = {OP_TAB: "Placa soldada al miembro principal y atornillada al alma del
            OP_GUSSET: "Cartela soldada al principal y atornillada a la diagonal; las diagonales del mismo plano comparten cartela.",
            OP_GUSSET_W: "Cartela soldada al principal con la diagonal soldada a la cartela (sin pernos).",
            OP_COPE: "Recorta las alas (y parte del alma) en el extremo del miembro conectado, para que quepa contra el principal.",
-           OP_CONT: "Placas horizontales dentro de la columna I, a la altura de las alas del miembro conectado."}
+           OP_CONT: "Placas horizontales dentro de la columna I, a la altura de las alas del miembro conectado.",
+           OP_BASE: "Placa base con anclajes sobre concreto en el extremo libre de un miembro (el principal o uno conectado): cálculo cerrado (AISC DG1, ACI 318) y análisis "
+                    "3D por elementos finitos. Sus datos están en las pestañas de «Placa base» (Cargas, Perfil, Placa, Pernos, Llave de corte, Rigidizadores, Soldadura, "
+                    "Concreto y Elementos finitos). Solo una por conexión."}
 
 
 _GROUP_COLORS = {"Conexión de corte": "#4a90d9", "Conexión de momento": "#e8731a", "Conexión de diagonal": "#4fae6a", "Modificar el miembro": "#8a94a0",
-                 "Rigidizar el miembro principal": "#9b6fc9"}
+                 "Rigidizar el miembro principal": "#9b6fc9", "Apoyo del miembro": "#c9a227"}
 _ICON_CACHE = {}
 
 
@@ -487,8 +495,14 @@ def op_icon(kind: str):
     return _ICON_CACHE[kind]
 
 
-def op_summary(o: Operation, us=None) -> str:
+def op_summary(o: Operation, us=None, prj=None) -> str:
     L = (lambda v: us.q("L", v)) if us is not None else (lambda v: f"{v:g} in")
+    if o.kind == OP_BASE:
+        if prj is None:
+            return ""
+        p, b = prj.plate, prj.bolts
+        dim = f"Ø{L(p.Dp)}" if p.shape == "Circular" else f"{L(p.N)} × {L(p.B)}"
+        return f"placa {dim} × {L(p.tp)}, {b.n_total} anclajes Ø{b.size}"
     if o.kind in (OP_TAB, OP_DANG, OP_WELD):
         return f"{o.n_bolts} pernos Ø{o.bolt_size} {o.bolt_grade}, e = {L(o.plate_t)}"
     if o.kind == OP_SEAT:
@@ -561,6 +575,10 @@ class OperationsPage(Form):
         of._lay.addRow(self.lbl_help)
         of.combo("Tipo", "o.kind", OPERATIONS)
         of.combo("Miembro", "o.member", [])
+        self.cb_end = QComboBox()
+        self.cb_end.addItems(["Lado − (abajo si es vertical)", "Lado +"])
+        self.cb_end.currentIndexChanged.connect(self._end_changed)
+        of._lay.addRow("Extremo del principal", self.cb_end)
         of.combo("Diámetro de los pernos", "o.bolt_size", SHEAR_BOLT_SIZES)
         of.combo("Calidad de los pernos", "o.bolt_grade", BOLT_GRADES)
         of.int_("Pernos por fila (o filas de la cartela)", "o.n_bolts", 1, 12)
@@ -593,16 +611,21 @@ class OperationsPage(Form):
     def load(self, prj):
         self._prj = prj
         nd = self._nodo()
-        cb = self.of.w("o.member")
-        cb.blockSignals(True)
-        cb.clear()
-        cb.addItems([m.name for m in nd.members])
-        cb.blockSignals(False)
+        self._fill_member_combo(nd.operations[self._sel].kind if nd.operations and self._sel < len(nd.operations) else None)
         self._sel = max(0, min(self._sel, len(nd.operations) - 1))
         self._busy = True
         self._fill_table()
         self._busy = False
         self._load_op()
+
+    def _fill_member_combo(self, kind):
+        """Miembros a los que se puede aplicar la operacion: la placa base tambien puede ir en el principal."""
+        nd = self._nodo()
+        cb = self.of.w("o.member")
+        cb.blockSignals(True)
+        cb.clear()
+        cb.addItems(nd.names() if kind == OP_BASE else [m.name for m in nd.members])
+        cb.blockSignals(False)
 
     def store(self, prj):
         self._prj = prj
@@ -613,7 +636,7 @@ class OperationsPage(Form):
         self.tbl.blockSignals(True)
         self.tbl.setRowCount(len(nd.operations))
         for i, o in enumerate(nd.operations):
-            for j, txt in enumerate((str(i + 1), o.kind, o.member, op_summary(o, self.us))):
+            for j, txt in enumerate((str(i + 1), o.kind, o.member, op_summary(o, self.us, self._prj))):
                 it = QTableWidgetItem(txt)
                 if j == 1:
                     it.setIcon(op_icon(o.kind))
@@ -642,10 +665,14 @@ class OperationsPage(Form):
             return
         self._busy = True
         self.of.us = self.us
+        self._fill_member_combo(self._hold.o.kind)
         cb = self.of.w("o.member")
         _ensure_item(cb, self._hold.o.member)
         _ensure_item(self.of.w("o.plate_steel"), self._hold.o.plate_steel)
         self.of.load(self._hold)
+        self.cb_end.blockSignals(True)
+        self.cb_end.setCurrentIndex(1 if self._hold.o.end >= 0 else 0)
+        self.cb_end.blockSignals(False)
         self._busy = False
         self._visibility()
 
@@ -668,15 +695,23 @@ class OperationsPage(Form):
             "o.bolt_grade": k in (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET),
             "o.n_bolts": k in (OP_TAB, OP_DANG, OP_WELD, OP_GUSSET),
             "o.bolt_s": k in (OP_TAB, OP_DANG, OP_WELD, OP_GUSSET),
-            "o.plate_t": k not in (OP_COPE, OP_CONT),
-            "o.plate_steel": k not in (OP_COPE, OP_CONT),
-            "o.weld_size": k not in (OP_COPE, OP_CONT, OP_SEAT),
+            "o.plate_t": k not in (OP_COPE, OP_CONT, OP_BASE),
+            "o.plate_steel": k not in (OP_COPE, OP_CONT, OP_BASE),
+            "o.weld_size": k not in (OP_COPE, OP_CONT, OP_SEAT, OP_BASE),
             "o.ep_ext": k == OP_EP_EXT,
             "o.cope_top": k == OP_COPE, "o.cope_bot": k == OP_COPE, "o.cope_len": k == OP_COPE,
             "o.cont_t": k == OP_CONT,
         }
         for p, on in show.items():
             of.show_field(p, on)
+        nd = self._nodo()
+        of.show_field(self.cb_end, k == OP_BASE and o.member == nd.main_name)
+
+    def _end_changed(self, *_):
+        if self._busy or self._hold.o is None:
+            return
+        self._hold.o.end = 1 if self.cb_end.currentIndex() == 1 else -1
+        self.changed.emit()
 
     def _op_changed(self, *_):
         if self._busy or self._hold.o is None:
@@ -687,6 +722,12 @@ class OperationsPage(Form):
             for k, v in OP_DEFAULTS.get(self._hold.o.kind, {}).items():
                 setattr(self._hold.o, k, v)
             self._busy = True
+            self._fill_member_combo(self._hold.o.kind)
+            _ensure_item(self.of.w("o.member"), self._hold.o.member)
+            if self._hold.o.kind == OP_BASE:                    # una sola placa base por conexion
+                nd_ = self._nodo()
+                nd_.operations = [x for x in nd_.operations if x is self._hold.o or x.kind != OP_BASE]
+                self._sel = nd_.operations.index(self._hold.o)
             self.of.load(self._hold)
             self._busy = False
         self._visibility()
@@ -705,7 +746,9 @@ class OperationsPage(Form):
     def _add(self, kind, member=None):
         self._store_op()
         nd = self._nodo()
-        if not nd.members:
+        if kind == OP_BASE:                                   # la placa base va en el principal (o en el miembro seleccionado): una sola por conexion
+            member = member or (self.selected_member if self.selected_member in nd.names() else nd.main_name)
+        elif not nd.members:
             return
         if member is None:
             sel = self.selected_member
@@ -713,6 +756,8 @@ class OperationsPage(Form):
         o = Operation(kind=kind, member=member, **OP_DEFAULTS.get(kind, {}))
         if o.is_connection:                                    # una sola conexion por miembro: la nueva reemplaza a la anterior
             nd.operations = [x for x in nd.operations if not (x.member == member and x.is_connection)]
+        if kind == OP_BASE:
+            nd.operations = [x for x in nd.operations if x.kind != OP_BASE]
         nd.operations.append(o)
         self._sel = len(nd.operations) - 1
         self._refill()
@@ -904,7 +949,8 @@ class AnalysisPage(QWidget):
         self.btn_chk = QPushButton("Verificar por código (AISC 360-22)")
         self.btn_chk.setStyleSheet("QPushButton{background:#e85d0c;color:white;font-weight:bold;border:0;} QPushButton:hover{background:#c44a06;}")
         self.btn_chk.clicked.connect(self.check_requested.emit)
-        self.btn_fem = QPushButton("Análisis 3D por elementos finitos  (próximamente)")
+        self.btn_fem = QPushButton("Análisis 3D de la placa base (Gmsh + CalculiX)")
+        self.btn_fem.setToolTip("Análisis de elementos finitos sólido de la placa base de la conexión (solo con la operación «Placa base»).")
         self.btn_fem.clicked.connect(self.fem_requested.emit)
         self.btn_rep = QPushButton("Informe del nudo (PDF)")
         self.btn_rep.clicked.connect(self.report_requested.emit)
@@ -917,7 +963,7 @@ class AnalysisPage(QWidget):
         lay.addStretch(1)
         self.set_state("Sin verificar.", None)
         self.lbl.setText("Cada operación se verifica con las cargas de los miembros que toca: pernos (cortante, tracción, aplastamiento), placas (fluencia, rotura, "
-                         "bloque de cortante, flexión) y soldaduras. Los resultados aparecen en la pestaña <b>Resultados</b>.")
+                         "bloque de cortante, flexión) y soldaduras; la placa base, con anclajes (ACI 318), placa (DG1) y soldadura. Los resultados aparecen en la pestaña <b>Resultados</b>.")
 
     def set_state(self, text, ok):
         bg, fg = {True: ("#c6efce", "#006100"), False: ("#ffc7ce", "#9c0006"), None: ("#e4e7eb", "#44546a")}[ok]
@@ -930,6 +976,9 @@ class AnalysisPage(QWidget):
         self.lbl_list.setText("".join(f"<div style='margin:2px 0'><span style='color:{mark[st][1]}; font-weight:bold'>{mark[st][0]}</span>&nbsp; {txt}</div>"
                                       for st, txt in rows))
         self.btn_chk.setEnabled(all(st is not False for st, _t in rows))
+
+    def set_fem_available(self, on):
+        self.btn_fem.setEnabled(bool(on))
 
 
 # ====================================================================================================== contenedor
@@ -992,18 +1041,26 @@ class NodeForm(Form):
         sin_conn = [m.name for m in nd.members if nd.connection_of(m.name) is None]
         cases = sorted({x.case for x in nd.loads})
         cargados = {x.member for x in nd.loads if any(abs(getattr(x, k)) > 1e-12 for k in ("N", "Vy", "Vz", "T", "My", "Mz"))}
-        rows = [(bool(nd.members), f"<b>1 Miembros:</b> {len(nd.members)} conectado(s) al principal «{nd.main_name}» ({nd.main_shape})" if nd.members else "<b>1 Miembros:</b> no hay miembros conectados")]
-        if not conn:
-            rows.append((False, "<b>2 Operaciones:</b> agregue al menos una operación de conexión"))
+        base = nd.base_op()
+        rows = [(bool(nd.members) or base is not None,
+                 f"<b>1 Miembros:</b> principal «{nd.main_name}» ({nd.main_shape}) y {len(nd.members)} conectado(s)" if nd.members or base is not None
+                 else "<b>1 Miembros:</b> no hay miembros conectados")]
+        extra = f"; placa base en «{base.member}»" if base is not None else ""
+        if not conn and base is None:
+            rows.append((False, "<b>2 Operaciones:</b> agregue al menos una operación de conexión o la placa base"))
         else:
-            rows.append((True if not sin_conn else None, f"<b>2 Operaciones:</b> {len(nd.operations)} ({len(conn)} de conexión)"
-                         + (f"; sin conexión: {', '.join(sin_conn)}" if sin_conn else "")))
+            rows.append((True if not sin_conn or not conn else None, f"<b>2 Operaciones:</b> {len(nd.operations)} ({len(conn)} de conexión{extra})"
+                         + (f"; sin conexión: {', '.join(sin_conn)}" if sin_conn and conn else "")))
         if not cases:
-            rows.append((False, "<b>3 Cargas:</b> defina al menos un caso de carga"))
+            if base is not None and not conn:
+                rows.append((True, "<b>3 Cargas:</b> la placa base usa sus propias combinaciones (Placa base ▸ Cargas)"))
+            else:
+                rows.append((False, "<b>3 Cargas:</b> defina al menos un caso de carga"))
         else:
             faltan = [n for n in (names & {o.member for o in conn}) if n not in cargados]
             rows.append((True if not faltan else None, f"<b>3 Cargas:</b> {len(cases)} caso(s)" + (f"; miembros sin carga: {', '.join(sorted(faltan))}" if faltan else "")))
         self.an_pg.set_checklist(rows)
+        self.an_pg.set_fem_available(base is not None)
 
     def _after_rename(self):
         self.load(self._prj)

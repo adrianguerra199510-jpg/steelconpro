@@ -266,6 +266,7 @@ class Model3D:
     notes: list = field(default_factory=list)
     dims: list = field(default_factory=list)      # cotas para el visor: (a, b, desplazamiento, texto, vistas)
     tags: list = field(default_factory=list)      # etiquetas de miembros para el visor: (punto, texto)
+    extra: list = field(default_factory=list)     # piezas ya hechas de caras en el mundo (placa base): (etiqueta, caras, color, alfa)
 
     def part(self, name):
         return next((p for p in self.parts if p.name == name), None)
@@ -276,6 +277,11 @@ class Model3D:
             a, b = p.bbox()
             mn.append(a)
             mx.append(b)
+        for _tag, faces, _c, _a in self.extra:
+            P = np.asarray([q for f in faces for q in f], float)
+            if len(P):
+                mn.append(P.min(axis=0))
+                mx.append(P.max(axis=0))
         return np.min(mn, axis=0), np.max(mx, axis=0)
 
     def bolt_hole_prisms(self, part_name):

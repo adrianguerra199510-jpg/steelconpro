@@ -24,7 +24,7 @@ def run():
     from steelconpro.conn import presets as PROD, assembly as AS, module_for, modules, solve_conn
     from steelconpro.conn.specs import (CT_BASEPLATE, CT_NODE, CONN_TYPES, ATTR_OF, MODE_COL, MODE_BEAM, MODE_CHORD, LEGACY_NODES, LEGACY_END_LABELS,
                                         END_LABELS, OPERATIONS, CONNECTION_OPS, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET,
-                                        OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Member, Operation, Load)
+                                        OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, Nodo, Member, Operation, Load)
     from steelconpro.conn.fem import scene as SC
     from steelconpro.conn.checks import adapters
 
@@ -163,6 +163,86 @@ def run():
             FAIL.append(f"principal: designaciones sucesivas {ndr.names()}")
             break
     print(f"{'miembro principal designable':34} V1 pasa a principal sin mover nada (viga, columna en dos tramos, viga que sigue el eje), extremos, operaciones/cargas descartadas: OK")
+
+    # ---------------------------------------------------------------- la placa base como operacion (sin modulo individual)
+    from steelconpro.solver import solve as _solve_eng
+    from steelconpro.conn import baseplate as BPm
+    from steelconpro import geometry as _G
+    for ex in ("PB-01_W14X90", "PB-02_HSS12_rigidizada", "PB-03_poste_circular", "COMP-1_W14X90_traccion"):
+        raw_ = json.load(open(f"ejemplos/{ex}.scp", encoding="utf-8"))
+        eng_ = Project.from_json(json.dumps(raw_["conexiones"][0] if "conexiones" in raw_ else raw_))               # el proyecto de placa base tal como era
+        ref_ = max(_solve_eng(eng_.with_combo(i)).max_ratio for i in range(len(eng_.combo_list())))
+        pj_ = load_book(f"ejemplos/{ex}.scp")[0]
+        Rn_ = solve_conn(pj_)
+        if abs(Rn_.max_ratio - ref_) > 1e-9 or Rn_.ok != all(_solve_eng(eng_.with_combo(i)).ok for i in range(len(eng_.combo_list()))):
+            FAIL.append(f"placa base: {ex} como operacion del nudo da D/C {Rn_.max_ratio} y el motor {ref_}")
+        mb_ = AS.build_model(pj_)
+        pl_ = [f for t, fs, _c, _a in mb_.extra if t == "plate" for f in fs]
+        zs_ = np.array([q[2] for f in pl_ for q in f])
+        if not mb_.extra or any(t == "column" for t, _f, _c, _a in mb_.extra) or abs(zs_.max()) > 1e-6 or abs(zs_.min() + pj_.plate.tp) > 1e-6:
+            FAIL.append(f"placa base: {ex}: la placa debe quedar bajo el extremo del principal (z de {-pj_.plate.tp:g} a 0): {zs_.min():.3f}..{zs_.max():.3f}")
+    # orientacion: el perfil del nudo coincide con el que dibuja el motor de la placa base (giro del perfil respecto de la placa)
+    n_or = 0
+    for lab_ in ("W14X90", "W8X31", "HSS12X12X1/2", "HSS6X4X1/4", "C12X30", "L4X4X1/2", "WT6X20"):
+        for rot_ in (0.0, 90.0, 30.0, -45.0):
+            pe_ = Project(); pe_.section.label = lab_; pe_.section.rotation = rot_
+            q_ = BPm.unify(Project.from_json(pe_.to_json()))
+            nd_ = q_.node
+            A_, sx_, sy_ = AS.main_frame(nd_)
+            pr_ = AS.section_prisms(AS.shape_of(nd_.main_shape), (0, 0, 0), sx_, sy_, A_, 0.0, 10.0)
+            E_, Ai_, bx_, by_ = BPm.end_of_member(nd_, nd_.base_op(), {}, {})
+            O_, F_ = BPm.plate_transform(BPm.derive(q_), E_, Ai_, bx_, by_)
+            pts_ = np.vstack([p_.corners() for p_ in pr_])
+            loc_ = (F_.T @ (pts_ - O_).T).T
+            base_ = loc_[np.abs((pts_ - E_) @ Ai_) < 1e-6][:, :2]
+            rs_ = _G.section_rects(BPm.derive(q_))
+            e_ = np.array([pt for poly in rs_ for pt in poly]) if rs_ else np.array(_G.profile_outline(BPm.derive(q_))[0])
+            if not (np.allclose(e_.min(0), base_.min(0), atol=1e-5) and np.allclose(e_.max(0), base_.max(0), atol=1e-5)):
+                FAIL.append(f"placa base: el perfil {lab_} con giro {rot_} no coincide con el del motor de la placa base")
+            n_or += 1
+    # una columna inclinada sobre placa horizontal (migracion de la inclinacion): el eje del miembro es el de la columna y el plano de la placa sigue horizontal
+    pt_ = Project(); pt_.loads.tilt_x, pt_.loads.tilt_y = 10.0, 20.0
+    qt_ = BPm.unify(Project.from_json(pt_.to_json()))
+    Et_, Ait_, bxt_, byt_ = BPm.end_of_member(qt_.node, qt_.node.base_op(), {}, {})
+    Ot_, Ft_ = BPm.plate_transform(BPm.derive(qt_), Et_, Ait_, bxt_, byt_)
+    if np.abs(Ft_ - np.eye(3)).max() > 1e-9 or abs(qt_.node.main_el - 90.0) < 1.0:
+        FAIL.append(f"placa base: la columna inclinada debe migrar con la placa horizontal (matriz {np.round(Ft_, 4).tolist()}) y el eje inclinado ({qt_.node.main_el})")
+    def _pj(nd__):
+        q__ = Project(); q__.ctype = CT_NODE; q__.element = "T-1"; q__.node = nd__
+        return q__
+    # la placa base en un miembro conectado (extremo libre) y en el lado + del principal; todo finito y verificable
+    rb_ = random.Random(7)
+    n_bp = 0
+    for k_ in range(60):
+        nb_ = PRE.build(MODE_COL, "int2", "I", "tab")
+        who_ = rb_.choice(nb_.names())
+        nb_.operations.append(Operation(kind=OP_BASE, member=who_, end=rb_.choice((-1, 1))))
+        qb_ = _pj(nb_)
+        qb_.plate.tp = rb_.choice((0.5, 1.0, 1.5))
+        mb2_ = AS.build_model(qb_)
+        if not mb2_.extra:
+            FAIL.append(f"placa base: sin geometria en {who_} (end {nb_.base_op().end}): {mb2_.notes}")
+            continue
+        for t_, fs_, _c, _a in mb2_.extra:
+            if not np.all(np.isfinite(np.array([q for f in fs_ for q in f]))):
+                FAIL.append(f"placa base: coordenadas no finitas ({who_})")
+        Rb2_ = solve_conn(qb_)
+        if not any(c.title.startswith("[Placa base") for c in Rb2_.checks) or any(not math.isfinite(c.ratio) for c in Rb2_.checks):
+            FAIL.append(f"placa base: verificaciones de la placa en {who_}")
+        n_bp += 1
+    # designar el miembro principal arrastra la placa base al mismo extremo libre
+    ndb = PRE.build(MODE_COL, "int2", "I", "tab")
+    ndb.members[0].pos = ndb.members[1].pos = 24.0
+    ndb.operations.append(Operation(kind=OP_BASE, member=ndb.main_name, end=-1))
+    ndb.main_end = END_LABELS[2]
+    pbd = _pj(ndb)
+    zmin0 = float(AS.build_model(pbd).bounds()[0][2])
+    AS.set_main(ndb, "V1")
+    mdb = AS.build_model(pbd)
+    if ndb.base_op() is None or ndb.base_op().member not in ndb.names() or ndb.base_op().member == "V1" or abs(float(mdb.bounds()[0][2]) - (zmin0 - 24.0)) > 1e-6:
+        FAIL.append(f"placa base: al designar otro principal la placa debe seguir en el extremo libre: {ndb.base_op()}, z {mdb.bounds()[0][2]} (antes {zmin0})")
+    print(f"{'placa base como operacion':34} 4 archivos de placa base abren y dan el mismo D/C que el motor, perfil y giro coinciden ({n_or} casos), columna inclinada, "
+          f"{n_bp} nudos con placa en miembros o en el lado +, al designar el principal la placa sigue: OK")
 
     # ---------------------------------------------------------------- cartelas: una por plano
     for geom, nmem, ngus in (("V", 2, 1), ("N", 2, 1), ("X", 4, 1), ("D", 1, 1)):
@@ -322,7 +402,7 @@ def run():
     print(f"{'casos de carga y avisos':34} gobierna el peor caso; sin cargas o sin operaciones avisa: OK")
 
     # ---------------------------------------------------------------- ejemplos del proyecto
-    for ex, ct in (("CN-01_columna_con_vigas", CT_NODE), ("CN-02_viga_con_secundarias", CT_NODE), ("CN-03_cordon_con_diagonales", CT_NODE)):
+    for ex, ct in (("CN-01_columna_con_vigas", CT_NODE), ("CN-02_viga_con_secundarias", CT_NODE), ("CN-03_cordon_con_diagonales", CT_NODE), ("CN-04_columna_con_placa_base", CT_NODE)):
         bk = load_book(f"ejemplos/{ex}.scp")
         if len(bk) != 1 or bk[0].ctype != ct:
             FAIL.append(f"nudos: ejemplo {ex} no abre como {ct}")
@@ -330,7 +410,7 @@ def run():
         R = solve_conn(bk[0])
         if not R.checks or not R.ok or R.max_ratio <= 0.0:
             FAIL.append(f"nudos: ejemplo {ex}: {len(R.checks)} verificaciones, ok = {R.ok}, D/C max = {R.max_ratio}")
-    print(f"{'ejemplos':34} CN-01, CN-02 y CN-03 abren y cumplen")
+    print(f"{'ejemplos':34} CN-01 a CN-04 abren y cumplen")
 
     # ---------------------------------------------------------------- guardar y leer
     prj = []
@@ -346,7 +426,7 @@ def run():
     f = os.path.join(tmp, "nudos.scp")
     save_book(f, [Project()] + prj)
     bk = load_book(f)
-    if [p.ctype for p in bk] != [CT_BASEPLATE, CT_NODE, CT_NODE, CT_NODE] or any(a.node != b.node for a, b in zip(prj, bk[1:])):
+    if [p.ctype for p in bk] != [CT_NODE, CT_NODE, CT_NODE, CT_NODE] or bk[0].node.base_op() is None or any(a.node != b.node for a, b in zip(prj, bk[1:])):
         FAIL.append("nudos: el libro no conserva los datos de los modulos")
     n0 = bk[1].node
     if n0.members[0].az != 33.0 or not isinstance(n0.members[0], Member) or not all(isinstance(o, Operation) for o in n0.operations) \
@@ -402,10 +482,11 @@ def run():
     bk2 = load_book(f2)
     if len(bk2) != 4 or MD.LAST_SKIPPED != [("VS-1", leg["ctype"])]:
         FAIL.append(f"nudos: una conexion de tipologia retirada debe omitirse con aviso: {len(bk2)} conexiones, {MD.LAST_SKIPPED}")
-    for ex in ("PB-01_W14X90", "COMP-1_W14X90_traccion"):
-        if load_book(f"ejemplos/{ex}.scp")[0].ctype != CT_BASEPLATE:
-            FAIL.append(f"nudos: {ex} debe abrir como placa base")
-    print(f"{'libros':34} ida y vuelta con operaciones y cargas; version anterior migra; tipologias retiradas se omiten; placa base abre igual")
+    for ex in ("PB-01_W14X90", "PB-02_HSS12_rigidizada", "PB-03_poste_circular", "COMP-1_W14X90_traccion"):
+        pb_ = load_book(f"ejemplos/{ex}.scp")[0]
+        if pb_.ctype != CT_NODE or pb_.node.base_op() is None or pb_.node.members:
+            FAIL.append(f"nudos: {ex} (placa base de la version anterior) debe abrir como conexion de nudo con la operacion de placa base")
+    print(f"{'libros':34} ida y vuelta con operaciones y cargas; version anterior migra; tipologias retiradas se omiten; las placas base de la version anterior abren como nudo con la operacion de placa base")
 
     # ---------------------------------------------------------------- aleatorio: cualquier seccion del catalogo, angulos, posiciones y operaciones
     rnd = random.Random(20261009)
@@ -801,16 +882,60 @@ def run():
         mpd.select("Columna+")
         if mpd._sel < 0 or mpd.mf.w("m.name").text() != "Columna+":
             FAIL.append("principal UI: el miembro seleccionado (antes principal) debe poder editarse")
-        win._switch(0)
+        # ---- la placa base es una operacion: una placa base de la version anterior abre como nudo con la operacion y sus pestañas
+        from steelconpro.conn import baseplate as BPm
+        n_bk0 = len(win.book)
+        win.book = win.book + load_book("ejemplos/PB-01_W14X90.scp")
+        win._switch(n_bk0)
         app.processEvents()
-        if not (win.tabs_out.isTabEnabled(win.tabs_out.indexOf(win.tab_fem)) and win.btn3d.isEnabled()) or "CALCULAR" not in win.btn3d.text():
-            FAIL.append("nudos UI: la placa base debe conservar sus pestañas de analisis y resultados")
+        tabs_pb = [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)]
+        tabs_out_pb = {win.tabs_out.tabText(i): win.tabs_out.isTabEnabled(i) for i in range(win.tabs_out.count()) if win.tabs_out.isTabVisible(i)}
+        if win.prj.ctype != CT_NODE or not win.has_base or tabs_pb != ["Proyecto", "Conexión de nudo", "Placa base"] or tabs_out_pb.get("Analisis FEM") is not True \
+                or [win.tabs_bp.tabText(i) for i in range(win.tabs_bp.count())] != win.BASE_TABS:
+            FAIL.append(f"nudos UI: con la operacion de placa base deben aparecer sus pestañas y el analisis FEM: {tabs_pb} / {tabs_out_pb}")
+        win.recalc(); win.run_3d(); app.processEvents()
+        Rb = win.node_res
+        if Rb is None or not win._node_fresh() or abs(Rb.max_ratio - 0.75) > 1e-3 or not any(c.title.startswith("[Placa base") for c in Rb.checks) or "CUMPLE" not in win.lbl_verdict.text():
+            FAIL.append(f"nudos UI: VERIFICAR en una conexion con placa base: D/C {getattr(Rb, 'max_ratio', None)}, '{win.lbl_verdict.text()}'")
+        if not any("Placa base" in (win.tbl.item(r_, 0).text() if win.tbl.item(r_, 0) else "") for r_ in range(win.tbl.rowCount())):
+            FAIL.append("nudos UI: la tabla de resultados debe tener el grupo de la placa base")
+        # el perfil de la placa base es el del miembro: cambiarlo en Miembros cambia el de la placa
+        win.fnamed[module_for(CT_NODE).TAB].members_pg.main_pick.set_label("W12X65")
+        win.store_ui(); win.load_ui(); win.recalc(); app.processEvents()
+        if win._bp_prj().section.label != "W12X65" or win.prj.section.label != "W12X65":
+            FAIL.append("nudos UI: el perfil de la placa base debe seguir al del miembro")
+        # agregar / quitar la operacion de placa base en una conexion nueva
+        win.add_connection(CT_NODE)
+        win.recalc(); app.processEvents()
+        if win.has_base or [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)] != ["Proyecto", "Conexión de nudo"]:
+            FAIL.append("nudos UI: una conexion nueva no lleva la placa base")
+        opp = win.fnamed[module_for(CT_NODE).TAB].ops_pg
+        opp._add(OP_BASE)
+        win.load_ui(); win.recalc(); app.processEvents()
+        if not win.has_base or win.prj.node.base_op().member != win.prj.node.main_name or "Placa base" not in [win.tabs_in.tabText(i) for i in range(win.tabs_in.count()) if win.tabs_in.isTabVisible(i)]:
+            FAIL.append("nudos UI: agregar la operacion de placa base debe mostrar sus pestañas")
+        opp._add(OP_BASE)                                                # una sola por conexion
+        if len([o for o in win.prj.node.operations if o.kind == OP_BASE]) != 1:
+            FAIL.append("nudos UI: solo una placa base por conexion")
+        mdl_b = AS.build_model(win.prj)
+        if not mdl_b.extra or any(t == "column" for t, _f, _c, _a in mdl_b.extra):
+            FAIL.append("nudos UI: la geometria de la placa base debe estar en el modelo 3D (sin duplicar el perfil)")
+        win.run_3d(); app.processEvents()
+        if not win._node_fresh() or not any(c.title.startswith("[Placa base") for c in win.node_res.checks):
+            FAIL.append("nudos UI: verificar la placa base en una conexion nueva")
+        opp.tbl.selectRow([i for i, o in enumerate(win.prj.node.operations) if o.kind == OP_BASE][0])
+        opp._row_selected()
+        opp._del()
+        win.load_ui(); win.recalc(); app.processEvents()
+        if win.has_base:
+            FAIL.append("nudos UI: quitar la operacion de placa base debe ocultar sus pestañas")
+        win._switch(n_bk0)
         # ---- plantillas del usuario: guardar una conexion terminada, crear otra desde ella, renombrar y eliminar
         from steelconpro import templates as TPL
         from steelconpro.ui_wizard import SaveTemplateDialog
         tdir = __import__("pathlib").Path(tmp) / "plantillas_ui"
         tdir.mkdir(exist_ok=True)
-        dlg = NewConnectionDialog(None, CT_NODE, where=tdir)
+        dlg = NewConnectionDialog(None, where=tdir)
         if dlg.choice() != {"ctype": CT_NODE, "template": None} or dlg.lst_tpl.count() < 1 or "blanco" not in dlg.lst_tpl.item(0).text():
             FAIL.append(f"asistente: sin plantillas debe ofrecer solo la conexion en blanco: {dlg.choice()}")
         win._switch(1)
@@ -820,7 +945,7 @@ def run():
         sd.ed_name.setText("Mi nudo tipo"); sd.ed_desc.setPlainText("prueba"); sd._ok()
         if not sd.path or [t["name"] for t in TPL.list_templates(src.ctype, tdir)] != ["Mi nudo tipo"]:
             FAIL.append("plantillas: no se guardo la plantilla")
-        dlg = NewConnectionDialog(None, src.ctype, where=tdir)
+        dlg = NewConnectionDialog(None, where=tdir)
         if dlg.lst_tpl.count() != 2 or dlg.lst_tpl.item(1).data(Qt.UserRole) != sd.path or dlg.lbl_img.pixmap() is None:
             FAIL.append("asistente: la plantilla guardada debe aparecer en la lista de su modulo")
         dlg.lst_tpl.setCurrentRow(1)
@@ -841,7 +966,7 @@ def run():
         if TPL.list_templates(src.ctype, tdir):
             FAIL.append("plantillas: eliminar")
         # la placa base tambien: copia completa del proyecto
-        win._switch(0)
+        win._switch(n_bk0)
         win.store_ui()
         pb_ = win.prj
         pbp = TPL.save_template(pb_, "Placa tipo", "", True, tdir)
@@ -849,7 +974,7 @@ def run():
         from dataclasses import asdict as _asd
         d1, d2 = _asd(pb_), _asd(pb2)
         d1["element"] = d2["element"] = ""
-        if d1 != d2 or pb2.ctype != CT_BASEPLATE:
+        if d1 != d2 or pb2.ctype != CT_NODE or pb2.node.base_op() is None:
             FAIL.append("plantillas: la placa base debe volver idéntica")
         # sin cargas
         qn = copy.deepcopy(src)
@@ -857,7 +982,7 @@ def run():
         if TPL.load_template(tn).node.loads or not qn.node.loads:
             FAIL.append("plantillas: «incluir cargas» desmarcado debe guardar sin cargas sin tocar la conexion original")
         print(f"{'interfaz (offscreen)':34} 3 nudos (principal vertical, horizontal e inclinado): miembros / operaciones / cargas, VERIFICAR llena Resultados y la memoria, resultado desactualizado al editar, "
-              f"Analisis FEM desactivado, conexiones nuevas en blanco, plantillas propias (guardar, crear, renombrar, eliminar); la placa base conserva sus pestañas")
+              f"Analisis FEM desactivado, conexiones nuevas en blanco, plantillas propias (guardar, crear, renombrar, eliminar), la placa base como operacion (pestañas, verificacion, perfil del miembro)")
     except ImportError as e:
         if "PySide6" not in str(e) and "shiboken" not in str(e):
             FAIL.append(f"nudos UI: {type(e).__name__}: {e}")

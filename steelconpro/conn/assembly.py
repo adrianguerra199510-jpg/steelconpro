@@ -19,7 +19,7 @@ from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN
 from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, unit
 from .specs import (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
-                    OP_COPE, OP_CONT, GUSSET_OPS, END_LABELS, Operation, Member)
+                    OP_COPE, OP_CONT, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
 
 EMBED = 0.35            # las placas entran un poco en el miembro principal para que no quede una rendija en las uniones esviadas
 DIAG_MIN = 10.0         # elevacion (grados) desde la cual un miembro se considera diagonal (color y cartela por omision)
@@ -534,9 +534,10 @@ def set_main(nd, name) -> list:
         notes.append(f"El eje de «{name}» no tocaba al principal anterior: el nudo se coloca en el punto de su posición ({m.pos:g}).")
     lneg, lpos = old.lengths()
     # ---- el principal anterior se vuelve miembro (o dos, si pasaba por el nudo)
+    t_att = float(np.dot(info["P0"] - O_old, A))                      # altura del punto de llegada sobre el eje del principal anterior
     olds = []
     for sgn, ln in ((1.0, lpos), (-1.0, lneg)):
-        if ln > 1e-6:
+        if ln - sgn * t_att > 1e-6:                                    # queda cuerpo del principal anterior de ese lado del punto de llegada
             olds.append((sgn, ln))
     others = [x for x in nd.members if x is not m]
     new_members = []
@@ -554,6 +555,7 @@ def set_main(nd, name) -> list:
 
     mshape2 = shape_of(nd.main_shape)
     ext2 = outer_extent(mshape2)
+    new_sides = []
     for k, (sgn, ln) in enumerate(olds):
         t0 = float(np.dot(Pnew - O_old, A))                   # altura del punto de llegada sobre el eje del principal anterior
         P0 = O_old + A * t0
@@ -568,9 +570,10 @@ def set_main(nd, name) -> list:
         if Lfree < 1.0:
             continue
         az, el = _angles(dirv)
-        nm = old.main_name if len(olds) == 1 else f"{old.main_name}{'+' if sgn > 0 else '−'}"
-        mm = Member(name=nm, shape=old.main_shape, steel=old.main_steel, az=az, el=el, pos=pos, off=off, off2=off2, L=Lfree, roll=old.main_roll, gap=0.0)
-        new_members.append(mm)
+        new_members.append(Member(name="", shape=old.main_shape, steel=old.main_steel, az=az, el=el, pos=pos, off=off, off2=off2, L=Lfree, roll=old.main_roll, gap=0.0))
+        new_sides.append(sgn)
+    for mm, sgn in zip(new_members, new_sides):               # un solo tramo conserva el nombre; dos llevan + y −
+        mm.name = old.main_name if len(new_members) == 1 else f"{old.main_name}{'+' if sgn > 0 else '−'}"
     # ---- los demas miembros conservan su geometria global (nuevo origen y ejes)
     moved = []
     for x in others:
@@ -588,11 +591,26 @@ def set_main(nd, name) -> list:
         notes.append("Quedan separados del nuevo principal (retranqueo) para no cambiar su posición: " + ", ".join(moved)
                      + ". Acérquelos o cambie sus operaciones.")
     nd.members = new_members + others
+    # ---- la placa base sigue al extremo libre donde estaba: la del miembro designado queda en su extremo (lado +); la del principal anterior pasa al tramo
+    #      del lado donde estaba
+    bop = nd.base_op()
+    if bop is not None and bop.member == old.main_name:
+        want = -1.0 if bop.end < 0 else 1.0                              # lado del eje del principal anterior
+        tgt = next((x for x in new_members if float(np.dot(member_dir(x), A)) * want > 0.5), None)
+        if tgt is None:
+            nd.operations = [o for o in nd.operations if o is not bop]
+            notes.append("Se descartó la placa base: el tramo del principal anterior donde estaba ya no existe.")
+        else:
+            bop.member, bop.end = tgt.name, -1
+            notes.append(f"La placa base pasa a «{tgt.name}» (el mismo extremo libre).")
+    elif bop is not None and bop.member == m.name:
+        bop.end = 1
+        notes.append("La placa base queda en el extremo libre del nuevo principal (lado +).")
     # ---- operaciones y cargas
     for nmx in (m.name,):
-        dropped_ops = [o for o in nd.operations if o.member == nmx]
+        dropped_ops = [o for o in nd.operations if o.member == nmx and o.kind != OP_BASE]
         dropped_loads = [x for x in nd.loads if x.member == nmx]
-        nd.operations = [o for o in nd.operations if o.member != nmx]
+        nd.operations = [o for o in nd.operations if o.member != nmx or o.kind == OP_BASE]
         nd.loads = [x for x in nd.loads if x.member != nmx]
     if dropped_ops or dropped_loads:
         notes.append(f"Se descartaron {len(dropped_ops)} operación(es) y {len(dropped_loads)} carga(s) de «{m.name}»: eran su conexión al principal anterior; "
@@ -605,10 +623,10 @@ def set_main(nd, name) -> list:
 def build_model(prj, vals=None) -> Model3D:
     from .specs import ATTR_OF
     nd = getattr(prj, ATTR_OF[prj.ctype])
-    return build_nodo(nd, name=prj.element or prj.ctype)
+    return build_nodo(nd, name=prj.element or prj.ctype, prj=prj)
 
 
-def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
+def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
     """Modelo 3D del nudo: el miembro principal, los miembros conectados y el resultado de aplicar las operaciones en el orden de la lista."""
     hw = nd.show_hw if hardware is None else hardware
     mdl = Model3D(name)
@@ -623,9 +641,10 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
     ext = outer_extent(mshape)
     names = {m.name for m in nd.members}
     for o in nd.operations:
-        if o.member not in names:
+        if o.member not in names and not (o.kind == OP_BASE and o.member == nd.main_name):
             mdl.notes.append(f"Operación «{o.kind}»: el miembro «{o.member}» no existe.")
     ctxs = []
+    free_ends, frames = {}, {}                          # nombre -> (inicio, fin, direccion) y nombre -> marco de la seccion, para la placa base
     axes = []                                           # (nombre, inicio, fin, punto sobre el eje principal, posicion) de cada miembro conectado, para las cotas
     for i, m in enumerate(nd.members):
         shp = shape_of(m.shape)
@@ -688,8 +707,18 @@ def build_nodo(nd, name="Nudo", hardware=None) -> Model3D:
         end = Q + dirv * (ms + max(m.L, 1.0))
         mdl.tags.append((tuple(map(float, end)), m.name))
         axes.append((m.name, Q + dirv * ms, end, P0, float(m.pos)))
+        free_ends[m.name], frames[m.name] = (Q + dirv * ms, end, dirv), (dirv, sx, sy)
         ctxs.append(c)
     _build_gussets(ctxs, nd, mdl)
+    bop = nd.base_op()
+    if bop is not None and prj is not None and hw:
+        from . import baseplate as BP
+        place = BP.end_of_member(nd, bop, free_ends, frames)
+        if place is None:
+            mdl.notes.append(f"Placa base: el miembro «{bop.member}» no existe o no tiene extremo libre de ese lado.")
+        else:
+            E, A_in, bsx, bsy = place
+            mdl.extra += BP.plate_faces(BP.derive(prj, nd), E, A_in, bsx, bsy)
     _node_dims(mdl, A * (-lneg), A * lpos, axes)
     return mdl
 

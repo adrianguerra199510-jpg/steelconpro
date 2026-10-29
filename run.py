@@ -8,8 +8,9 @@
     SteelConPro.exe proyecto.scp --pdf mem.pdf --docx s.docx
                                      --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
-                                              (--3d corre Gmsh + CalculiX y verifica con sus resultados;
-                                               en los modulos de nudo escribe las imagenes del modelo 3D: solo geometria)
+                                              (--3d escribe las imagenes del modelo 3D y, si la conexion lleva la operacion
+                                               de placa base, corre Gmsh + CalculiX y verifica con sus resultados;
+                                               --geo escribe la geometria de la placa base para el mallador)
 """
 import os
 import sys
@@ -56,7 +57,26 @@ def batch_node(prj, argv, suf=""):
     import tempfile
     from steelconpro import conn, report
     mod = conn.module_for(prj.ctype)
-    res = conn.solve_conn(prj)
+    fem_map = {}
+    if prj.node.base_op() is not None and ("--3d" in argv or "--geo" in argv):        # placa base de la conexion: analisis 3D (Gmsh + CalculiX) y/o geometria para el mallador
+        from steelconpro import mesh3d
+        from steelconpro.conn import baseplate as BP
+        bp = BP.derive(prj)
+        if "--3d" in argv:
+            from steelconpro.rep3d import make_fem
+            for i in range(len(bp.combo_list())):
+                q = bp.with_combo(i)
+                r3, msg = mesh3d.full_3d(q, os.path.join(_out(argv, "--3d", suf), f"placa_base_comb{i + 1}"))
+                print(f"  placa base, combinacion {i + 1}: {msg}")
+                if r3 is not None:
+                    f = make_fem(q, r3)
+                    f.sig = q.sig3d()
+                    fem_map[i] = f
+        if "--geo" in argv:
+            g, d = mesh3d.export_3d(bp, _out(argv, "--geo", suf), bp.fea.mesh3d)
+            print("  ->", g)
+            print("  ->", d)
+    res = conn.solve_conn(prj, fem_map=fem_map)
     gov = res.governing
     print(f"{prj.element}: {mod.label(prj)}")
     print(f"{prj.element}: {'CUMPLE' if res.ok else 'NO CUMPLE'}   D/C max = {res.max_ratio:.3f}" + (f"   gobierna: {gov.title}" if gov else ""))
@@ -72,8 +92,8 @@ def batch_node(prj, argv, suf=""):
         print("  ->", report.export_pdf(prj, res, _out(argv, "--pdf", suf), figs))
     if "--docx" in argv:
         print("  ->", report.export_docx(prj, res, _out(argv, "--docx", suf), figs))
-    if "--geo" in argv:
-        print("  aviso: --geo (malla 3D) no esta disponible en los modulos de nudo.")
+    if "--geo" in argv and prj.node.base_op() is None:
+        print("  aviso: --geo (malla 3D) solo esta disponible para la operacion de placa base.")
     return 0 if res.ok else 2
 
 

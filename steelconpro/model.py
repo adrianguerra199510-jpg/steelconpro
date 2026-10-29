@@ -580,6 +580,13 @@ class Project:
             return Project.from_json(f.read())
 
 
+def new_connection() -> "Project":
+    """Conexion nueva en blanco: solo el miembro principal; las operaciones (conexiones, placa base...) se agregan despues."""
+    p = Project()
+    p.ctype = CT_NODE
+    return p
+
+
 # ============================================ libro: varias conexiones por archivo
 def _used_extras(projects):
     """Perfiles personalizados y materiales del usuario que usan las conexiones,
@@ -636,10 +643,12 @@ def load_book(path: str) -> list:
         M.register_embedded(d.get("materiales", {}))
         out = []
         LAST_SKIPPED.clear()
+        from .conn.baseplate import unify
         for c in d.get("conexiones", []):
             try:
-                out.append(Project.from_json(json.dumps(c)))
+                out.append(unify(Project.from_json(json.dumps(c))))
             except LegacyConnection as e:
                 LAST_SKIPPED.append((str(c.get("element", "")), str(e)))
         return out or [Project()]
-    return [Project.from_json(json.dumps(d))]
+    from .conn.baseplate import unify
+    return [unify(Project.from_json(json.dumps(d)))]

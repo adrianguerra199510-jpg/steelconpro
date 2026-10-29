@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Asistente «Nueva conexion» y guardado de plantillas.
 
-No hay plantillas predefinidas: se elige el modulo (conexion de nudo o placa base) y se parte de una conexion en blanco o de una
-plantilla propia (una conexion terminada que se guardo antes con «Guardar como plantilla»).  `NewConnectionDialog.choice()` devuelve el modulo y la
+No hay modulos ni plantillas predefinidas: toda conexion es un nudo (miembros + operaciones, entre ellas la placa base) y se parte de una conexion en
+blanco o de una plantilla propia (una conexion terminada que se guardo antes con «Guardar como plantilla»).  `NewConnectionDialog.choice()` devuelve la
 ruta de la plantilla (None = en blanco).  `SaveTemplateDialog` pide el nombre y la descripcion de una plantilla nueva.
 """
 from __future__ import annotations
@@ -12,11 +12,10 @@ from PySide6.QtGui import QColor, QPixmap, QImage
 from PySide6.QtCore import Qt
 
 from . import templates as TPL
-from .conn.specs import CT_BASEPLATE, CT_NODE
+from .conn.specs import CT_NODE
 
-CLASSES = [(CT_NODE, "Conexión de nudo"), (CT_BASEPLATE, "Placa base de columna")]
-BLANK_TEXT = {CT_NODE: "Un miembro principal solo: agregue después los demás miembros, designe cuál es el principal, y defina las operaciones y las cargas.",
-              CT_BASEPLATE: "Una placa base con los valores iniciales del programa."}
+BLANK_TEXT = ("Un miembro principal solo. Agregue después los demás miembros, designe cuál es el principal, y defina las operaciones (placas, pernos, "
+              "cortes, placa base...) y las cargas. Todo tipo de conexión se arma así.")
 
 
 def pil_to_pixmap(im) -> QPixmap:
@@ -28,43 +27,27 @@ def pil_to_pixmap(im) -> QPixmap:
 
 def render_project(prj, size):
     """Imagen (z-buffer propio, sin OpenGL) del modelo 3D de una conexion para la vista previa."""
-    from .conn.specs import CT_BASEPLATE as BP
     from .conn.fem import scene as S
-    if prj.ctype == BP:
-        from . import gl3d
-        sc = gl3d.scene_geometry(prj, loads=False)
-    else:
-        from .conn import assembly as AS
-        sc = S.scene_model(AS.build_model(prj), loads=False, tags=True)
+    from .conn import assembly as AS
+    sc = S.scene_model(AS.build_model(prj), loads=False, tags=True)
     return S.render_scene_image(sc, 24.0, 50.0, size, ss=2, margin=0.04)
 
 
 class NewConnectionDialog(QDialog):
     """Elige el modulo y si se parte de cero o de una plantilla propia; `choice()` lo devuelve."""
 
-    def __init__(self, parent=None, current=CT_NODE, where=None):
+    def __init__(self, parent=None, where=None):
         super().__init__(parent)
         self.setWindowTitle("Nueva conexión")
-        self.resize(1040, 600)
+        self.resize(820, 560)
         self.where = where
-        self.cls = current if current in dict(CLASSES) else CT_NODE
+        self.cls = CT_NODE
         root = QVBoxLayout(self)
         cols = QHBoxLayout()
         root.addLayout(cols, 1)
 
-        left = QVBoxLayout()
-        left.addWidget(QLabel("<b>1. Módulo</b>"))
-        self.lst_cls = QListWidget()
-        self.lst_cls.setMaximumWidth(280)
-        for ct, nm in CLASSES:
-            it = QListWidgetItem(nm)
-            it.setData(Qt.UserRole, ct)
-            self.lst_cls.addItem(it)
-        left.addWidget(self.lst_cls, 1)
-        cols.addLayout(left)
-
         mid = QVBoxLayout()
-        mid.addWidget(QLabel("<b>2. Punto de partida</b>"))
+        mid.addWidget(QLabel("<b>Punto de partida</b>"))
         self.lst_tpl = QListWidget()
         self.lst_tpl.setMinimumWidth(330)
         self.lst_tpl.setWordWrap(True)
@@ -98,7 +81,6 @@ class NewConnectionDialog(QDialog):
         bb.rejected.connect(self.reject)
         root.addWidget(bb)
 
-        self.lst_cls.currentItemChanged.connect(lambda *_: self._pick_class(self.lst_cls.currentItem().data(Qt.UserRole)) if self.lst_cls.currentItem() else None)
         self.lst_tpl.currentItemChanged.connect(lambda *_: self._preview())
         self.lst_tpl.itemDoubleClicked.connect(lambda *_: self.accept())
         self._pick_class(self.cls)
@@ -106,9 +88,6 @@ class NewConnectionDialog(QDialog):
     # ------------------------------------------------------------------ lista
     def _pick_class(self, ct):
         self.cls = ct
-        self.lst_cls.blockSignals(True)
-        self.lst_cls.setCurrentRow([c for c, _n in CLASSES].index(ct))
-        self.lst_cls.blockSignals(False)
         self.lst_tpl.blockSignals(True)
         self.lst_tpl.clear()
         it = QListWidgetItem("▸  Conexión en blanco (desde cero)")
@@ -137,9 +116,9 @@ class NewConnectionDialog(QDialog):
         try:
             if path is None:
                 from .model import Project
-                p = Project()
-                p.ctype = self.cls
-                self.lbl_info.setText(BLANK_TEXT[self.cls])
+                from .model import new_connection as new_conn
+                p = new_conn()
+                self.lbl_info.setText(BLANK_TEXT)
             else:
                 p = TPL.load_template(path)
                 t = next((x for x in TPL.list_templates(self.cls, self.where) if x["file"] == path), None)

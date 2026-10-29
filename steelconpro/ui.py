@@ -28,7 +28,7 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
                     LUG_DIRS, STIFF_POSITIONS, STIFF_SHAPES, STIFF_SPACING, WELD_CRITERIA, U_TYPES)
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
-from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, FIXITY, LoadCombo, REBAR
+from .model import new_connection as new_conn, LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, FIXITY, LoadCombo, REBAR
 from .dialogs import SectionDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -37,7 +37,8 @@ from . import draw, report, mesh3d, view3d, brand, appdata
 from .rep3d import make_fem
 from .ui_widgets import DCBarDelegate, KpiCard, Form, scroll, PasteTable, ThemeSwitch
 from .ui_nodes import NodeForm
-from .conn.specs import CONN_TYPES, CT_BASEPLATE
+from .conn.specs import CONN_TYPES, CT_BASEPLATE, CT_NODE
+from .conn import baseplate as BP
 from . import conn as connpkg
 from .conn.fem import scene as cfem_scene
 from . import gl3d
@@ -188,7 +189,9 @@ class Worker3D(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.prj = Project()
+        self.prj = new_conn()
+        self._in_base = False                     # True mientras se corre/muestra el analisis de la placa base (ver _base_ctx)
+        self._bp_cache = {}                       # id(conexion) -> proyecto derivado para el motor de la placa base
         self.prj.date = datetime.date.today().isoformat()
         self.book = [self.prj]
         self.cur = 0
@@ -370,13 +373,12 @@ class MainWindow(QMainWindow):
         f.text("Elemento", "element")
         f.text("Calculo", "author")
         f.text("Fecha", "date")
-        f.group("Tipo de conexion")
+        f.group("Conexion")
         self.lbl_ctype = QLabel("")
         self.lbl_ctype.setWordWrap(True)
-        f._lay.addRow("Modulo", self.lbl_ctype)
-        f.note("Placa base de columna: calculo completo con anclajes ACI 318, soldadura y analisis 3D por elementos finitos. Conexion de nudo: se arma por "
-               "operaciones (miembros —uno de ellos se designa como principal—, operaciones y cargas) y se verifica por codigo (AISC 360-22). "
-               "Cada conexion del proyecto tiene su propio modulo: se elige al crearla (boton Nueva).")
+        f._lay.addRow("Tipo", self.lbl_ctype)
+        f.note("Toda conexion se arma igual: miembros (uno de ellos se designa como principal), operaciones (placas, pernos, cortes, placa base...) y cargas; "
+               "se verifica por codigo (AISC 360-22; placa base con anclajes ACI 318, AISC DG1 y analisis 3D por elementos finitos).")
         f.group("Unidades de trabajo")
         self.cb_preset = QComboBox()
         self.cb_preset.addItem("(personalizado)")
@@ -702,6 +704,25 @@ class MainWindow(QMainWindow):
             self.tabs_in.addTab(sw, mod.TAB)
             f.finish(with_help=False)
 
+        # ---- la placa base ya no es un modulo: sus datos (Cargas, Perfil, Placa, Pernos...) van en UNA pestaña «Placa base» que aparece con la operacion
+        self.BASE_TABS = ["Cargas", "Perfil", "Placa", "Pernos", "Llave de corte", "Rigidizadores", "Soldadura", "Concreto", "Elementos finitos"]
+        self.tabs_bp = QTabWidget()
+        self.tabs_bp.setDocumentMode(True)
+        self.tabs_bp.setUsesScrollButtons(True)
+        for t in self.BASE_TABS:
+            sw = self.tab_widgets.pop(t)
+            self.tabs_in.removeTab(self.tabs_in.indexOf(sw))
+            self.tabs_bp.addTab(sw, t)
+        self.tab_widgets["Placa base"] = self.tabs_bp
+        self.tabs_in.addTab(self.tabs_bp, "Placa base")
+        fpf = self.fnamed["Perfil"]
+        self.lbl_bp_member = QLabel("")
+        self.lbl_bp_member.setWordWrap(True)
+        self.lbl_bp_member.setStyleSheet("color:#1f3864; background:#eef3fa; border:1px solid #c8d6e8; border-radius:4px; padding:6px;")
+        fpf.outer.insertWidget(0, self.lbl_bp_member)
+        fpf.show_group("Catalogo AISC (1,660 perfiles) y secciones propias", False)         # el perfil es el del miembro (se elige en Conexión de nudo > Miembros)
+        fpf.show_group("Seccion doble", False)
+
     # ================================================================== vistas
     def _build_views(self):
         self.tabs_out = QTabWidget()
@@ -998,7 +1019,16 @@ class MainWindow(QMainWindow):
         self.fill_table()
         self.recalc()                       # dibujos, etiquetas y tablas con las unidades nuevas
 
+    def _sync_section(self):
+        """El perfil de la placa base es el del miembro que la lleva."""
+        nd = self.prj.node if self.prj.ctype == CT_NODE else None
+        op = nd.base_op() if nd is not None else None
+        if op is not None:
+            q = BP.derive(self.prj, nd)
+            self.prj.section.label, self.prj.section.steel = q.section.label, q.section.steel
+
     def load_ui(self):
+        self._sync_section()
         for msg in self.prj.normalize():
             self.statusBar().showMessage(msg, 10000)
         self._loading = True
@@ -1032,6 +1062,7 @@ class MainWindow(QMainWindow):
             f.store(self.prj)
         self._xy_store()
         self._combo_store()
+        self._sync_section()
 
     # ------------------------------------------ coordenadas manuales de pernos
     def _xy_load(self):
@@ -1285,7 +1316,7 @@ class MainWindow(QMainWindow):
         """Nueva conexion: se elige el modulo y se parte de cero o de una plantilla propia."""
         from .ui_wizard import NewConnectionDialog
         self.store_ui()
-        dlg = NewConnectionDialog(self, self.prj.ctype if self.prj.ctype in CONN_TYPES else None)
+        dlg = NewConnectionDialog(self)
         if dlg.exec():
             c = dlg.choice()
             self.add_connection(c["ctype"], c["template"])
@@ -1298,18 +1329,16 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.statusBar().showMessage(f"Plantilla guardada: {dlg.path}", 8000)
 
-    def add_connection(self, ctype=CT_BASEPLATE, template=None):
-        """Agrega una conexion nueva del modulo dado (en blanco, o copia de la plantilla indicada) y la deja activa."""
+    def add_connection(self, ctype=CT_NODE, template=None):
+        """Agrega una conexion nueva (en blanco, o copia de la plantilla indicada) y la deja activa."""
         from . import templates as TPL
-        p = TPL.load_template(template) if template else Project()
-        if template and p.ctype != ctype:
-            raise ValueError("La plantilla es de otro módulo.")
-        p.ctype = ctype
+        p = TPL.load_template(template) if template else new_conn()
+        p.ctype = CT_NODE
         p.name = self.prj.name
         p.date = datetime.date.today().isoformat()
         p.u_len, p.u_force, p.u_stress, p.u_moment = (self.prj.u_len, self.prj.u_force,
                                                       self.prj.u_stress, self.prj.u_moment)
-        p.element = f"{'PB' if ctype == CT_BASEPLATE else connpkg.module_for(ctype).PREFIX}-{len(self.book) + 1:02d}"
+        p.element = f"{connpkg.module_for(CT_NODE).PREFIX}-{len(self.book) + 1:02d}"
         self.book.append(p)
         self._switch(len(self.book) - 1)
 
@@ -1398,51 +1427,91 @@ class MainWindow(QMainWindow):
         """True si la conexion actual no es una placa base (se calcula en steelconpro/conn)."""
         return self.prj.ctype != CT_BASEPLATE
 
+    @property
+    def has_base(self) -> bool:
+        """La conexion actual lleva la operacion de placa base (aparecen la pestaña «Placa base» y el analisis FEM)."""
+        return self.prj.ctype == CT_NODE and self.prj.node.base_op() is not None
+
     def _apply_ctype(self):
-        """Muestra solo las pestañas de entrada y de salida que corresponden al modulo de la conexion actual.  En los modulos de nudo la pestaña
-        Analisis FEM queda desactivada (etapa siguiente) y el boton VERIFICAR corre las verificaciones por codigo."""
-        conn = self.is_conn
+        """Muestra solo las pestañas de entrada y de salida que corresponden a la conexion actual: Proyecto y Conexión de nudo, mas «Placa base» si
+        la conexion lleva esa operacion.  El analisis FEM es el de la placa base; el boton VERIFICAR corre las verificaciones por codigo."""
+        if self._in_base or not self.is_conn:               # mientras se muestra el analisis de la placa base no se tocan las pestañas
+            return
         mod = self._cur_mod()
-        visual = bool(conn and getattr(mod, "VISUAL", False))
-        fem_off = conn                                   # analisis 3D por elementos finitos de los nudos: etapa siguiente
-        mod_tab = mod.TAB if conn else None
-        conn_tabs = {m.TAB for _c, m in connpkg.modules()}
+        has_base = self.has_base
         for title, sw in self.tab_widgets.items():
-            vis = (title in ("Proyecto", mod_tab)) if conn else (title not in conn_tabs)
+            vis = title in ("Proyecto", mod.TAB) or (title == "Placa base" and has_base)
             self.tabs_in.setTabVisible(self.tabs_in.indexOf(sw), vis)
         if not self.tabs_in.isTabVisible(self.tabs_in.currentIndex()):
             self.tabs_in.setCurrentWidget(self.tab_widgets["Proyecto"])
-        for wd, vis in ((self.tab_model, True), (self.tab_fem, True), (self.tab_res, True), (self.tab_scheme, conn and not self.use_gl)):      # con OpenGL las vistas Planta / Frontal / Lateral y las cotas son del visor
-            self.tabs_out.setTabVisible(self.tabs_out.indexOf(wd), vis)
-        for wd, nm, off in ((self.tab_fem, "Analisis FEM", fem_off), (self.tab_res, "Resultados", visual)):
-            i = self.tabs_out.indexOf(wd)
-            self.tabs_out.setTabEnabled(i, not off)
-            self.tabs_out.setTabToolTip(i, f"{nm}: todavia no disponible en los modulos de nudo." if off else "")
+        for wd in (self.tab_model, self.tab_fem, self.tab_res):
+            self.tabs_out.setTabVisible(self.tabs_out.indexOf(wd), True)
+        self.tabs_out.setTabVisible(self.tabs_out.indexOf(self.tab_scheme), not self.use_gl)      # con OpenGL las vistas Planta / Frontal / Lateral y las cotas son del visor
+        i = self.tabs_out.indexOf(self.tab_fem)
+        self.tabs_out.setTabEnabled(i, has_base)
+        self.tabs_out.setTabToolTip(i, "" if has_base else "Analisis FEM: es el de la placa base; agregue la operacion «Placa base» en el paso 2 (Operaciones).")
         if (not self.tabs_out.isTabVisible(self.tabs_out.currentIndex())) or (not self.tabs_out.isTabEnabled(self.tabs_out.currentIndex())):
             self.tabs_out.setCurrentWidget(self.tab_model)
-        if hasattr(self, "spv_plan"):                 # sin OpenGL: la planta y la elevacion de la placa base no aplican a los nudos
-            self.spv_plan.setVisible(not conn)
-        self.lbl_combo2.setVisible(not conn)               # los nudos verifican todos los casos de carga a la vez
-        self.cb_combo2.setVisible(not conn)
+        if hasattr(self, "spv_plan"):
+            self.spv_plan.setVisible(False)
+        self.lbl_combo2.setVisible(has_base)                # combinaciones de la placa base (el resto de las operaciones usa casos de carga)
+        self.cb_combo2.setVisible(has_base)
         for w_ in (self.kpi_row, self.lbl_filter, self.cb_filter):
-            w_.setVisible(conn)
-        self.lbl_cases.setText("<b>Casos de carga</b>" if conn else "<b>Combinaciones de carga</b>")
-        self.tbl.setItemDelegateForColumn(4, self._dc_delegate if conn else self._plain_delegate)
+            w_.setVisible(True)
+        self.lbl_cases.setText("<b>Casos de carga y combinaciones</b>")
+        self.tbl.setItemDelegateForColumn(4, self._dc_delegate)
         hh_ = self.tbl.horizontalHeader()
-        hh_.setSectionResizeMode(4, QHeaderView.Fixed if conn else QHeaderView.ResizeToContents)
-        if conn:
-            hh_.resizeSection(4, 120)
-        self.btn3d.setText("VERIFICAR  (F8)" if conn else "CALCULAR  (F8)")
-        self.btn3d.setEnabled(not visual)
-        self.btn3d.setToolTip("Verifica por codigo (AISC 360-22) cada operacion del nudo con los casos de carga y entrega el veredicto en la pestaña Resultados." if conn else
-                              "Corre el analisis 3D (Gmsh + CalculiX) de todas las combinaciones de carga y "
-                              "entrega el veredicto. Mientras no se calcule no se muestra ningun resultado.")
-        self.chk_loads_geom.setText("Mostrar nombres" if conn else "Mostrar cargas")
-        self.chk_loads_geom.setToolTip("Nombre de cada miembro y de cada pieza en el modelo." if conn else
-                                       "Flechas de la combinacion activa: Pu (rojo), cortantes (azul) y momentos (violeta).")
-        self.lbl_geom.setText(f"<b>Modelo 3D — {mod.TAB}</b>" if conn else "<b>Geometria de la conexion</b>")
-        self.tabs_out.setTabText(self.tabs_out.indexOf(self.tab_model), "Modelo 3D" if conn else "Modelo y vistas")
+        hh_.setSectionResizeMode(4, QHeaderView.Fixed)
+        hh_.resizeSection(4, 120)
+        self.btn3d.setText("VERIFICAR  (F8)")
+        self.btn3d.setEnabled(True)
+        self.btn3d.setToolTip("Verifica por codigo (AISC 360-22; placa base: AISC DG1 y ACI 318) cada operacion de la conexion con sus cargas y entrega el veredicto en la pestaña "
+                              "Resultados. El analisis 3D por elementos finitos de la placa base se corre aparte (paso 4, Analisis).")
+        self.chk_loads_geom.setText("Mostrar nombres")
+        self.chk_loads_geom.setToolTip("Nombre de cada miembro y de cada pieza en el modelo.")
+        self.lbl_geom.setText(f"<b>Modelo 3D — {mod.TAB}</b>")
+        self.tabs_out.setTabText(self.tabs_out.indexOf(self.tab_model), "Modelo 3D")
         self.tabs_out.setTabText(self.tabs_out.indexOf(self.tab_scheme), "Planta y elevacion")
+        if has_base:
+            nd = self.prj.node
+            op = nd.base_op()
+            self.lbl_bp_member.setText(f"<b>Perfil de la placa base:</b> el del miembro «{op.member}» ({self.prj.section.label}, {self.prj.section.steel}); se elige en "
+                                       f"<i>Conexión de nudo ▸ Miembros</i>. Aquí se define cómo queda la placa respecto del perfil (giro, descentrado) y la inclinación.")
+
+    # ---- la placa base dentro de la conexion: el motor y el analisis 3D trabajan sobre el proyecto derivado
+    def _bp_prj(self):
+        """Proyecto del motor de la placa base de la conexion actual (siempre el mismo objeto: sus resultados 3D guardados le pertenecen)."""
+        key = id(self.prj)
+        q = self._bp_cache.get(key)
+        q = BP.derive(self.prj, self.prj.node, into=q) if q is not None else BP.derive(self.prj, self.prj.node)
+        self._bp_cache[key] = q
+        return q
+
+    def _base_ctx(self):
+        """`with self._base_ctx():` pone como proyecto activo el derivado (placa base) para usar sin cambios el analisis, las tablas y las vistas de la placa base."""
+        import contextlib
+
+        @contextlib.contextmanager
+        def ctx():
+            node = self.prj
+            bp = self._bp_prj()
+            self.prj, self._in_base = bp, True
+            try:
+                yield bp
+            finally:
+                self.prj, self._in_base = node, False
+        return ctx()
+
+    def _fem_map(self, prj=None):
+        """{combinacion: Fem3D vigente} del analisis 3D de la placa base de la conexion (o {})."""
+        p = prj or self.prj
+        if p.ctype != CT_NODE or p.node.base_op() is None:
+            return {}
+        bp = self._bp_cache.get(id(p))
+        if bp is None:
+            return {}
+        bp = BP.derive(p, p.node, into=bp)
+        return {i: f for i in range(len(bp.combo_list())) if (f := self._fem_now(bp, i)) is not None}
 
     @staticmethod
     def _con_label(p) -> str:
@@ -1587,7 +1656,7 @@ class MainWindow(QMainWindow):
     def _solve_all(self, p):
         """Resultados de TODAS las combinaciones de la conexion p: lista de (proyecto_de_la_combinacion, Results)."""
         if p.ctype != CT_BASEPLATE:                  # modulos de nudo: verificaciones por codigo (todos los casos de carga en un solo Results)
-            return [(p, connpkg.solve_conn(p))]
+            return [(p, connpkg.solve_conn(p, fem_map=self._fem_map(p)))]
         out = []
         for i in range(len(p.combo_list())):
             q = p.with_combo(i)
@@ -1611,7 +1680,7 @@ class MainWindow(QMainWindow):
         """(proyecto, Results) de la combinacion que gobierna, con la tabla resumen de combinaciones."""
         p = p or self.prj
         if p.ctype != CT_BASEPLATE:
-            return p, (self.node_res if (p is self.prj and self._node_fresh()) else connpkg.solve_conn(p))
+            return p, (self.node_res if (p is self.prj and self._node_fresh()) else connpkg.solve_conn(p, fem_map=self._fem_map(p)))
         pairs = self._solve_all(p)
         k = self._governing(pairs)
         q, R = pairs[k]
@@ -1626,6 +1695,8 @@ class MainWindow(QMainWindow):
         if self.is_conn:                                        # modulos de nudo: dibuja; las verificaciones se corren con VERIFICAR (F8)
             self.pairs = []
             self._update_labels()
+            if self.has_base:
+                self._fill_combo_box()
             for fn in (self.draw_all, self.fill_table, self._fill_memory_conn):
                 try:
                     fn()
@@ -1932,11 +2003,18 @@ class MainWindow(QMainWindow):
     def _on_combo_pick(self, i):
         if self._loading or i < 0:
             return
-        if self.is_conn or i == self.prj.combo_idx:
+        if i == self.prj.combo_idx:
+            return
+        if self.is_conn and not self.has_base:
             return
         self.store_ui()
         self.prj.apply_combo(i)
         self.load_ui()
+        if self.is_conn:                                   # placa base de una conexion: se redibuja el analisis de la combinacion elegida
+            with self._base_ctx():
+                self.recalc()
+            self.recalc()
+            return
         self.recalc()
 
     def _combo_load(self):
@@ -2066,6 +2144,17 @@ class MainWindow(QMainWindow):
         """Termino el calculo: cualquier error al procesar o dibujar se muestra (y se guarda en error.log) en vez
         de dejar la ventana sin resultados."""
         try:
+            if getattr(self, "_job_is_base", False):                  # analisis de la placa base de una conexion: se procesa sobre el proyecto derivado
+                self._job_is_base = False
+                job = self._job_prj
+                if any(job is q for q in self._bp_cache.values()) and self.prj.ctype == CT_NODE and self._bp_cache.get(id(self.prj)) is job:
+                    with self._base_ctx():
+                        self._on_3d_impl(out, _msg)
+                    self.run_node_checks(quiet=True)                  # el FEM de la placa entra al veredicto y a la memoria del nudo
+                    self.tabs_out.setCurrentWidget(self.tab_fem)
+                else:                                                  # el usuario cambio de conexion mientras corria: solo se guardan los resultados
+                    self._store_fem_only(out)
+                return
             self._on_3d_impl(out, _msg)
         except Exception as e:
             log = self._log_error("fin del calculo", e)
@@ -2135,6 +2224,20 @@ class MainWindow(QMainWindow):
                                          f"{self.pairs[self._governing(self.pairs)][0].combos[self._governing(self.pairs)].name}",
                                          8000)
 
+    def _store_fem_only(self, out):
+        try:
+            self.dlg3d.close()
+        except Exception:
+            pass
+        self.btn3d.setEnabled(True)
+        p = self._job_prj
+        for idx, name, q, sig, res, msg in out:
+            if res is not None:
+                fem = make_fem(q, res)
+                fem.sig = sig
+                self.fem_cache[(id(p), idx)] = fem
+                self.raw_cache[(id(p), idx)] = (sig, res)
+
     def fill_3d_tables(self):
         """Tablas del modelo 3D: soldadura por zona y traccion por perno."""
         if self.is_conn:
@@ -2195,7 +2298,9 @@ class MainWindow(QMainWindow):
         return self._node_cache.get(id(self.prj), ("", None))[0]
 
     def _node_sig_now(self) -> str:
-        return self._cur_mod().signature(self.prj)
+        sig = self._cur_mod().signature(self.prj)
+        fm = self._fem_map()
+        return sig + ("|fem:" + ",".join(f"{i}={f.sig[:12]}" for i, f in sorted(fm.items())) if fm else "")
 
     def _node_fresh(self) -> bool:
         """True si hay verificaciones del nudo y corresponden a los datos actuales."""
@@ -2206,7 +2311,7 @@ class MainWindow(QMainWindow):
         self.store_ui()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            self._node_cache[id(self.prj)] = (self._node_sig_now(), connpkg.solve_conn(self.prj))
+            self._node_cache[id(self.prj)] = (self._node_sig_now(), connpkg.solve_conn(self.prj, fem_map=self._fem_map()))
         except Exception as e:
             QApplication.restoreOverrideCursor()
             log = self._log_error("run_node_checks", e)
@@ -2225,8 +2330,20 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Verificacion completa: {'CUMPLE' if R.ok else 'NO CUMPLE'}, D/C max = {R.max_ratio:.3f}", 8000)
 
     def run_node_fem(self):
-        QMessageBox.information(self, "Analisis 3D", "El analisis 3D por elementos finitos de los nudos todavia no esta disponible en esta version: "
-                                "por ahora el nudo se verifica por codigo (AISC 360-22). La geometria 3D ya se puede exportar a STEP (Exportar > Modelo solido 3D).")
+        """Analisis 3D por elementos finitos (Gmsh + CalculiX) de la placa base de la conexion; los demas elementos del nudo se verifican por codigo."""
+        self.store_ui()
+        if not self.has_base:
+            QMessageBox.information(self, "Analisis 3D", "El analisis 3D por elementos finitos es el de la placa base: agregue la operacion «Placa base» en el paso 2 (Operaciones). "
+                                    "Las demas operaciones se verifican por codigo (AISC 360-22); la geometria 3D se puede exportar a STEP (Exportar > Modelo solido 3D).")
+            return
+        if self.worker is not None and self.worker.isRunning():
+            return
+        self._job_is_base = True
+        with self._base_ctx():
+            self.run_3d()
+        if self.worker is None or not self.worker.isRunning():          # no hubo nada que calcular (todo vigente)
+            self._job_is_base = False
+            self.recalc()
 
     def _set_node_state(self):
         f = self.fnamed.get(self._cur_mod().TAB) if self.is_conn else None
@@ -2462,7 +2579,7 @@ class MainWindow(QMainWindow):
     def new(self):
         if QMessageBox.question(self, "Nuevo", "¿Descartar el proyecto actual?") != QMessageBox.Yes:
             return
-        self.prj = Project()
+        self.prj = new_conn()
         self.prj.date = datetime.date.today().isoformat()
         self.book = [self.prj]
         self.cur = 0
