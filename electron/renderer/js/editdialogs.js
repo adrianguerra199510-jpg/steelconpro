@@ -20,6 +20,8 @@ export function renameRefs(nd, old, nw) {
     if (o.member === old) o.member = nw;
     if (o.parent === old) o.parent = nw;
     o.targets = (o.targets || []).map((t) => (t === old ? nw : t));
+    if (o.weld_main === old) o.weld_main = nw;
+    o.weld_to = (o.weld_to || []).map((t) => [t[0] === old ? nw : t[0], t[1]]);
     if ((o.kind === K.PLATE || o.kind === K.ANGLE) && o.name === old) o.name = nw;
   }
   for (const l of nd.loads) if (l.member === old) l.member = nw;

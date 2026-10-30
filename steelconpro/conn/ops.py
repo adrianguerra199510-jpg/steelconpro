@@ -140,7 +140,7 @@ def ordered(nd) -> list:
         moved = False
         for item in list(pending):
             i, o = item
-            need = {o.parent} - {""} | set(o.targets or [])
+            need = {o.parent} - {""} | set(o.targets or []) | ({o.weld_main} - {""}) | {t[0] for t in (o.weld_to or [])}
             if o.kind == OP_CUT:
                 need = set()                                       # el corte solo mira a los miembros
             if need <= (known | done):
@@ -294,6 +294,53 @@ def bolt_edge_distance(reg, names, ff, pts3):
     return best if best < 1e8 else None
 
 
+def _auto_face(main, tgt):
+    """Cara del elemento `tgt` que toca al elemento `main` (la que contiene sus bordes o su extremo)."""
+    from . import plates as PL
+    best, score = None, 0.0
+    for nm, f in tgt["faces"].items():
+        sc = 0.0
+        if main.get("geo") is not None:
+            g = main["geo"]
+            poly = g["poly"]
+            n = len(poly)
+            for k in range(n):
+                a, b = PL.point3(g, *poly[k], g["t"] / 2.0), PL.point3(g, *poly[(k + 1) % n], g["t"] / 2.0)
+                for P in (a, b):
+                    pass
+                da, db = float((a - f.O) @ f.N), float((b - f.O) @ f.N)
+                if abs(da) < g["t"] / 2.0 + 0.1 and abs(db) < g["t"] / 2.0 + 0.1:
+                    sa, ua = float((a - f.O) @ f.A), float((a - f.O) @ f.U)
+                    if -1.0 <= sa <= f.L + 1.0 and abs(ua) <= f.uh + 1.0:
+                        sc += float(np.linalg.norm(b - a))
+        elif main.get("frame_full") is not None:
+            start, end, d, *_ = main["frame_full"]
+            d = np.asarray(d, float)
+            if abs(float(d @ f.N)) > 0.7:
+                for P in (np.asarray(start, float), np.asarray(end, float)):
+                    dist = abs(float((P - f.O) @ f.N))
+                    if dist < 6.0:
+                        sc = max(sc, 1.0 / (1.0 + dist))
+        if sc > score:
+            best, score = f, sc
+    return best
+
+
+def _weld_pair(main, tgt, face_name, o, PL):
+    """Líneas de soldadura [(p0, p1, nA, nB, borde)] del elemento `main` contra una cara del elemento `tgt`."""
+    ff = tgt["faces"].get(face_name) if face_name else None
+    if ff is None:
+        ff = _auto_face(main, tgt)
+    if ff is None:
+        return []
+    edges = None if o.weld_all else set(o.weld_edges)
+    if main.get("geo") is not None:
+        return PL.weld_lines(main["geo"], ff, edges, o.weld_a, o.weld_len)
+    if main.get("frame_full") is not None:
+        return member_contour_lines(main["frame_full"], ff, edges)
+    return list(main.get("lines") or [])
+
+
 def build_generic(mdl, nd, reg: dict, hw: bool = True):
     """Arma en `mdl` las placas, angulos, pernos, soldaduras, huecos y cortes de las operaciones generales.  `reg` = {nombre: {type, faces, part, t, Fy, Fu}} de
     los elementos ya colocados (miembros y placa base); se completa con las placas que se van creando.  Devuelve la lista de entradas
@@ -436,6 +483,25 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             if not n_ok:
                 mdl.notes.append(f"Operación {i + 1} «{o.kind}»: ningún hueco cae dentro del elemento «{o.parent}» (revise la posición).")
             ent.update(ok=True, holes=n_ok)
+        elif o.kind == OP_FILLET and o.weld_main:
+            main = reg.get(o.weld_main)
+            lines_all, ents = [], []
+            tos = o.weld_to or ([[main["parent"], main.get("parent_face", "")]] if main and main.get("parent") else [])
+            if main is None:
+                mdl.notes.append(f"Operación {i + 1}: elija el elemento que se suelda.")
+            for tn, tf in tos:
+                tgt = reg.get(tn)
+                if tgt is None or tn == o.weld_main:
+                    continue
+                lines = _weld_pair(main, tgt, tf, o, PL)
+                for k, ln in enumerate(lines):
+                    if hw:
+                        mdl.welds.append(_mkweld(Weld, f"{o.weld_main}-S{i + 1}.{len(lines_all) + k + 1}", main["part"], tgt["part"], ln, o.weld_size, f"S{i + 1}", wtype))
+                    ents.append(float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0]))))
+                lines_all += lines
+                if not lines:
+                    mdl.notes.append(f"Operación {i + 1}: «{o.weld_main}» no toca a «{tn}»" + (f" por la cara «{tf}»." if tf else "."))
+            ent.update(ok=bool(ents), weld_len=sum(ents), plates=[o.weld_main] if ents else [], t_other=min([reg[t[0]].get("t", 0.375) for t in tos if t[0] in reg] or [0.375]))
         elif o.kind == OP_FILLET:
             ents = []
             if o.weld_mode == WELD_MODES[1]:                                           # contorno de un miembro contra una cara

@@ -275,7 +275,7 @@ function opTitle(o) {
     case K.HOLE: return `Huecos en ${o.parent}`;
     case K.TRIM: return `Recorte · ${(o.targets || []).join(', ') || '—'}`;
     case K.BOLTS: return `Pernos en ${o.parent}`;
-    case K.FILLET: return `Soldadura · ${(o.targets || []).join(', ') || '—'}`;
+    case K.FILLET: return `Soldadura · ${o.weld_main || (o.targets || []).join(', ') || '—'}`;
     case K.CUT: case K.COPE: return `Corte · ${(o.targets && o.targets.length ? o.targets : [o.member]).join(', ')}`;
     case K.BASE: return `Placa base · ${o.member || E.conn().node.main_name}`;
     default: return `${SHORT(o.kind)} · ${o.member}`;
@@ -287,7 +287,7 @@ function opSub(o) {
   if (o.kind === K.TRIM) return `${o.trim_mode.toLowerCase()}`;
   if (o.kind === K.PLATE || o.kind === K.ANGLE) return `sobre ${o.parent} · ${o.face}${o.attach ? ' · ' + o.attach.toLowerCase() : ''}`;
   if (o.kind === K.BOLTS) return `${o.rows}×${o.cols} ${o.bolt_size}" ${o.bolt_grade}`;
-  if (o.kind === K.FILLET) return `filete ${S.us.q('L', o.weld_size)}`;
+  if (o.kind === K.FILLET) return `${o.weld_main && (o.weld_to || []).length ? 'a ' + o.weld_to.map((t) => t[0]).join(', ') + ' · ' : ''}${(o.weld_type || 'Filete').split(' ')[0].toLowerCase()} ${S.us.q('L', o.weld_size)}`;
   return groupOf(o.kind);
 }
 function opRatio(i) {
@@ -375,7 +375,7 @@ function highlight() {
       else if (o.kind === K.HOLE) names.push(o.parent);
       else if (o.kind === K.TRIM) names.push(...(o.targets || []), o.parent);
       else if (o.kind === K.BOLTS) names.push(o.parent, ...(o.targets || []));
-      else if (o.kind === K.FILLET) names.push(...(o.targets || []));
+      else if (o.kind === K.FILLET) names.push(...(o.weld_main ? [o.weld_main, ...(o.weld_to || []).map((t) => t[0])] : (o.targets || [])));
       else if (o.kind === K.CUT) names.push(...(o.targets || []));
       else if (o.kind === K.COPE) names.push(...(o.targets && o.targets.length ? o.targets : [o.member]));
       else if (o.kind === K.BASE) names.push(o.member || nd.main_name);
@@ -442,7 +442,7 @@ async function createOperation(kind) {
     const plates = nd.operations.filter((o) => o.kind === K.PLATE || o.kind === K.ANGLE);
     const last = plates[plates.length - 1];
     if (last && kind === K.BOLTS) { params.parent = last.name; params.targets = [last.parent]; params.pl_s = last.pl_L / 2; params.pl_u = 0; }
-    if (last && kind === K.FILLET) params.targets = [last.name];
+    if (last && kind === K.FILLET) { params.weld_main = last.name; params.weld_to = last.parent ? [[last.parent, '']] : []; }
   }
   E.snap();
   try {

@@ -176,6 +176,14 @@ class Operation:
     seat_Lh: float = 5.0         # ángulo de asiento: pierna horizontal (bajo el ala), in
     seat_Lv: float = 6.0         # ángulo de asiento: pierna vertical (contra el soporte), in
     seat_W: float = 0.0          # ángulo de asiento: ancho, in (0 = automático)
+    wf_top: str = WELD_TYPES[1]  # conexiones de momento: tipo de soldadura del ala superior de la viga a la placa / al soporte
+    wf_bot: str = WELD_TYPES[1]  # idem, ala inferior
+    wf_web: str = WELD_TYPES[0]  # idem, alma
+    align_to: str = ""           # conexiones de corte y de momento: elemento al que se alinea la placa («» = el miembro conectado; el nombre del principal = paralela a su cara)
+    gus_L: float = 0.0           # cartela de arriostramiento: largo a lo largo del eje del miembro desde el principal, in (0 = automático)
+    gus_hb: float = 0.0          # cartela: ancho de la base sobre el principal, in (0 = automático)
+    gus_hm: float = 0.0          # cartela: ancho de la punta, in (0 = automático)
+    gus_cut: float = 0.0         # cartela: lado del corte de las esquinas de la punta, in
     cope_auto: bool = True       # corta la viga secundaria (cope) lo necesario para librar las alas de la viga principal
     # ---- formas de placa, aberturas, agujeros y soldadura (operaciones generales)
     pl_L2: float = 0.0           # trapecio: ancho de la base superior, in (0 = igual al de la base)
@@ -191,6 +199,8 @@ class Operation:
     weld_edges: list = field(default_factory=list)   # bordes de la placa que se sueldan (indices); con weld_all = True se sueldan todos
     weld_type: str = WELD_TYPES[0]
     weld_mode: str = WELD_MODES[0]
+    weld_main: str = ""          # soldadura: elemento que se suelda (miembro, placa o ángulo); con él se usa `weld_to` en vez de parent/face/targets
+    weld_to: list = field(default_factory=list)      # soldadura: [[elemento, cara]] a los que se suelda (cara "" = la que toca); puede haber varios
     weld_a: float = 0.0          # inicio del cordon en cada borde (in desde su primer vertice)
     weld_len: float = 0.0        # largo del cordon en cada borde, in (0 = todo el borde)
     hole_shape: str = HOLE_SHAPES[0]
@@ -308,7 +318,7 @@ class Nodo:
         for i, o in enumerate(self.operations):
             if o.makes_element and o.name == name:
                 continue
-            if o.parent == name or name in (o.targets or []) or (o.member == name and o.kind != OP_BASE and o.kind in GENERIC_OPS):
+            if o.parent == name or name in (o.targets or []) or o.weld_main == name or any(t[0] == name for t in (o.weld_to or [])) or (o.member == name and o.kind != OP_BASE and o.kind in GENERIC_OPS):
                 out.append(i)
         return out
 
@@ -324,6 +334,8 @@ class Nodo:
             if o.parent == old:
                 o.parent = new
             o.targets = [new if x == old else x for x in (o.targets or [])]
+            o.weld_main = new if o.weld_main == old else o.weld_main
+            o.weld_to = [[new if t[0] == old else t[0], t[1]] for t in (o.weld_to or [])]
         for x in self.loads:
             if x.member == old:
                 x.member = new
@@ -336,6 +348,8 @@ class Nodo:
             if o.parent == old:
                 o.parent = new
             o.targets = [new if x == old else x for x in (o.targets or [])]
+            o.weld_main = new if o.weld_main == old else o.weld_main
+            o.weld_to = [[new if t[0] == old else t[0], t[1]] for t in (o.weld_to or [])]
         for x in self.loads:
             if x.member == old:
                 x.member = new

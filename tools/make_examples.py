@@ -150,8 +150,8 @@ def base_con_diagonal_cartela_cortada() -> Project:
     from steelconpro.conn import assembly as AS
     p = base_con_diagonal()
     p.element = "CN-08"; p.name = "Ejemplo: placa base con diagonal y cartela cortada soldada a la columna y a la placa base"
-    p.plate.B = 36.0                                   # la placa se amplía hacia el lado de la cartela
-    p.conc.B2, p.conc.N2 = 48.0, 40.0
+    p.plate.N = 36.0                                   # la placa se amplía en la dirección del peralte de la columna (hacia el lado de la cartela)
+    p.conc.N2, p.conc.B2 = 48.0, 40.0
     nd = p.node
     nd.members = [Member(name="D1", shape="W8X31", steel="ASTM A992", az=0.0, el=45.0, roll=90.0, pos=12.0, gap=5.0, L=72.0)]
     nd.operations = [o for o in nd.operations if o.kind == OP_BASE]

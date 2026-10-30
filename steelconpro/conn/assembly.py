@@ -238,6 +238,46 @@ def gap_eff(m) -> float:
     return max(0.5 + float(m.gap), 0.0)
 
 
+def support_normal(nd, m):
+    """Normal (hacia afuera del principal) de la cara del principal en la que llega el miembro `m`, o None si no la toca."""
+    mshape = shape_of(nd.main_shape)
+    A, msx, msy = main_frame(nd)
+    dirv = member_dir(m)
+    P0, o2 = attach_point(nd, m, (A, msx, msy))
+    d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
+    s_ex = exit_dist(outer_extent(mshape), o2, d2)
+    if s_ex is None:
+        return None
+    x, y = o2[0] + s_ex * d2[0], o2[1] + s_ex * d2[1]
+    if mshape.kind == W_SHAPE:
+        flange = abs(y) >= mshape.d / 2.0 - 1e-6
+    else:
+        flange = abs(y) / max(mshape.d / 2.0, 1e-6) >= abs(x) / max(mshape.bf / 2.0 if mshape.bf > 0 else mshape.d / 2.0, 1e-6)
+    return (msy * (1.0 if y >= 0 else -1.0)) if flange else (msx * (1.0 if x >= 0 else -1.0))
+
+
+def aligned_frame(nd, m, op, dirv, sx, sy):
+    """Ejes (dirección de salida, ancho, alto) de la placa de una conexión de corte o de momento según el elemento al que se alinea.
+    «» = el propio miembro; el principal = paralela a la cara del principal en la que llega; otro miembro = sus propios ejes."""
+    if not getattr(op, "align_to", ""):
+        return None
+    if op.align_to == nd.main_name:
+        n = support_normal(nd, m)
+        if n is None:
+            return None
+        d2 = unit(n)
+        up = sy - d2 * float(np.dot(sy, d2))
+        if np.linalg.norm(up) < 1e-6:
+            up = sx - d2 * float(np.dot(sx, d2))
+        up = unit(up)
+        return d2, unit(np.cross(up, d2)), up                    # sx'×sy' = dir'
+    o = nd.member_named(op.align_to)
+    if o is None or o is m:
+        return None
+    _, osx, osy = member_frame(o)
+    return member_dir(o), osx, osy
+
+
 def tab_dims(op, m, shp, db):
     """Medidas de la placa simple: (filas, separacion, columnas, separacion entre columnas, alto, ancho, a) en in; `a` = distancia de la soldadura a la primera columna."""
     s = max(op.bolt_s, 3 * db * 0.8)
@@ -364,6 +404,49 @@ def endplate_layout(op, shp, extended):
     return {"t": t, "hh": hh, "gb": gb, "wide": wide, "rows": rows, "hollow": hollow, "bf": bf}
 
 
+def beam_end_welds(ctx, tag, B_name, s_face, faces=("top", "bot", "web")):
+    """Cordones del contorno de la sección del miembro contra la placa (o el soporte) en `s_face` (distancia desde Q a lo largo de ctx.dir), uno por segmento
+    del contorno, con el tipo elegido por cara del miembro: ala superior, ala inferior y alma.  Devuelve los Weld."""
+    from .fem.model3d import i_section, rect_tube
+    from .specs import WELD_TYPES
+    shp, op = ctx.shape, ctx.op
+    d, bf = float(shp.d), float(shp.bf if shp.bf > 0 else shp.d)
+    if shp.kind == W_SHAPE:
+        poly = i_section(shp)
+        tf = float(shp.tf)
+        face_of = lambda y: "top" if y > d / 2.0 - tf - 1e-6 else ("bot" if y < -d / 2.0 + tf + 1e-6 else "web")      # noqa: E731
+    elif shp.is_round:
+        return []
+    else:
+        poly = rect_tube(shp)[0]
+        face_of = lambda y: "top" if y > d / 2.0 - 1e-6 else ("bot" if y < -d / 2.0 + 1e-6 else "web")                # noqa: E731
+    types = {"top": op.wf_top, "bot": op.wf_bot, "web": op.wf_web}
+    tmap = {"top": min(float(getattr(shp, "tf", 0.5)) or 0.5, 0.375), "bot": min(float(getattr(shp, "tf", 0.5)) or 0.5, 0.375), "web": float(op.weld_size)}
+    out = []
+    n = len(poly)
+    nB = ctx.dir
+    for k in range(n):
+        a, b = poly[k], poly[(k + 1) % n]
+        ym = 0.5 * (a[1] + b[1])
+        f = face_of(ym)
+        if f not in faces:
+            continue
+        if f == "web" and abs(a[1] - b[1]) < 1e-9:
+            pass
+        P0 = ctx.at(s_face, a[0], a[1])
+        P1 = ctx.at(s_face, b[0], b[1])
+        if float(np.linalg.norm(P1 - P0)) < 0.05:
+            continue
+        nA = ctx.sx * (b[1] - a[1]) - ctx.sy * (b[0] - a[0])
+        nA = nA / max(float(np.linalg.norm(nA)), 1e-12)
+        ty = types[f]
+        size = float(op.weld_size) if ty == WELD_TYPES[0] else (tmap[f] if ty == WELD_TYPES[1] else 0.5 * tmap[f])
+        w = Weld(f"{tag}-W{k + 1}", ctx.partname, B_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, nA)), tuple(map(float, nB)), float(size), 70.0, tag)
+        w.kind = ty
+        out.append(w)
+    return out
+
+
 def _endplate_geometry(ctx, tag, extended):
     m, shp = ctx.m, ctx.shape
     L = endplate_layout(ctx.op, shp, extended)
@@ -376,6 +459,7 @@ def _endplate_geometry(ctx, tag, extended):
         for k, sg in enumerate((1, -1)):
             ctx.bolts.append(_bolt(f"{tag}-B{i + 1}{k + 1}", ctx.at(t, sg * (gb / 2.0 if not hollow else wide / 2.0 - 1.25), v), -ctx.dir, ctx.db, 0.0, t + 1.0,
                                    [(f"Placa extrema {tag}", 0.0, t)], ctx.op.bolt_grade))
+    ctx.welds += beam_end_welds(ctx, tag, f"Placa extrema {tag}", t)           # soldadura de la viga a la placa, con el tipo elegido por cara
     return t
 
 
@@ -384,6 +468,8 @@ def _weld_geometry(ctx, tag):
     shp = ctx.shape
     if _is_open(shp):
         _tab_geometry(ctx, tag)
+    if ctx.main_name:
+        ctx.welds += beam_end_welds(ctx, f"{tag}f", ctx.main_name, 0.12, faces=("top", "bot"))      # alas soldadas al soporte con el tipo elegido por ala
     return 0.12
 
 
@@ -415,14 +501,19 @@ def cope_prisms(shape, o, sx, sy, A, s0, s1, ct, cb, cl):
     """Viga I con corte (cope) en el extremo: alma como poligono con las muescas y alas acortadas.  Profundidades ct / cb y longitud cl en in."""
     d, bf, tf, tw = shape.d, shape.bf, shape.tf, shape.tw
     ct, cb, cl = max(ct, 0.0), max(cb, 0.0), max(cl, 0.0)
-    pts = [(s0, -d / 2 + cb)]
+    # el alma va solo ENTRE las alas (las alas son prismas aparte): si el alma llegara hasta el borde exterior, sus caras coincidirían con las de las alas
+    # (parpadeo y líneas de más en el visor, y volumen repetido en la malla); en la zona del corte sube o baja hasta la profundidad del corte
+    top_in, bot_in = d / 2 - tf, -d / 2 + tf
+    pts = []
     if cb > 0:
-        pts += [(s0 + cl, -d / 2 + cb), (s0 + cl, -d / 2)]
-    pts += [(s1, -d / 2), (s1, d / 2)]
-    if ct > 0:
-        pts += [(s0 + cl, d / 2), (s0 + cl, d / 2 - ct), (s0, d / 2 - ct)]
+        pts += [(s0, -d / 2 + cb), (s0 + cl, -d / 2 + cb), (s0 + cl, bot_in)]
     else:
-        pts += [(s0, d / 2)]
+        pts += [(s0, bot_in)]
+    pts += [(s1, bot_in), (s1, top_in)]
+    if ct > 0:
+        pts += [(s0 + cl, top_in), (s0 + cl, d / 2 - ct), (s0, d / 2 - ct)]
+    else:
+        pts += [(s0, top_in)]
     o = tuple(map(float, o))
     web = Prism(poly=[(float(a), float(b)) for a, b in pts], o=o, U=tuple(map(float, A)), V=tuple(map(float, sy)), w0=-tw / 2.0, w1=tw / 2.0)
     U, V = tuple(map(float, sx)), tuple(map(float, sy))
@@ -520,17 +611,28 @@ def _hull(pts):
 
 
 def _gusset_outline(ctx):
-    """Puntos (3D, en el plano de la cartela) del contorno de la cartela de un miembro: base sobre el principal y punta bajo el miembro."""
-    m, shp = ctx.m, ctx.shape
+    """Puntos (3D, en el plano de la cartela) del contorno de la cartela de un miembro: base sobre el principal y punta bajo el miembro.
+    Las medidas (largo, ancho de la base, ancho de la punta y corte de esquinas) se pueden fijar en la operación; 0 = automático."""
+    m, shp, op = ctx.m, ctx.shape, ctx.op
     dm = max(min(shp.d if not shp.is_round else shp.d, 16.0), 4.0)
-    hb = max(dm * 1.05, 7.0)
-    hm = max(dm * 0.9, 5.0)
-    rows = max(1, int(ctx.op.n_bolts))
-    s = max(ctx.op.bolt_s, 2.5)
+    hb = op.gus_hb if op.gus_hb > 0 else max(dm * 1.05, 7.0)
+    hm = op.gus_hm if op.gus_hm > 0 else max(dm * 0.9, 5.0)
+    rows = max(1, int(op.n_bolts))
+    s = max(op.bolt_s, 2.5)
     ov = (rows - 1) * s + 3.0 + 1.0
-    gl = 2.0 if ctx.op.kind == OP_GUSSET else 6.0
-    tip = gl + (ov if ctx.op.kind == OP_GUSSET else 0.0)
-    pts = [ctx.at(-EMBED, 0.0, -hb / 2.0), ctx.at(-EMBED, 0.0, hb / 2.0), ctx.at(tip, 0.0, hm / 2.0), ctx.at(tip, 0.0, -hm / 2.0)]
+    gl = 2.0 if op.kind == OP_GUSSET else 6.0
+    tip = gl + (ov if op.kind == OP_GUSSET else 0.0)
+    if op.gus_L > 0:
+        if op.kind == OP_GUSSET:
+            tip = op.gus_L                                       # la cartela se alarga, el miembro queda donde estaba
+        else:
+            gl = tip = op.gus_L                                  # soldada: el miembro termina donde termina la cartela
+    cut = min(max(op.gus_cut, 0.0), hm / 2.0, max(tip, 0.1))
+    pts = [ctx.at(-EMBED, 0.0, -hb / 2.0), ctx.at(-EMBED, 0.0, hb / 2.0)]
+    if cut > 1e-6:
+        pts += [ctx.at(tip - cut, 0.0, hm / 2.0), ctx.at(tip, 0.0, hm / 2.0 - cut), ctx.at(tip, 0.0, -hm / 2.0 + cut), ctx.at(tip - cut, 0.0, -hm / 2.0)]
+    else:
+        pts += [ctx.at(tip, 0.0, hm / 2.0), ctx.at(tip, 0.0, -hm / 2.0)]
     return pts, gl, ov, hm
 
 
@@ -795,12 +897,18 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         conn_op = conns[0] if conns else None
         diag = abs(m.el) >= DIAG_MIN
         ctxs_m, mss = [], []
+        align = None
         for k, cop in enumerate(conns or [None]):                 # cada operacion de conexion del miembro se arma en el orden de la lista
             c = _Ctx(m, cop, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
             c.partname = m.name
             c.main_name = nd.main_name
             tag = m.name if k == 0 else f"{m.name}.{k + 1}"
             kind = cop.kind if cop else None
+            if cop is not None and kind in (OP_EP_FLUSH, OP_EP_EXT, OP_SEAT):
+                fr = aligned_frame(nd, m, cop, dirv, sx, sy)
+                if fr is not None:                                 # la placa se alinea con otro elemento (p. ej. la cara de la columna) y no con el miembro conectado
+                    c.dir, c.sx, c.sy = fr
+                    align = (fr[0], k)
             ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
             if kind == OP_TAB:
                 _tab_geometry(c, tag)
@@ -829,6 +937,15 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 if not pl:
                     mdl.notes.append(f"{m.name}: las placas de continuidad solo se dibujan en una columna I a la que llega el miembro por la cara del ala.")
                 mdl.parts += pl
+        acut = None
+        if align is not None:                                       # extremo del miembro cortado por el plano de la placa alineada con otro elemento
+            d2 = align[0]
+            cth = float(np.dot(dirv, d2))
+            if abs(cth) > 0.05 and cth < 0.9999:
+                extra = (max(shp.d, shp.bf) / 2.0) * math.sqrt(max(1.0 - cth * cth, 0.0)) / abs(cth) + 0.5
+                acut = (tuple(map(float, Q + d2 * ms)), tuple(map(float, -d2)))
+                ms -= extra
+                Lm += extra
         Fy_m, Fu_m = _steel(m.steel)
         cope = next((o for o in nd.operations if o.kind in (OP_COPE, OP_CUT) and (o.member == m.name or m.name in (o.targets or []))), None)
         if cope is not None and shp.kind == W_SHAPE and (cope.cope_top > 0 or cope.cope_bot > 0):
@@ -851,6 +968,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 prisms = section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, Lm)
         mdl.parts.append(Part(m.name, "brace" if diag else "beam", f"{m.name} {shp.label}", Fy_m, Fu_m, prisms, t=shp.tw, stub=True))
         mdl.parts[-1].owner = m.name
+        if acut is not None:
+            for pr_ in mdl.parts[-1].prisms:
+                pr_.cut_planes = list(pr_.cut_planes) + [acut]
         for c_ in ctxs_m:
             for p in c_.parts:
                 p.owner = m.name

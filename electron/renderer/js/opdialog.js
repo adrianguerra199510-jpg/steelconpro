@@ -99,7 +99,12 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     if (vis.ep_ext) items.push(numField('Extensión de la placa extrema', 'ep_ext', 'L', 0.5, 24));
     if (kind === K.EP_FLUSH || kind === K.EP_EXT) items.push(numField('Ancho de la placa (0 = automático)', 'ep_w', 'L', 0, 60), numField('Alto total de la placa (0 = automático)', 'ep_h', 'L', 0, 120),
       numField('Gramil de los pernos (0 = automático)', 'ep_g', 'L', 0, 40), { type: 'custom', render: () => epRows(op, ctx, us) });
+    if (kind === K.EP_FLUSH || kind === K.EP_EXT || kind === K.WELD) items.push({ path: 'wf_top', label: 'Soldadura del ala superior', type: 'combo', items: C.weld_types }, { path: 'wf_bot', label: 'Soldadura del ala inferior', type: 'combo', items: C.weld_types },
+      ...(kind === K.WELD ? [] : [{ path: 'wf_web', label: 'Soldadura del alma', type: 'combo', items: C.weld_types }]));
     if (isTab) items.push(numField('Desplazar la placa a lo largo del peralte', 'tab_y', 'L', -60, 60));
+    if (kind === K.EP_FLUSH || kind === K.EP_EXT || kind === K.SEAT) items.push({ type: 'custom', render: () => field('Alinear la placa a', selectInput({ value: op.align_to || '', options: [{ value: '', label: `El miembro conectado (${op.member})` }, { value: nd.main_name, label: `La cara del principal «${nd.main_name}»` }, ...members.filter((x) => x !== op.member).map((x) => ({ value: x, label: `El miembro «${x}»` }))], onChange: (v) => { op.align_to = v; ctx.onChange(); } })) });
+    if (kind === K.GUSSET || kind === K.GUSSET_W) items.push(numField('Largo de la cartela desde el principal (0 = automático)', 'gus_L', 'L', 0, 120, null, null, 'A lo largo del eje del miembro, medido desde la cara del principal.'),
+      numField('Ancho de la base (0 = automático)', 'gus_hb', 'L', 0, 120), numField('Ancho de la punta (0 = automático)', 'gus_hm', 'L', 0, 120), numField('Corte de las esquinas de la punta', 'gus_cut', 'L', 0, 40));
     if (kind === K.DANG) items.push(numField('Pierna al soporte', 'dang_lo', 'L', 1.5, 12), numField('Pierna sobre el alma (0 = automático)', 'dang_la', 'L', 0, 12), numField('Largo del ángulo (0 = automático)', 'dang_H', 'L', 0, 60));
     if (kind === K.SEAT) items.push(numField('Pierna horizontal (bajo el ala)', 'seat_Lh', 'L', 2, 14), numField('Pierna vertical (contra el soporte)', 'seat_Lv', 'L', 2, 14), numField('Ancho del asiento (0 = automático)', 'seat_W', 'L', 0, 40));
     if (isTab || kind === K.DANG) items.push({ path: 'cope_auto', label: 'Cortar la viga secundaria si choca con las alas del principal', type: 'check', wide: true,
@@ -276,34 +281,43 @@ function boltsBody(body, E, op, ctx, info, el, nd, us, addForm) {
 function numField2(label, path, lo, hi) { return { path, label, type: 'num', uk: 'L', lo, hi }; }
 
 // ---------------------------------------------------------------------------------------------------------- soldadura
+// Un elemento principal (miembro, placa o ángulo) que se suelda a uno o varios elementos, cada uno por la cara que toca (o la que se elija).
 function weldBody(body, E, op, ctx, info, nd, us, addForm, index) {
   const C = S.C;
+  if (!op.weld_main) {                                               // operaciones antiguas: se pasan al formato nuevo
+    op.weld_main = (op.targets || [])[0] || '';
+    op.weld_to = op.parent ? [[op.parent, op.face || '']] : [];
+    op.targets = []; op.parent = ''; op.face = ''; op.weld_mode = C.weld_modes[0];
+  }
+  if (!op.weld_to) op.weld_to = [];
   const root = h('div', { class: 'col gap-12' });
-  const sel = h('div'); const edges = h('div'); const cord = h('div');
+  const mainBox = h('div'); const toBox = h('div'); const cord = h('div'); const edges = h('div');
+  const label = (e) => `${e.name} — ${e.type}${e.main ? ' (principal)' : ''}`;
   const rebuild = () => {
-    clear(sel); clear(edges); clear(cord);
-    const contour = op.weld_mode === C.weld_modes[1];
-    const tg = new Set(op.targets || []);
-    if (!contour) {
-      const plates = info.filter((e) => e.type === 'placa' || e.type === 'ángulo');
-      const checks = h('div', { class: 'col gap-4' });
-      for (const e of plates) checks.append(checkInput({ value: tg.has(e.name), label: `${e.name}`, onChange: (v) => { v ? tg.add(e.name) : tg.delete(e.name); op.targets = [...tg]; ctx.onChange(); } }));
-      sel.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Placas que se sueldan' }), plates.length ? checks : h('p', { class: 'muted', text: 'Primero agregue una operación «Placa»: la soldadura une las placas elegidas con la cara del elemento al que están unidas.' }),
-        h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'Opcional: elija abajo otro elemento y su cara para soldar la placa contra él (por ejemplo, el borde de una placa contra el ala de otro miembro).' })));
-    } else {
-      sel.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Miembro cuyo contorno se suelda' }), h('div', { class: 'form-grid' },
-        field('Miembro', selectInput({ value: (op.targets || [])[0] || '', options: [{ value: '', label: '—' }, ...info.filter((e) => e.type === 'miembro').map((e) => ({ value: e.name, label: e.name }))], onChange: (v) => { op.targets = v ? [v] : []; ctx.onChange(); } })))));
-    }
-    const e = info.find((x) => x.name === op.parent);
-    sel.append(h('div', { class: 'card-sec' }, h('h4', { text: contour ? 'Elemento y cara donde se suelda' : 'Soldar contra (opcional)' }), h('div', { class: 'form-grid' },
-      field('Elemento', selectInput({ value: op.parent, options: [{ value: '', label: contour ? '—' : 'La cara a la que se une la placa' }, ...info.map((x) => ({ value: x.name, label: `${x.name} — ${x.type}` }))], onChange: (v) => { op.parent = v; const x = info.find((y) => y.name === v); op.face = x ? x.faces[0] : ''; rebuild(); ctx.onChange(); } })),
-      field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } })))));
+    clear(mainBox); clear(toBox); clear(cord); clear(edges);
+    mainBox.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Elemento que se suelda' }), h('div', { class: 'form-grid' },
+      field('Elemento principal', selectInput({ value: op.weld_main, options: [{ value: '', label: '—' }, ...info.map((e) => ({ value: e.name, label: label(e) }))],
+        onChange: (v) => { op.weld_main = v; op.weld_to = op.weld_to.filter((t) => t[0] !== v); op.weld_edges = []; rebuild(); ctx.onChange(); } }))),
+      h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'Una placa se suelda por sus bordes; un miembro, por todo el contorno de su sección en el extremo; un ángulo, por el contorno de su pierna.' })));
+    const rows = h('div', { class: 'col gap-8' });
+    op.weld_to.forEach((t, k) => {
+      const e = info.find((x) => x.name === t[0]);
+      rows.append(h('div', { class: 'row', style: { alignItems: 'flex-end', gap: '8px' } },
+        h('div', { class: 'grow' }, field(`Elemento ${k + 1}`, selectInput({ value: t[0], options: info.filter((x) => x.name !== op.weld_main).map((x) => ({ value: x.name, label: label(x) })),
+          onChange: (v) => { t[0] = v; t[1] = ''; rebuild(); ctx.onChange(); } }))),
+        h('div', { class: 'grow' }, field('Cara', selectInput({ value: t[1] || '', options: [{ value: '', label: 'La que toca (automática)' }, ...(e ? e.faces : []).map((f) => ({ value: f, label: f }))],
+          onChange: (v) => { t[1] = v; ctx.onChange(); } }))),
+        iconBtn('trash', 'Quitar', () => { op.weld_to.splice(k, 1); rebuild(); ctx.onChange(); })));
+    });
+    const others = info.filter((x) => x.name !== op.weld_main);
+    toBox.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Se suelda a' }), op.weld_to.length ? rows : h('p', { class: 'muted', text: op.weld_main && info.find((x) => x.name === op.weld_main)?.type === 'placa' ? 'Sin elementos: se suelda a la cara del elemento al que está unida la placa.' : 'Agregue los elementos a los que se suelda.' }),
+      h('div', { style: { height: '8px' } }), btn('Agregar elemento', { icon: 'plus', disabled: !others.length, onClick: () => { op.weld_to.push([others[0].name, '']); rebuild(); ctx.onChange(); } })));
     cord.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Cordón' }), addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types },
       { path: 'weld_all', label: 'Todos los bordes', type: 'check', wide: true }, numField('Inicio del cordón en cada borde', 'weld_a', 'L', 0, 600), numField('Largo del cordón (0 = todo el borde)', 'weld_len', 'L', 0, 600)])));
-    if (!op.weld_all && !contour) edges.append(edgePicker(E, op, ctx, index, (op.targets || [])[0]));
+    const mt = info.find((x) => x.name === op.weld_main)?.type;
+    if (!op.weld_all && mt === 'placa') edges.append(edgePicker(E, op, ctx, index, op.weld_main));
   };
-  const modeSeg = segmented(C.weld_modes.map((m) => ({ value: m, label: m })), op.weld_mode, (v) => { op.weld_mode = v; op.targets = []; rebuild(); ctx.onChange(); });
-  root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Qué se suelda' }), modeSeg), sel, cord, edges);
+  root.append(mainBox, toBox, cord, edges);
   rebuild();
   root.onField = (p) => { if (p === 'weld_all') rebuild(); };
   body.append(root);

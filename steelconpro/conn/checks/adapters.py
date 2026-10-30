@@ -17,8 +17,8 @@ from ...design import Check
 from ...explain import Recorder
 from ...shapes import CATALOG, W_SHAPE
 from ..assembly import attach_info, gap_eff
-from ..specs import (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Operation, Member)
-from .specs import ShearTab, DoubleAngle, Seated, EndPlate, SUP_KINDS
+from ..specs import (WELD_TYPES, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Operation, Member)
+from .specs import ShearTab, DoubleAngle, Seated, EndPlate, SUP_KINDS, EP_FLANGE_WELD
 from . import shear_tab, double_angle, seated, endplate, generic
 
 TOL_OTHER = 0.02          # fraccion de la fuerza principal bajo la cual una componente no considerada no se avisa
@@ -127,7 +127,8 @@ def build_items(nd: Nodo):
             spec = EndPlate(beam=m.shape, beam_steel=m.steel, col=nd.main_shape, col_steel=nd.main_steel, cont_plates=any(o.kind == OP_CONT and o.member == m.name for o in nd.operations),
                             plate_steel=op.plate_steel, bp=(op.ep_w if op.ep_w > 0 else (beam.bf if beam is not None else 7.0) + 1.5), tp=op.plate_t,
                             **({'g': op.ep_g} if op.ep_g > 0 else {}), bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
-                            pfo=1.75, pfi=1.75, e_ext=1.5, ext_t=ext, ext_c=ext, fw_size=op.weld_size, ww_size=op.weld_size)
+                            pfo=1.75, pfi=1.75, e_ext=1.5, ext_t=ext, ext_c=ext, fw_size=op.weld_size, ww_size=op.weld_size,
+                            fw_type=(EP_FLANGE_WELD[1] if (op.wf_top == WELD_TYPES[0] or op.wf_bot == WELD_TYPES[0]) else EP_FLANGE_WELD[0]))
             items.append(Item(op, m, "ep", spec, None, engine=endplate))
         elif op.kind in (OP_GUSSET, OP_GUSSET_W):
             items.append(Item(op, m, "gusset", None, None, engine=generic))
