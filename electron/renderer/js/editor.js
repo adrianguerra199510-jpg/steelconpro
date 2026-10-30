@@ -116,17 +116,22 @@ const runMesh = debounce(async () => {
   } catch (e) { setStatus(`No se pudo dibujar el modelo: ${e.message}`, true); }
 }, 90);
 
+// el equilibrio del nudo (cargas de los extremos) se mantiene al día para dibujar las flechas; las verificaciones (D/C) SOLO se calculan con «Calcular»
+const runNodal = debounce(async () => {
+  try { E.nodal = await call('nodal', { connection: E.conn() }); } catch (e) { E.nodal = null; }
+  renderNodal(); applyLoads();
+}, 300);
 const verify = latest(async () => call('verify', { connection: E.conn() }));
 const runVerify = debounce(async () => {
-  setVerdict('calc');
+  setVerdict('calc'); E.calculating = true; renderResults();
   try {
     const r = await verify();
     if (!r) return;
-    E.res = r; E.stale = false;
+    E.res = r; E.stale = false; E.calculating = false;
     try { E.nodal = await call('nodal', { connection: E.conn() }); } catch (e) { E.nodal = null; }
     renderResults(); renderNodal(); applyLoads(); renderTree(); setVerdict(); if (E.report) E.report.refresh();
-  } catch (e) { E.res = null; setVerdict('error', e.message); renderResults(e.message); }
-}, 700);
+  } catch (e) { E.calculating = false; E.res = null; setVerdict('error', e.message); renderResults(e.message); }
+}, 100);
 
 function markDirty() { E.dirty = true; setStatus('Cambios sin guardar…'); save(); }
 const save = debounce(() => saveNow(), 1200);
@@ -142,10 +147,11 @@ async function saveNow(manual) {
 
 E.changed = (opts = {}) => {
   markDirty();
-  E.stale = true;
-  if (opts.structure) renderTree();
+  E.stale = true; E.res = null; E.calculating = false;                        // un cambio descarta los resultados: sin D/C hasta volver a calcular
+  if (opts.structure) renderTree(); else renderTree();
   if (opts.geometry !== false) runMesh();
-  runVerify();
+  runNodal();
+  renderResults();
   setVerdict('stale');
 };
 
@@ -238,8 +244,8 @@ async function refreshAll(rebuildRight = true) {
   E.ui.hwBtn.classList.toggle('on', c.node.show_hw);
   renderConnTabs(); renderTree(); updateUndo();
   if (rebuildRight) buildRight();
-  E.stale = true; setVerdict('stale');
-  runMesh.flush(); runVerify();
+  E.stale = true; E.res = null; setVerdict('stale');
+  runMesh.flush(); runNodal.flush(); renderResults();
 }
 
 function renderConnTabs() {
@@ -569,14 +575,14 @@ function scrollToGroup(i) {
   if (el) { el.classList.remove('closed'); el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.animate([{ background: 'var(--brand-50)' }, { background: 'transparent' }], { duration: 1200 }); }
 }
 
-function renderResults(err) { if (E.ui.resBox) fillResults(E.ui.resBox, err); }
+function renderResults(err) { if (E.ui.resBox) fillResults(E.ui.resBox, err); renderMemory(); if (E.report) E.report.refresh(); }
 
 function fillResults(box, err, { forceOpen = false, pick = true } = {}) {
   clear(box);
   const r = E.res;
   const us = S.us;
   if (err) { box.append(h('div', { class: 'warns' }, h('div', { class: 'warn-row fatal' }, svg('circle-alert', 15), h('span', { text: err })))); return; }
-  if (!r) { box.append(h('div', { style: { padding: '16px' } }, spinner('Calculando…'))); return; }
+  if (!r) { box.append(E.calculating ? h('div', { style: { padding: '16px' } }, spinner('Calculando…')) : h('div', { class: 'muted', style: { padding: '18px 14px', fontSize: '13px' }, text: 'Todavía no se ha calculado. Presione «Calcular» para ver las verificaciones y los D/C de cada operación.' })); return; }
   box.append(h('div', { class: 'kpis', style: { margin: '6px 0 12px' } },
     h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'D/C máximo' }), h('div', { class: 'v', text: r.max_ratio.toFixed(3) })),
     h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Gobierna' }), h('div', { class: 'v', style: { fontSize: '12px' }, text: r.governing || '—' })),

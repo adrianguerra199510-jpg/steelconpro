@@ -31,6 +31,8 @@ const os = require('os');
       if (i === 59) throw new Error('el visor no recibio piezas');
     }
     check(true, 'el visor 3D recibe las piezas del modelo');
+    check(await page.evaluate(() => !document.querySelector('.big-chip.ok, .big-chip.bad') && !document.querySelector('.tree-item .dc')), 'sin calcular no hay D/C en ninguna operación');
+    await page.click('button:has-text("Calcular")');
     await page.waitForSelector('.big-chip.ok, .big-chip.bad', { timeout: 60000 });
     check(true, 'se calculan los resultados por operación');
     await page.screenshot({ path: path.join(shots, 'electron_editor.png') });
