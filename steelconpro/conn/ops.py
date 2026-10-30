@@ -270,7 +270,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
     for i, o in order:
         ent = {"op": o, "index": i, "ok": False}
         entries.append(ent)
-        if o.kind == OP_CUT:
+        if o.kind in (OP_CUT, OP_TRIM):
             ent["ok"] = True
             continue
         parent = reg.get(o.parent)
@@ -497,6 +497,8 @@ def add_checks(prj, nd, R, rec, mdl):
                 _chk(R.checks, grp, f"{key}_cut_{tg}", f"Recorte de «{tg}»: pandeo local del alma y flexión del miembro recortado — NO EVALUADO", 0.0, 1.0, "-",
                      "AISC Manual Parte 9", "El corte debe revisarse aparte (los herrajes ya consideran la geometría recortada).", skip=True)
             continue
+        if o.kind in (OP_TRIM, OP_HOLE) and ent.get("ok"):
+            continue                                                   # solo geometría: no hay nada que verificar
         if not ent.get("ok"):
             _chk(R.checks, grp, f"{key}_na", "La operación no se pudo armar (falta el elemento o la cara) — NO EVALUADO", 0.0, 1.0, "-", "", "Revise el elemento y la cara en la operación.", skip=True)
             continue
@@ -529,6 +531,25 @@ def add_checks(prj, nd, R, rec, mdl):
                 edge = min(edge_a, edge_b)
                 Fu_p = parent.get("Fu", Fu)
                 _bolt_checks(R.checks, grp, key, o, o.rows * o.cols, [(o.name, t, Fu), (o.parent, ff.wall, Fu_p)], edge, True, V, T, None)
+        elif o.kind == OP_ANGLE:
+            spec, parent = ent["spec"], ent["parent"]
+            t = spec["t"]
+            Fy, Fu = _steel(o.plate_steel, True)
+            Ag = (o.leg_a + o.leg_b - t) * t
+            nh = o.cols if o.attach == ATTACHES[1] else 0
+            Ae = Ag - nh * (bolt_db(o.bolt_size) + 0.125) * t
+            if rec is not None:
+                rec.section(f"OPERACION {i + 1}: {o.kind.upper()} — {o.name}")
+                rec.text(f"Ángulo L{o.leg_a:g}×{o.leg_b:g}×{t:g} × {o.pl_L:g} in sobre «{o.parent}» ({o.face}); {o.attach.lower()}.")
+            _chk(R.checks, grp, f"{key}_ty", "Ángulo — fluencia en tracción (sección bruta)", T, 0.90 * Fy * Ag, "kip", "AISC J4.1(a)", "φ = 0.90")
+            _chk(R.checks, grp, f"{key}_tr", "Ángulo — rotura en tracción (sección neta)", T, 0.75 * Fu * Ae, "kip", "AISC J4.1(b)", "φ = 0.75")
+            _chk(R.checks, grp, f"{key}_vy", "Ángulo — fluencia por cortante", V, 1.00 * 0.60 * Fy * o.pl_L * t, "kip", "AISC J4.2(a)", "φ = 1.00")
+            if o.attach == ATTACHES[0]:
+                _weld_checks(R.checks, grp, key, float(o.weld_size), ent.get("weld_len", 0.0), V, T, t, parent["faces"][o.face].wall if o.face in parent["faces"] else t)
+            else:
+                ff = ent["ff"]
+                edge = min(o.pl_L / 2.0 - (o.rows - 1) * o.bolt_s / 2.0, o.leg_a / 2.0 - (o.cols - 1) * o.bolt_g / 2.0)
+                _bolt_checks(R.checks, grp, key, o, o.rows * o.cols, [(o.name, t, Fu), (o.parent, ff.wall, parent.get("Fu", Fu))], edge, True, V, T, None)
         elif o.kind == OP_BOLTS:
             ff = ent["ff"]
             layers = [(nm, t, ent["parent"].get("Fu", 65.0) if k == 0 else 65.0) for k, (nm, t) in enumerate(ent["layers"])]

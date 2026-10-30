@@ -85,8 +85,46 @@ def columna_con_placa_base() -> Project:
     return p
 
 
+def _gen(nd, kind, **kw):
+    from steelconpro.conn import ops as OPS
+    return OPS.add_operation(nd, kind, **kw)
+
+
+def refuerzo_con_placas() -> Project:
+    """Viga con placa de refuerzo trapezoidal soldada al ala, rigidizador y huecos ranurados; todo con operaciones generales (editables)."""
+    from steelconpro.conn.specs import OP_PLATE, OP_BOLTS, OP_FILLET, OP_HOLE, PLATE_SHAPES, FACES_I, PLATE_ORIENTS, ATTACHES
+    p = Project(); p.ctype = CT_NODE; p.element = "CN-05"; p.name = "Ejemplo: viga con placa trapezoidal, rigidizador y huecos"
+    nd = PRE.build(MODE_BEAM, "sec1", "I", "tab")
+    nd.members[0].shape = "W18X35"
+    nd.operations = []
+    a = _gen(nd, OP_PLATE, parent=nd.main_name, face=FACES_I[1], shape=PLATE_SHAPES[4], pl_L=14.0, pl_W=6.0, pl_L2=3.0, plate_t=0.5, pl_s=36.0)
+    b = _gen(nd, OP_PLATE, parent=a.name, face="Cara +", role="Rigidizador", orient=PLATE_ORIENTS[1], pl_L=5.0, pl_W=3.0, plate_t=0.375)
+    _gen(nd, OP_HOLE, parent=a.name, face="Cara +", rows=1, cols=2, bolt_g=3.0)
+    _gen(nd, OP_FILLET, targets=[b.name], weld_size=0.1875)
+    nd.members = []
+    nd.loads = []
+    p.node = nd
+    return p
+
+
+def diagonal_en_inglete() -> Project:
+    """Diagonal HSS recortada contra el ala de la columna, soldada en todo su contorno, y un ángulo de asiento atornillado."""
+    from steelconpro.conn.specs import OP_TRIM, OP_FILLET, OP_ANGLE, FACES_I, WELD_MODES, ATTACHES
+    p = Project(); p.ctype = CT_NODE; p.element = "CN-06"; p.name = "Ejemplo: diagonal recortada con soldadura de contorno y ángulo"
+    nd = PRE.build(MODE_COL, "int2", "I", "tab")
+    nd.operations = []
+    nd.members = [Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=-45.0, pos=96.0, L=60.0)]
+    _gen(nd, OP_TRIM, targets=["D1"], parent=nd.main_name, face=FACES_I[0], trim_gap=0.0)
+    _gen(nd, OP_FILLET, weld_mode=WELD_MODES[1], targets=["D1"], parent=nd.main_name, face=FACES_I[0], weld_size=0.1875)
+    _gen(nd, OP_ANGLE, parent=nd.main_name, face=FACES_I[2], attach=ATTACHES[1], pl_s=84.0, pl_L=6.0, rows=2, cols=1)
+    nd.loads = [Load("Caso 1", "D1", N=5.0)]
+    p.node = nd
+    return p
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    for fn, mk in (("CN-01_columna_con_vigas.scp", nodo_columna), ("CN-02_viga_con_secundarias.scp", viga_a_viga), ("CN-03_cordon_con_diagonales.scp", cruceta), ("CN-04_columna_con_placa_base.scp", columna_con_placa_base)):
+    for fn, mk in (("CN-01_columna_con_vigas.scp", nodo_columna), ("CN-02_viga_con_secundarias.scp", viga_a_viga), ("CN-03_cordon_con_diagonales.scp", cruceta), ("CN-04_columna_con_placa_base.scp", columna_con_placa_base),
+                   ("CN-05_viga_con_placas_trapezoidales.scp", refuerzo_con_placas), ("CN-06_diagonal_con_recorte_y_angulo.scp", diagonal_en_inglete)):
         save_book(str(OUT / fn), [mk()])
         print("->", OUT / fn)

@@ -174,7 +174,7 @@ def run():
         back = api.book_load({"path": f})["connections"][0]
         if [o["kind"] for o in back["node"]["operations"]] != [o["kind"] for o in con["node"]["operations"]]:
             fail("ops: el archivo no conserva las operaciones")
-        for ex in ("CN-01_columna_con_vigas", "CN-04_columna_con_placa_base", "PB-01_W14X90"):
+        for ex in ("CN-01_columna_con_vigas", "CN-04_columna_con_placa_base", "CN-05_viga_con_placas_trapezoidales", "CN-06_diagonal_con_recorte_y_angulo", "PB-01_W14X90"):
             b = load_book(os.path.join("ejemplos", ex + ".scp"))
             vv = api.verify({"connection": api.book_load({"path": os.path.join("ejemplos", ex + ".scp")})["connections"][0]})
             if not vv["checks"]:
