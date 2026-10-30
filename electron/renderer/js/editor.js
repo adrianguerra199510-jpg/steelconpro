@@ -9,6 +9,7 @@ import { openOperation, OP_ICON, opColor, groupOf } from './opdialog.js';
 import { openMember, openLoads, openProject, renameRefs } from './editdialogs.js';
 import { openSections, openMaterials, openTemplates } from './libraries.js';
 import { renderItems } from './forms.js';
+import { pickTypology } from './typology.js';
 
 const join = (a, b) => `${a.replace(/[\\/]+$/, '')}/${b}`;
 
@@ -248,9 +249,11 @@ function renderConnTabs() {
     box.append(b);
   });
   box.append(iconBtn('plus', 'Nueva conexión en este proyecto', async () => {
+    const pick = await pickTypology();
+    if (!pick) return;
     E.snap();
     const c0 = E.conn();
-    const nc = await call('connection_new', { n: E.conns.length + 1, name: c0.name, u_len: c0.u_len, u_force: c0.u_force, u_stress: c0.u_stress, u_moment: c0.u_moment });
+    const nc = await call('connection_new', { n: E.conns.length + 1, name: c0.name, u_len: c0.u_len, u_force: c0.u_force, u_stress: c0.u_stress, u_moment: c0.u_moment, typology: pick.typology, params: pick.params });
     E.conns.push(nc); markDirty(); switchConn(E.conns.length - 1);
   }));
 }

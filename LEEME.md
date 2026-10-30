@@ -459,3 +459,11 @@ cierra con V.
 - Las conexiones tipo tienen sus medidas editables: placa simple (alto, ancho, filas × columnas, desplazamiento), doble ángulo (piernas y largo), asiento (piernas y ancho) y placa extrema (ancho, alto, gramil y posición de cada fila de pernos).
 - **Convertir en piezas editables** (placa extrema a ras y extendida): la conexión se reemplaza por una placa sobre el extremo del miembro, la soldadura de contorno y un grupo de pernos por fila, con los mismos pernos que la original. Desde ahí se edita cada pieza (forma, aberturas, pernos, soldaduras).
 - Pestaña **FEM**: *Configuración del análisis FEM* (largo modelado de cada miembro, calidad y tamaño de malla, contacto, plasticidad, modelo y criterio de soldaduras) y **Ver malla en el visor** (genera solo la malla con Gmsh y la muestra pieza por pieza, sin resolver).
+
+## Tipologías de nudo y orden de las operaciones
+
+- **Nueva conexión** (el «+» de las pestañas de conexión y «Nuevo proyecto») ofrece: *En blanco*, **Plato base** (columna sobre placa base con diagonales y cartelas), **Nodo de columna intermedia o superior** y **Nodo de vigas** (dos miembros que se cruzan). Cada una arma los miembros, las operaciones y unas cargas de partida; todo queda editable.
+- Las operaciones se aplican **en el orden de la lista** (flechas de subir y bajar en el árbol). Un miembro puede tener varias conexiones: crear una nueva ya no borra la anterior.
+- El miembro conectado se mueve sobre su propio eje con *Desplazamiento sobre su eje* (reemplaza al retranqueo del extremo).
+- **Soldadura**: se elige un elemento principal (miembro, placa o ángulo) y cualquier número de elementos a los que se suelda, cada uno por la cara que toca o la que se elija. En las conexiones a momento se dibuja la soldadura de la viga y se elige su tipo por cara (ala superior, ala inferior y alma).
+- Placa extrema y asiento: *Alinear la placa a* la cara del principal, al miembro conectado o a otro miembro. Cartela: largo, ancho de la base, ancho de la punta y corte de esquinas.

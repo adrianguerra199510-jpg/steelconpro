@@ -1,4 +1,5 @@
 // Pantalla de inicio: proyectos y carpetas del espacio de trabajo (como el panel de proyectos de Terrastruct).
+import { pickTypology } from './typology.js';
 import { call } from './api.js';
 import { S, go, setTheme } from './state.js';
 import { h, clear, svg, btn, iconBtn, menu, modal, promptBox, confirmBox, toast, errorBox, field, selectInput, textInput, segmented, fmtDate, debounce } from './ui.js';
@@ -247,8 +248,10 @@ function newProject(folder = '') {
     const [ul, uf, us] = u[unitSet];
     const um = { 'kN': 'kN·m', 'kip': 'kip·in', 'tonf': 'tonf·m' }[uf] || 'kN·m';
     try {
-      const r = await call('ws_create_project', { root: S.root, folder: fld, name, u_len: ul, u_force: uf, u_stress: us, u_moment: um });
       m.close();
+      const pick = await pickTypology();
+      if (!pick) return;
+      const r = await call('ws_create_project', { root: S.root, folder: fld, name, u_len: ul, u_force: uf, u_stress: us, u_moment: um, typology: pick.typology, params: pick.params });
       await go('editor', { path: r.rel });
     } catch (e) { errorBox(e); }
   }

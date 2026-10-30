@@ -64,6 +64,20 @@ const os = require('os');
     await wait(2500);
     await page.screenshot({ path: path.join(shots, 'fem_3_malla_placa_base.png') });
   });
+  await step('tipologias', async () => {
+    await home(); await open('CN-04');
+    for (const [name, key] of [['Plato base', 'base'], ['Nodo de columna intermedia o superior', 'col'], ['Nodo de vigas', 'vigas']]) {
+      await page.click('[title="Nueva conexión en este proyecto"]');
+      await page.waitForSelector('.tpl-card', { timeout: 15000 });
+      await page.click(`.tpl-card:has-text("${name}")`);
+      await wait(400);
+      if (key === 'base') await page.screenshot({ path: path.join(shots, 'tipologia_dialogo.png') });
+      await page.click('.modal button:has-text("Crear")');
+      for (let i = 0; i < 40; i++) { if (await page.evaluate(() => !!(window.__E && window.__E.viewer && window.__E.viewer.parts.length > 2))) break; await wait(500); }
+      await wait(2500);
+      await page.screenshot({ path: path.join(shots, `tipologia_${key}.png`) });
+    }
+  });
   console.log(errors.length ? 'Errores: ' + errors.slice(0, 5).join(' | ') : 'sin errores de consola');
   await app.close();
 })();

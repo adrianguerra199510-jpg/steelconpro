@@ -98,6 +98,23 @@ def book_new(_=None) -> dict:
     return {"connections": [_dump(p)]}
 
 
+def typologies(_=None) -> dict:
+    """Tipologías de nudo para el diálogo de «Nueva conexión»: [{id, name, fields}]."""
+    from .conn import typologies as T
+    return {"types": [{"id": k, "name": n, "fields": T.schema(k)} for k, n in T.TYPES]}
+
+
+def _apply_typology(p, args):
+    kind = args.get("typology") or ""
+    if not kind:
+        return
+    from .conn import typologies as T
+    p.node = T.build_nodo(kind, args.get("params") or {})
+    if kind == "base":
+        p.combo_list()
+        p.apply_combo(0)
+
+
 def connection_new(args=None) -> dict:
     args = args or {}
     p = new_connection()
@@ -106,6 +123,7 @@ def connection_new(args=None) -> dict:
         if k in args:
             setattr(p, k, args[k])
     p.element = args.get("element") or f"CN-{int(args.get('n', 1)):02d}"
+    _apply_typology(p, args)
     return _dump(p)
 
 
@@ -948,6 +966,7 @@ def ws_create_project(args) -> dict:
     for kk in ("u_len", "u_force", "u_stress", "u_moment"):
         if kk in args:
             setattr(p, kk, args[kk])
+    _apply_typology(p, args)
     save_book(str(path), [p])
     return {"path": str(path), "rel": str(path.relative_to(root)).replace(os.sep, "/")}
 

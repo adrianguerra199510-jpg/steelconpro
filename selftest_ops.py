@@ -186,6 +186,24 @@ def run():
             fail(f"fem: no se genero la malla ({js.get('state')}, {js.get('error', '')[:200]})")
         print(f"{'conexion editable y malla FEM':34} placa extrema -> piezas con los mismos {len(before)} pernos; malla {ms['mesh']['elements'] if ms else 0:,} elementos: OK")
 
+        # ---- tipologias de nudo (plato base, columna intermedia o superior, nodo de vigas) y varias conexiones por miembro en orden
+        tp = api.typologies()["types"]
+        for t in tp:
+            cn = api.connection_new({"typology": t["id"]})
+            mm = api.mesh({"connection": cn}); vv = api.verify({"connection": cn})
+            if mm.get("notes") or len(mm["parts"]) < 4 or not vv["checks"]:
+                fail(f"tipologia {t['id']}: {mm.get('notes')} {len(mm['parts'])} piezas, {len(vv['checks'])} verificaciones")
+        cn = api.connection_new({"typology": "col", "params": {"top": True, "n_braces": 2}})
+        if any(m_["el"] > 0 for m_ in cn["node"]["members"]):
+            fail("tipologia: en el nudo superior las diagonales van hacia abajo")
+        c3 = api.book_new()["connections"][0]
+        nm3 = api.new_member({"connection": c3})["member"]; c3["node"]["members"].append(nm3)
+        for kd in ("EP_FLUSH", "GUSSET"):
+            r3 = api.add_operation({"connection": c3, "kind": K[kd], "params": {"member": nm3["name"]}}); c3 = r3["connection"]
+        if sum(1 for o in c3["node"]["operations"] if o["member"] == nm3["name"]) != 2:
+            fail("operaciones: una conexion nueva no debe borrar la anterior del mismo miembro")
+        print(f"{'tipologias y orden':34} 3 tipologias de nudo se arman y calculan; dos conexiones en un miembro se conservan: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")
