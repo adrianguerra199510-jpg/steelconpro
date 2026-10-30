@@ -164,8 +164,15 @@ def _base_cases(prj, nd: Nodo):
     return out
 
 
-def _draw_items(nd: Nodo, loads: list, bal: dict) -> list:
-    """Cargas del caso para dibujarlas en el visor: [{pos, F, M, kind, name}] (fuerza y momento en ejes globales; unidades internas)."""
+def _draw_items(nd: Nodo, loads: list, bal: dict, ends: dict) -> list:
+    """Cargas del caso para dibujarlas en el visor, cada una en el EXTREMO de su elemento (fuerza y momento globales, trasladados al extremo):
+    [{pos, F, M, kind, name}].  `ends` = {miembro: punto del extremo libre}."""
+    A = AS.main_frame(nd)[0]
+    lneg, lpos = nd.lengths()
+    if lneg + lpos < 1.0:
+        lneg = lpos = 24.0
+    Eside = lambda side: A * side * (lpos if side > 0 else lneg)                  # noqa: E731
+    O = np.zeros(3)
     items = []
     for l in loads:
         if l.member == NODE:
@@ -176,73 +183,40 @@ def _draw_items(nd: Nodo, loads: list, bal: dict) -> list:
             if side == bal["side"]:
                 continue
             F, M = _vec(l, local_axes(nd, nd.main_name, side))
-            A = AS.main_frame(nd)[0]
-            items.append({"pos": (A * side * 12.0).tolist(), "F": F.tolist(), "M": M.tolist(), "name": nd.main_name, "kind": "main"})
+            E = Eside(side)
+            items.append({"pos": E.tolist(), "F": F.tolist(), "M": (M + np.cross(O - E, F)).tolist(), "name": nd.main_name, "kind": "main"})
             continue
         ax = local_axes(nd, l.member)
-        if ax is None:
+        if ax is None or l.member not in ends:
             continue
         F, M = _vec(l, ax)
-        items.append({"pos": _node_point(nd, l.member).tolist(), "F": F.tolist(), "M": M.tolist(), "name": l.member, "kind": "member"})
-    A = AS.main_frame(nd)[0]
-    items.append({"pos": (A * bal["side"] * 12.0).tolist(), "F": bal["R"], "M": bal["M"], "name": nd.main_name, "kind": "reaction"})
+        E = np.asarray(ends[l.member], float)
+        items.append({"pos": E.tolist(), "F": F.tolist(), "M": (M + np.cross(_node_point(nd, l.member) - E, F)).tolist(), "name": l.member, "kind": "member"})
+    Eb = Eside(bal["side"])
+    R, MR = np.array(bal["R"]), np.array(bal["M"])
+    items.append({"pos": Eb.tolist(), "F": R.tolist(), "M": (MR + np.cross(O - Eb, R)).tolist(), "name": nd.main_name + " (reacción)", "kind": "reaction"})
     return items
 
 
-def _box(E, R):
-    E = np.asarray(E, float)
-    return (float(E[0] - R), float(E[0] + R), float(E[1] - R), float(E[1] + R), float(E[2] - R), float(E[2] + R))
-
-
-def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, mshape):
-    """Apoyo y cargas del modelo FEM de un caso de carga: el lado que equilibra del principal se empotra; en el otro lado del principal y en el extremo libre de cada
-    miembro conectado se aplica la accion dada (fuerza y momento trasladados al extremo).  Devuelve (apoyos, cargas) del modelo 3D."""
-    from .fem.model3d import FaceSel, LoadApp, Support
-    A = AS.main_frame(nd)[0]
-    bal = balance(nd, loads)
-    sb = bal["side"]
-    Rm = max(mshape.d, mshape.bf) / 2.0 + 1.0
-    O = np.zeros(3)
-    E_of = lambda side: A * side * (lpos if side > 0 else lneg)             # noqa: E731
-    sups = [Support("Apoyo del principal", FaceSel(nd.main_name, _box(E_of(sb), Rm), tuple(float(x) for x in A * sb)), (1, 2, 3))]
-    lds = []
-    sg = -sb
-    Fg, Mg = np.zeros(3), np.zeros(3)
-    for l in loads:
-        if l.member == nd.main_name and (int(getattr(l, "side", 0)) or -sb) == sg:
-            F, M = _vec(l, local_axes(nd, nd.main_name, sg))
-            Fg, Mg = Fg + F, Mg + M
-        elif l.member == NODE:                                            # carga externa del nudo: se traslada al extremo del lado dado
-            Fg, Mg = Fg + np.array([l.N, l.Vy, l.Vz], float), Mg + np.array([l.T, l.My, l.Mz], float)
-    Eg = E_of(sg)
-    if np.linalg.norm(Fg) > 1e-9 or np.linalg.norm(Mg) > 1e-9:
-        lds.append(LoadApp(f"Carga de {nd.main_name}", FaceSel(nd.main_name, _box(Eg, Rm), tuple(float(x) for x in A * sg)), tuple(float(x) for x in Eg),
-                           tuple(float(x) for x in Fg), tuple(float(x) for x in (Mg + np.cross(O - Eg, Fg)))))
-    for l in loads:
-        if l.member in (nd.main_name, NODE) or l.member not in ends:
-            continue
-        F, M = _vec(l, local_axes(nd, l.member))
-        if np.linalg.norm(F) < 1e-9 and np.linalg.norm(M) < 1e-9:
-            continue
-        E, dirv, R = ends[l.member]
-        E = np.asarray(E, float)
-        lds.append(LoadApp(f"Carga de {l.member}", FaceSel(l.member, _box(E, R), tuple(float(x) for x in dirv)), tuple(float(x) for x in E),
-                           tuple(float(x) for x in F), tuple(float(x) for x in (M + np.cross(_node_point(nd, l.member) - E, F)))))
-    return sups, lds
+def _base_at_balance(nd: Nodo) -> bool:
+    op = nd.base_op()
+    return op is not None and (op.member == nd.main_name or not op.member) and (1 if op.end >= 0 else -1) == (1 if int(getattr(nd, "balance_end", -1)) >= 0 else -1)
 
 
 def analysis(prj, nd: Nodo) -> dict:
     """Resumen del analisis nodal para la interfaz: por caso, las filas del equilibrio, lo que se dibuja y las cargas que recibe la placa base."""
     cases = cases_of(nd)
     bc = _base_cases(prj, nd) if nd.base_op() is not None else None
+    ends = {t[1]: t[0] for t in AS.build_model(prj).tags}                 # extremo libre de cada miembro conectado
     out = []
     for i, (cname, loads) in enumerate(cases):
         b = balance(nd, loads)
         b["case"] = cname
-        b["draw"] = _draw_items(nd, loads, b)
+        b["draw"] = _draw_items(nd, loads, b, ends)
         if bc:
             cb, E, Fp, Mp = bc[i]
             b["base"] = {"Pu": cb.Pu, "Mux": cb.Mux, "Muy": cb.Muy, "Vux": cb.Vux, "Vuy": cb.Vuy}
+            b["draw"] = [d for d in b["draw"] if d["kind"] != "reaction" or not _base_at_balance(nd)]      # la carga de la placa base ya es la reaccion
             b["draw"].append({"pos": np.asarray(E).tolist(), "F": np.asarray(Fp).tolist(), "M": np.asarray(Mp).tolist(), "name": "Placa base", "kind": "base"})
         out.append(b)
     return {"cases": out, "balance_end": int(getattr(nd, "balance_end", -1)), "base": bool(bc)}
