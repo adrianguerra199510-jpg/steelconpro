@@ -83,7 +83,8 @@ def constants(_=None) -> dict:
         "plate_steels": [{"name": m.name, "Fy": m.Fy, "Fu": m.Fu} for m in M.PLATE_STEELS],
         "electrodes": [{"name": m.name, "FEXX": m.FEXX} for m in M.ELECTRODES],
         "schema_baseplate": sch,
-        "roles": SP.PLATE_ROLES,
+        "roles": SP.PLATE_ROLES, "openings": SP.OPENINGS, "weld_types": SP.WELD_TYPES, "weld_modes": SP.WELD_MODES, "hole_shapes": SP.HOLE_SHAPES,
+        "trim_modes": SP.TRIM_MODES, "faces_angle": SP.FACES_ANGLE,
     }
 
 
@@ -132,6 +133,13 @@ def normalize(args) -> dict:
 def op_defaults(args) -> dict:
     from .conn import ops as OPS
     return OPS.defaults(args["kind"], args.get("role", ""))
+
+
+def plate_edges(args) -> dict:
+    """Bordes elegibles de la placa de una operacion (para elegir donde se suelda): [{index, length}]."""
+    from .conn import plates as PL
+    p = _prj(args["connection"])
+    return {"edges": PL.edge_lengths(p.node.operations[int(args["index"])])}
 
 
 def add_operation(args) -> dict:

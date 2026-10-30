@@ -83,6 +83,10 @@ def member_faces(shape, start, end, A, sx, sy) -> dict:
         out["Cara −X"] = FaceFrame(start - sx * bf / 2.0, A, -sx, L, uh_x, t)
         out["Cara +Y"] = FaceFrame(start + sy * d / 2.0, A, sy, L, uh_y, t)
         out["Cara −Y"] = FaceFrame(start - sy * d / 2.0, A, -sy, L, uh_y, t)
+    wall = float(shape.tf if face_kind(shape) == "I" else (shape.tw if shape.tw > 0 else 0.5))
+    end = np.asarray(end, float)
+    out[FACES_END[0]] = FaceFrame(start - sx * bf / 2.0, sx, -A, bf, d / 2.0, wall)       # cara del extremo (plano de la seccion), normal hacia afuera del miembro
+    out[FACES_END[1]] = FaceFrame(end - sx * bf / 2.0, sx, A, bf, d / 2.0, wall)
     return out
 
 
@@ -108,7 +112,10 @@ def elements(prj) -> dict:
         out.append({"name": m.name, "type": "miembro", "main": False, "label": f"{m.name} ({m.shape})", "faces": face_names_of(AS.shape_of(m.shape))})
     for i, o in enumerate(nd.operations):
         if o.makes_element:
-            out.append({"name": o.name, "type": "placa", "main": False, "op": i, "label": f"{o.name} (placa {o.plate_t:g} in)", "faces": list(FACES_PLATE)})
+            if o.kind == OP_ANGLE:
+                out.append({"name": o.name, "type": "ángulo", "main": False, "op": i, "label": f"{o.name} (ángulo L{o.leg_a:g}×{o.leg_b:g}×{o.plate_t:g})", "faces": list(FACES_ANGLE)})
+            else:
+                out.append({"name": o.name, "type": "placa", "main": False, "op": i, "label": f"{o.name} (placa {o.plate_t:g} in)", "faces": list(FACES_PLATE)})
     if nd.base_op() is not None:
         out.append({"name": "Placa base", "type": "placa base", "main": False, "label": "Placa base", "faces": ["Cara superior", "Cara inferior"]})
     return {"elements": out}

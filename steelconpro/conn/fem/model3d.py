@@ -28,6 +28,21 @@ def unit(v):
     return v / n if n > 0 else v
 
 
+def _clip_poly(poly, pt, nrm):
+    """Recorta un poligono 3D conservando n·(x − pt) ≤ 0 (Sutherland–Hodgman)."""
+    out = []
+    n = len(poly)
+    d = [float(np.dot(nrm, np.asarray(q, float) - pt)) for q in poly]
+    for k in range(n):
+        a, b, da, db = poly[k], poly[(k + 1) % n], d[k], d[(k + 1) % n]
+        if da <= 0:
+            out.append(a)
+        if (da < 0 < db) or (db < 0 < da):
+            t = da / (da - db)
+            out.append(tuple(np.asarray(a, float) + t * (np.asarray(b, float) - np.asarray(a, float))))
+    return out
+
+
 @dataclass
 class Prism:
     """Poligono (u, v) extruido de w0 a w1 en el sistema local (o; U, V, W = U×V).  `circle=(ro, ri)`: cilindro o tubo de eje W."""
@@ -39,6 +54,7 @@ class Prism:
     w1: float = 1.0
     circle: tuple = None
     holes: list = field(default_factory=list)         # solo para tubos poligonales (mismo numero de vertices que el exterior)
+    cut_planes: list = field(default_factory=list)    # recortes planos [(punto, normal)]: se conserva n·(x − punto) ≤ 0 (solo dibujo)
     holes_extra: list = field(default_factory=list)   # agujeros de cualquier forma (poligonos en (u, v)): pernos, huecos y aberturas de las placas
 
     @property
@@ -64,7 +80,30 @@ class Prism:
         return np.array(pts)
 
     def faces(self, nseg: int = 36):
-        """Caras (poligonos 3D) para dibujar."""
+        """Caras (poligonos 3D) para dibujar; con `cut_planes` se recortan contra esos planos y se cierra la sección con una tapa."""
+        out = self._faces_base(nseg)
+        for (pt, nrm) in self.cut_planes:
+            pt, nrm = np.asarray(pt, float), np.asarray(nrm, float)
+            out = [c for c in (_clip_poly(f, pt, nrm) for f in out) if len(c) >= 3]
+            cap = self._cap(pt, nrm)
+            if cap:
+                out.append(cap)
+        return out
+
+    def _cap(self, pt, nrm):
+        if self.circle is not None or not self.poly:
+            return None
+        o, U, V, W = (np.asarray(x, float) for x in (self.o, self.U, self.V, self.W))
+        den = float(np.dot(nrm, W))
+        if abs(den) < 1e-9:
+            return None
+        ws = [float(np.dot(nrm, pt - o - u * U - v * V)) / den for (u, v) in self.poly]
+        if max(ws) < self.w0 - 1e-6 or min(ws) > self.w1 + 1e-6:
+            return None
+        ws = [min(max(w, self.w0), self.w1) for w in ws]
+        return [self.to_global(u, v, w) for (u, v), w in zip(self.poly, ws)]
+
+    def _faces_base(self, nseg: int = 36):
         out = []
         if self.circle is not None:
             ro, ri = self.circle

@@ -753,6 +753,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         if o.member not in names and not (o.kind == OP_BASE and o.member == nd.main_name) and not (o.kind in GENERIC_OPS and not o.member):
             mdl.notes.append(f"Operación «{o.kind}»: el miembro «{o.member}» no existe.")
     ctxs = []
+    shapes_by_name = {}
     reg = {}                                            # elementos con caras para las operaciones generales: nombre -> {type, faces, part, t, Fy, Fu}
     reg[nd.main_name] = {"type": "miembro", "part": nd.main_name, "t": mshape.tw, "Fy": Fy, "Fu": Fu,
                          "faces": member_faces(mshape, A * (-lneg), A * lpos, A, msx, msy)}
@@ -836,6 +837,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         fem_ends[m.name] = (end, dirv, max(shp.d, shp.bf) / 2.0 + 1.0)
         axes.append((m.name, Q + dirv * ms, end, P0, float(m.pos)))
         free_ends[m.name], frames[m.name] = (Q + dirv * ms, end, dirv), (dirv, sx, sy)
+        shapes_by_name[m.name] = shp
         reg[m.name] = {"type": "miembro", "part": m.name, "t": shp.tw, "Fy": Fy_m, "Fu": Fu_m, "faces": member_faces(shp, Q + dirv * ms, end, dirv, sx, sy)}
         ctxs.append(c)
     _build_gussets(ctxs, nd, mdl)
@@ -857,12 +859,61 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
             reg["Placa base"] = {"type": "placa base", "part": "Placa base", "t": tpb, "Fy": Fy_b, "Fu": Fu_b, "faces": {
                 "Cara superior": FaceFrame(Ob + Fb @ np.array([0.0, 0.0, tpb]) - Fb[:, 0] * Bw / 2.0, Fb[:, 0], Fb[:, 2], Bw, Nw / 2.0, tpb),
                 "Cara inferior": FaceFrame(Ob - Fb[:, 0] * Bw / 2.0, Fb[:, 0], -Fb[:, 2], Bw, Nw / 2.0, tpb)}}
+    for nm_, (s_, e_, d_) in free_ends.items():
+        reg[nm_]["ends"] = (s_, e_, d_)
+        _d, _sx, _sy = frames[nm_]
+        _shp = shapes_by_name[nm_]
+        reg[nm_]["frame"] = (s_, _d, _sx, _sy, _shp)
+        reg[nm_]["frame_full"] = (s_, e_, _d, _sx, _sy, _shp)
+    reg[nd.main_name]["ends"] = (A * (-lneg), A * lpos, A)
+    reg[nd.main_name]["frame"] = (np.zeros(3), A, msx, msy, mshape)
+    reg[nd.main_name]["frame_full"] = (A * (-lneg), A * lpos, A, msx, msy, mshape)
     mdl.generic = OPS.build_generic(mdl, nd, reg, hw)
+    _apply_trims(mdl, nd, reg)
     mdl.elems = reg
     if fem is not None:
         _fem_setup(mdl, nd, fem, fem_ends, lneg, lpos, mshape)
     _node_dims(mdl, A * (-lneg), A * lpos, axes)
     return mdl
+
+
+def _apply_trims(mdl, nd, reg):
+    """Recortes de un miembro contra otro elemento: plano de la cara del elemento (con holgura) o plano de inglete entre dos miembros."""
+    from .specs import OP_TRIM, TRIM_MODES
+    for i, o in enumerate(nd.operations):
+        if o.kind != OP_TRIM:
+            continue
+        tgt = o.targets[0] if o.targets else ""
+        mem = reg.get(tgt)
+        part = next((p for p in mdl.parts if p.name == (mem or {}).get("part")), None)
+        if mem is None or part is None or mem.get("type") != "miembro" or "ends" not in mem:
+            mdl.notes.append(f"Operación {i + 1} «{o.kind}»: elija el miembro que se recorta.")
+            continue
+        s_, e_, d_ = (np.asarray(x, float) for x in mem["ends"])
+        P, away = (s_, d_) if o.trim_end == "Inicio" else (e_, -d_)          # punto del extremo y direccion hacia el interior del miembro
+        if o.trim_mode == TRIM_MODES[1]:
+            oth = reg.get(o.parent)
+            if oth is None or "ends" not in oth or oth.get("type") != "miembro" or o.parent == tgt:
+                mdl.notes.append(f"Operación {i + 1}: el inglete necesita otro miembro (elemento al que se une).")
+                continue
+            s2, e2, d2 = (np.asarray(x, float) for x in oth["ends"])
+            Q2, away2 = (s2, d2) if np.linalg.norm(s2 - P) <= np.linalg.norm(e2 - P) else (e2, -d2)
+            n = away - away2
+            if np.linalg.norm(n) < 1e-6:
+                mdl.notes.append(f"Operación {i + 1}: los miembros son colineales; no hay inglete.")
+                continue
+            n = n / np.linalg.norm(n)
+            pt, keep = P + away * 0.0, -n                                         # se conserva n·(x − P) ≥ 0  ->  (−n)·(x − P) ≤ 0
+        else:
+            par = reg.get(o.parent)
+            if par is None or o.face not in par["faces"]:
+                mdl.notes.append(f"Operación {i + 1}: elija el elemento y la cara contra la que se recorta.")
+                continue
+            ff = par["faces"][o.face]
+            nn = np.asarray(ff.N, float)
+            pt, keep = np.asarray(ff.O, float) + nn * float(o.trim_gap), -nn      # el miembro queda del lado exterior de la cara
+        for pr in part.prisms:
+            pr.cut_planes = list(pr.cut_planes) + [(tuple(pt), tuple(keep))]
 
 
 def _fem_setup(mdl, nd, fem, ends, lneg, lpos, mshape):

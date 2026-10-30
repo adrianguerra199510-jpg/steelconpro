@@ -74,6 +74,7 @@ PLATE_SHAPES = ["Rectangular", "Triangular", "Con esquina recortada", "Circular"
 OPENINGS = ["Ninguna", "Circular", "Rectangular", "Rodea al miembro"]
 HOLE_SHAPES = ["Circular", "Ranura", "Rectangular"]
 WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcial)"]
+TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro"]
 WELD_MODES = ["Bordes de la placa", "Contorno del miembro"]
 ATTACHES = ["Soldada", "Atornillada"]
 FACES_END = ["Extremo inicio", "Extremo fin"]
@@ -190,6 +191,7 @@ class Operation:
     leg_b: float = 4.0           # angulo: pierna saliente, in
     leg_side: int = 1            # angulo: pierna saliente hacia +1 o −1 (a lo ancho de la cara)
     trim_gap: float = 0.0        # recorte contra elemento: holgura, in
+    trim_mode: str = TRIM_MODES[0]
     trim_end: str = "Inicio"     # extremo del miembro que se recorta
     force_V: float = 0.0         # fuerza cortante de diseño de la operacion (kip), opcional
     force_T: float = 0.0         # fuerza de traccion de diseño de la operacion (kip), opcional
