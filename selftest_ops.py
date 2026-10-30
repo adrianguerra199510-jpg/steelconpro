@@ -144,6 +144,29 @@ def run():
             fail(f"corte automatico: la viga S3 entra en la viga principal y debe cortarse ({ac})")
         print(f"{'placa simple y corte automatico':34} 3×2 pernos, placa 10×7 in con filetes en la cara del soporte, grupo elastico verificado, corte automatico de S3 {tuple(round(x, 2) for x in ac)}: OK")
 
+        # ---- nucleo geometrico general: formas de placa, aberturas, angulo, huecos, recorte y soldadura de contorno
+        c2 = api.book_new()["connections"][0]
+        mm = api.new_member({"connection": c2})["member"]; c2["node"]["members"].append(mm)
+        def add2(kind, params):
+            nonlocal c2
+            r = api.add_operation({"connection": c2, "kind": K[kind], "params": params}); c2 = r["connection"]; return c2["node"]["operations"][r["index"]]
+        for shp in SP.PLATE_SHAPES:
+            add2("PLATE", {"shape": shp})
+        add2("ANGLE", {})
+        add2("HOLE", {"parent": "P1", "rows": 2, "cols": 2})
+        add2("HOLE", {"parent": "P2", "hole_shape": SP.HOLE_SHAPES[1]})
+        add2("PLATE", {"parent": mm["name"], "face": SP.FACES_END[1], "pl_L": 8, "pl_W": 8, "shape": SP.PLATE_SHAPES[3], "opening": SP.OPENINGS[3], "op_member": mm["name"]})
+        pn = c2["node"]["operations"][-1]["name"]
+        add2("FILLET", {"weld_mode": SP.WELD_MODES[1], "targets": [mm["name"]], "parent": pn, "face": "Cara −"})
+        add2("TRIM", {"targets": [mm["name"]], "parent": c2["node"]["main_name"], "face": SP.FACES_I[0], "trim_gap": 0.5})
+        m2 = api.mesh({"connection": c2})
+        names2 = {p["name"] for p in m2["parts"]}
+        if m2.get("notes") or not {"P1", "P7", "A1", pn}.issubset(names2) or not any(n.startswith(mm["name"] + "-S") for n in names2):
+            fail(f"nucleo: modelo con formas/angulo/huecos/recorte/contorno ({m2.get('notes')}, {sorted(names2)[:12]})")
+        if not api.plate_edges({"connection": c2, "index": 0})["edges"] or len(api.verify({"connection": c2})["checks"]) < 20:
+            fail("nucleo: bordes de placa o verificaciones")
+        print(f"{'nucleo geometrico':34} 7 formas de placa, abertura que rodea al miembro, ángulo, huecos/ranuras, recorte y soldadura de contorno: {len(m2['parts'])} piezas: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")

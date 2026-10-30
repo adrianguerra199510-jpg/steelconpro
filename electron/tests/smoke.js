@@ -35,9 +35,19 @@ const os = require('os');
     check(true, 'se calculan los resultados por operación');
     await page.screenshot({ path: path.join(shots, 'electron_editor.png') });
     await page.dblclick('.tree-item:has-text("Placa base")');
-    await page.waitForSelector('.modal .tabbar', { timeout: 15000 });
-    check(true, 'la operación abre su ventana de edición');
+    await page.waitForSelector('.pedit', { timeout: 15000 });
+    check(true, 'la operación abre su panel de edición');
     await page.screenshot({ path: path.join(shots, 'electron_operacion.png') });
+    await page.click('.pfoot >> text=Cancelar');
+    for (const [kind, key] of [['Placa (refuerzo, cartela o rigidizador)', 'plate'], ['Ángulo (herraje)', 'angle'], ['Huecos y ranuras', 'hole'], ['Recorte contra otro elemento', 'trim'], ['Soldadura de filete entre elementos', 'weld']]) {
+      await page.evaluate((k) => { window.__E.createOperation(k); }, kind);
+      await page.waitForSelector('.pfoot >> text=Cancelar', { timeout: 20000 });
+      await page.waitForTimeout(800);
+      check(true, `se abre el formulario de «${kind}»`);
+      await page.screenshot({ path: path.join(shots, `electron_op_${key}.png`) });
+      await page.click('.pfoot >> text=Cancelar');
+      await page.waitForTimeout(500);
+    }
   } catch (e) {
     ok = false; console.log('ERROR: ' + e.message);
     try { await page.screenshot({ path: path.join(shots, 'electron_error.png') }); } catch (e2) { /* sin captura */ }

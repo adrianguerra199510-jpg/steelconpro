@@ -272,6 +272,9 @@ function opTitle(o) {
   const K = S.C.op;
   switch (o.kind) {
     case K.PLATE: return `${o.name || 'Placa'} · ${o.role}`;
+    case K.ANGLE: return `${o.name || 'Ángulo'} · L${o.leg_a}×${o.leg_b}`;
+    case K.HOLE: return `Huecos en ${o.parent}`;
+    case K.TRIM: return `Recorte · ${(o.targets || []).join(', ') || '—'}`;
     case K.BOLTS: return `Pernos en ${o.parent}`;
     case K.FILLET: return `Soldadura · ${(o.targets || []).join(', ') || '—'}`;
     case K.CUT: case K.COPE: return `Corte · ${(o.targets && o.targets.length ? o.targets : [o.member]).join(', ')}`;
@@ -281,7 +284,9 @@ function opTitle(o) {
 }
 function opSub(o) {
   const K = S.C.op;
-  if (o.kind === K.PLATE) return `sobre ${o.parent} · ${o.face}${o.attach ? ' · ' + o.attach.toLowerCase() : ''}`;
+  if (o.kind === K.HOLE) return `${o.rows}×${o.cols} · ${o.hole_shape.toLowerCase()}`;
+  if (o.kind === K.TRIM) return `${o.trim_mode.toLowerCase()}`;
+  if (o.kind === K.PLATE || o.kind === K.ANGLE) return `sobre ${o.parent} · ${o.face}${o.attach ? ' · ' + o.attach.toLowerCase() : ''}`;
   if (o.kind === K.BOLTS) return `${o.rows}×${o.cols} ${o.bolt_size}" ${o.bolt_grade}`;
   if (o.kind === K.FILLET) return `filete ${S.us.q('L', o.weld_size)}`;
   return groupOf(o.kind);
@@ -324,8 +329,7 @@ function renderTree() {
   box.append(sec('Operaciones', 'wrench'));
   const ol = h('div', { class: 'sect' });
   const ops = nd.operations;
-  const parentOf = (o) => (o.parent && ops.findIndex((p) => p.kind === K.PLATE && p.name === o.parent) >= 0 && o.kind !== K.PLATE ? o.parent : (o.kind === K.PLATE ? o.parent : ''));
-  const plateIdx = (name) => ops.findIndex((p) => p.kind === K.PLATE && p.name === name);
+    const plateIdx = (name) => ops.findIndex((p) => (p.kind === K.PLATE || p.kind === K.ANGLE) && p.name === name);
   const parentIndex = (o) => { const p = o.parent ? plateIdx(o.parent) : -1; return p >= 0 ? p : -1; };
   const children = (i) => ops.map((o, j) => [o, j]).filter(([o, j]) => j !== i && parentIndex(o) === i);
   const draw = (o, i, depth) => {
@@ -333,7 +337,7 @@ function renderTree() {
     node.append(item({ ic: OP_ICON[o.kind] || 'box', color: opColor(o.kind), name: `${i + 1}. ${opTitle(o)}`, sub: opSub(o), sel: E.sel === `o:${i}`, ratio: opRatio(i),
       onClick: () => select(`o:${i}`),
       acts: [iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); editOperation(i); }), iconBtn('trash', 'Eliminar', (e) => { e.stopPropagation(); deleteOperation(i); })] }));
-    const kids = o.kind === K.PLATE ? children(i) : [];
+    const kids = (o.kind === K.PLATE || o.kind === K.ANGLE) ? children(i) : [];
     if (kids.length) node.append(h('div', { class: 'tree-children' }, kids.map(([c, j]) => draw(c, j, depth + 1))));
     return node;
   };
@@ -367,7 +371,9 @@ function highlight() {
     const o = nd.operations[parseInt(E.sel.slice(2), 10)];
     if (o) {
       const K = S.C.op;
-      if (o.kind === K.PLATE) names.push(o.name, o.parent);
+      if (o.kind === K.PLATE || o.kind === K.ANGLE) names.push(o.name, o.parent);
+      else if (o.kind === K.HOLE) names.push(o.parent);
+      else if (o.kind === K.TRIM) names.push(...(o.targets || []), o.parent);
       else if (o.kind === K.BOLTS) names.push(o.parent, ...(o.targets || []));
       else if (o.kind === K.FILLET) names.push(...(o.targets || []));
       else if (o.kind === K.CUT) names.push(...(o.targets || []));
@@ -382,7 +388,7 @@ function pickPart(name, part) {
   const nd = E.conn().node, K = S.C.op;
   if (!name) { E.sel = null; renderTree(); highlight(); return; }
   if (name === nd.main_name || nd.members.some((m) => m.name === name)) return select(`m:${name}`);
-  const oi = nd.operations.findIndex((o) => o.name === name && o.kind === K.PLATE);
+  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE));
   if (oi >= 0) return select(`o:${oi}`);
   const owner = part ? part.owner : '';
   if (owner === 'op:base') { const bi = nd.operations.findIndex((o) => o.kind === K.BASE); if (bi >= 0) return select(`o:${bi}`); }
@@ -415,6 +421,7 @@ function addMenu(anchor) {
   m.classList.add('wide');
 }
 
+E.createOperation = (k) => createOperation(k);
 async function createOperation(kind) {
   const C = S.C;
   const nd = E.conn().node;
@@ -426,8 +433,13 @@ async function createOperation(kind) {
     params.member = nd.members.find((m) => m.name === sel)?.name || nd.members[0].name;
   } else if (kind === K.BASE && nd.operations.some((o) => o.kind === K.BASE)) {
     toast('La conexión ya tiene una placa base: edítela o elimínela para cambiarla.', 'info', 5000); return;
+  } else if (kind === K.TRIM) {
+    const sel = E.sel && E.sel.startsWith('m:') ? E.sel.slice(2) : '';
+    const m = nd.members.find((x) => x.name === sel) || nd.members[0];
+    if (!m) { toast('Agregue primero un miembro conectado para recortarlo.', 'info', 5000); return; }
+    params.targets = [m.name]; params.parent = nd.main_name; params.face = S.C.faces_i[0];
   } else if (kind === K.BOLTS || kind === K.FILLET) {
-    const plates = nd.operations.filter((o) => o.kind === K.PLATE);
+    const plates = nd.operations.filter((o) => o.kind === K.PLATE || o.kind === K.ANGLE);
     const last = plates[plates.length - 1];
     if (last && kind === K.BOLTS) { params.parent = last.name; params.targets = [last.parent]; params.pl_s = last.pl_L / 2; params.pl_u = 0; }
     if (last && kind === K.FILLET) params.targets = [last.name];

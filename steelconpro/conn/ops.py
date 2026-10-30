@@ -570,6 +570,10 @@ def add_operation(nd, kind: str, **kw) -> Operation:
     if kind == OP_BOLTS and not o.parent:
         o.parent = nd.main_name
         o.face = o.face or "Ala superior"
+    if kind in (OP_BOLTS, OP_HOLE, OP_ANGLE) and "pl_s" not in kw:
+        pp = next((x for x in nd.operations if x.makes_element and x.name == o.parent), None)
+        if pp is not None:
+            o.pl_s, o.pl_u = pp.pl_L / 2.0, 0.0               # sobre una placa: en su centro
     if o.is_connection:
         nd.operations = [x for x in nd.operations if not (x.member == o.member and x.is_connection)]
     if kind == OP_BASE:

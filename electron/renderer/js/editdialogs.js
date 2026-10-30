@@ -20,7 +20,7 @@ export function renameRefs(nd, old, nw) {
     if (o.member === old) o.member = nw;
     if (o.parent === old) o.parent = nw;
     o.targets = (o.targets || []).map((t) => (t === old ? nw : t));
-    if (o.kind === K.PLATE && o.name === old) o.name = nw;
+    if ((o.kind === K.PLATE || o.kind === K.ANGLE) && o.name === old) o.name = nw;
   }
   for (const l of nd.loads) if (l.member === old) l.member = nw;
 }
@@ -39,7 +39,7 @@ export async function openMember(E, name) {
   const body = h('div', { class: 'col gap-12' });
   const nameInp = textInput({ value: name, onChange: (v) => {
     v = v.trim();
-    if (!v || v === name || nd.main_name === v || nd.members.some((x) => x.name === v) || nd.operations.some((o) => o.kind === C.op.PLATE && o.name === v)) { nameInp.value = name; return; }
+    if (!v || v === name || nd.main_name === v || nd.members.some((x) => x.name === v) || nd.operations.some((o) => (o.kind === C.op.PLATE || o.kind === C.op.ANGLE) && o.name === v)) { nameInp.value = name; return; }
     renameRefs(nd, name, v); name = v; E.changed({ structure: true });
   } });
   const ctxObj = isMain ? nd : m;
