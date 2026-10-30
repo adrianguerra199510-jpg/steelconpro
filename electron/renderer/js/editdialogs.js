@@ -66,12 +66,12 @@ export async function openMember(E, name) {
           const r = await call('designate_main', { connection: conn, name });
           E.replaceConn(r.connection); E.changed({ structure: true });
           if (r.notes && r.notes.length) toast(r.notes.join(' '), 'info', 7000);
-          mod.close(true);
+          if (E.panel) E.panel.close('done');
         } catch (e) { errorBox(e); }
       } })));
   }
   return new Promise((resolve) => {
-    const mod = modal({ title: isMain ? `Miembro principal · ${name}` : `Miembro · ${name}`, icon: 'component', width: 600, cls: 'tall', body,
+    const panel = E.showPanel({ title: isMain ? `Miembro principal · ${name}` : `Miembro · ${name}`, icon: 'component', body,
       footer: [btn('Eliminar', { icon: 'trash', kind: 'danger', disabled: isMain, onClick: async () => {
         const deps = nd.operations.filter((o) => o.member === name || o.parent === name || (o.targets || []).includes(name));
         if (!(await confirmBox(`¿Eliminar el miembro «${name}»?`, { danger: true, ok: 'Eliminar', detail: deps.length ? `También se quitarán ${deps.length} operación(es) que lo usan.` : '' }))) return;
@@ -79,8 +79,8 @@ export async function openMember(E, name) {
         nd.members.splice(idx, 1);
         for (const o of deps) { const i = nd.operations.indexOf(o); if (i >= 0) await E.removeOperation(i, { silent: true }); }
         nd.loads = nd.loads.filter((l) => l.member !== name);
-        E.changed({ structure: true }); mod.close(true);
-      } }), h('span', { class: 'grow' }), btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close(true) })],
+        E.sel = null; E.changed({ structure: true }); panel.close('done');
+      } }), h('span', { class: 'grow' }), btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => panel.close('done') })],
       onClose: () => { if (JSON.stringify(nd) === before) E.dropSnap(); E.refreshTree(); resolve(true); } });
   });
 }
@@ -120,7 +120,7 @@ export function openLoads(E) {
     h('div', { class: 'card-sec' }, h('div', { class: 'form-grid' }, field('Lado del principal que equilibra el nudo', balSel))),
     h('div', { style: { overflow: 'auto' } }, h('table', { class: 't compact' }, h('thead', null, head), tb)),
     btn('Agregar carga', { icon: 'plus', onClick: () => { nd.loads.push({ case: nd.loads.length ? nd.loads[nd.loads.length - 1].case : 'Caso 1', member: nd.members[0] ? nd.members[0].name : nd.main_name, N: 0, Vy: 0, Vz: 0, T: 0, My: 0, Mz: 0, side: 0 }); draw(); E.changed({ loads: true }); } }));
-  const mod = modal({ title: 'Cargas del nudo', icon: 'zap', width: 980, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
+  const mod = modal({ title: 'Cargas del nudo', icon: 'zap', width: 980, floating: true, pos: { x: 340, y: 80 }, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
     onClose: () => { if (JSON.stringify([nd.loads, nd.balance_end]) === before) E.dropSnap(); E.refreshTree(); } });
 }
 
@@ -144,6 +144,6 @@ export function openProject(E) {
     h('div', { class: 'card-sec' }, h('h4', { text: 'Conexión' }), h('div', { class: 'form-grid' }, text('name', 'Nombre del proyecto'), text('element', 'Identificador del elemento'), text('author', 'Autor'), text('date', 'Fecha'))),
     h('div', { class: 'card-sec' }, h('h4', { text: 'Unidades' }), h('div', { class: 'form-grid' }, field('Conjunto', setSel), field('Longitud', sl), field('Fuerza', sf), field('Esfuerzo', ss), field('Momento', sm)),
       h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'Los datos se guardan en pulgadas, kip y ksi; las unidades solo cambian cómo se muestran y se escriben.' })));
-  const mod = modal({ title: 'Proyecto', icon: 'settings', width: 620, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
+  const mod = modal({ title: 'Proyecto', icon: 'settings', width: 620, floating: true, pos: { x: 340, y: 80 }, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
     onClose: () => { if (JSON.stringify([c.name, c.element, c.author, c.date, c.u_len, c.u_force, c.u_stress, c.u_moment]) === before) E.dropSnap(); E.refreshTree(); } });
 }

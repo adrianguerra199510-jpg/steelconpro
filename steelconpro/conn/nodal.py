@@ -102,6 +102,12 @@ def balance(nd: Nodo, loads: list) -> dict:
 
 def base_combos(prj, nd: Nodo):
     """Combinaciones de carga de la placa base (LoadCombo) sacadas del analisis nodal, o None si no hay casos de carga o no se puede colocar la placa."""
+    r = _base_cases(prj, nd)
+    return [x[0] for x in r] if r else None
+
+
+def _base_cases(prj, nd: Nodo):
+    """[(LoadCombo, E, Fp, Mp)]: ademas de la combinacion, el centro de la placa y la fuerza y el momento globales que recibe."""
     from ..model import LoadCombo
     from . import baseplate as BP
     op = nd.base_op()
@@ -154,20 +160,47 @@ def base_combos(prj, nd: Nodo):
         # accion del extremo del miembro sobre la placa = −(accion del apoyo sobre el miembro); el apoyo equilibra al tramo entre el nudo y la placa
         Fp = -R
         Mp = -MR - np.cross(-E, R)            # momento respecto del centro de la placa: −M_R − (O − E) × R
-        out.append(LoadCombo(cname, float(np.dot(R, ez)), float(np.dot(Mp, ex)), float(-np.dot(Mp, ey)), float(np.dot(Fp, ex)), float(np.dot(Fp, ey))))
+        out.append((LoadCombo(cname, float(np.dot(R, ez)), float(np.dot(Mp, ex)), float(-np.dot(Mp, ey)), float(np.dot(Fp, ex)), float(np.dot(Fp, ey))), E, Fp, Mp))
     return out
 
 
+def _draw_items(nd: Nodo, loads: list, bal: dict) -> list:
+    """Cargas del caso para dibujarlas en el visor: [{pos, F, M, kind, name}] (fuerza y momento en ejes globales; unidades internas)."""
+    items = []
+    for l in loads:
+        if l.member == NODE:
+            items.append({"pos": [0.0, 0.0, 0.0], "F": [l.N, l.Vy, l.Vz], "M": [l.T, l.My, l.Mz], "name": "Nudo", "kind": "ext"})
+            continue
+        if l.member == nd.main_name:
+            side = int(getattr(l, "side", 0)) or -bal["side"]
+            if side == bal["side"]:
+                continue
+            F, M = _vec(l, local_axes(nd, nd.main_name, side))
+            A = AS.main_frame(nd)[0]
+            items.append({"pos": (A * side * 12.0).tolist(), "F": F.tolist(), "M": M.tolist(), "name": nd.main_name, "kind": "main"})
+            continue
+        ax = local_axes(nd, l.member)
+        if ax is None:
+            continue
+        F, M = _vec(l, ax)
+        items.append({"pos": _node_point(nd, l.member).tolist(), "F": F.tolist(), "M": M.tolist(), "name": l.member, "kind": "member"})
+    A = AS.main_frame(nd)[0]
+    items.append({"pos": (A * bal["side"] * 12.0).tolist(), "F": bal["R"], "M": bal["M"], "name": nd.main_name, "kind": "reaction"})
+    return items
+
+
 def analysis(prj, nd: Nodo) -> dict:
-    """Resumen del analisis nodal para la interfaz: por caso, las filas del equilibrio y las cargas que recibe la placa base."""
+    """Resumen del analisis nodal para la interfaz: por caso, las filas del equilibrio, lo que se dibuja y las cargas que recibe la placa base."""
     cases = cases_of(nd)
-    combos = base_combos(prj, nd) if nd.base_op() is not None else None
+    bc = _base_cases(prj, nd) if nd.base_op() is not None else None
     out = []
     for i, (cname, loads) in enumerate(cases):
         b = balance(nd, loads)
         b["case"] = cname
-        if combos:
-            cb = combos[i]
+        b["draw"] = _draw_items(nd, loads, b)
+        if bc:
+            cb, E, Fp, Mp = bc[i]
             b["base"] = {"Pu": cb.Pu, "Mux": cb.Mux, "Muy": cb.Muy, "Vux": cb.Vux, "Vuy": cb.Vuy}
+            b["draw"].append({"pos": np.asarray(E).tolist(), "F": np.asarray(Fp).tolist(), "M": np.asarray(Mp).tolist(), "name": "Placa base", "kind": "base"})
         out.append(b)
-    return {"cases": out, "balance_end": int(getattr(nd, "balance_end", -1)), "base": bool(combos)}
+    return {"cases": out, "balance_end": int(getattr(nd, "balance_end", -1)), "base": bool(bc)}

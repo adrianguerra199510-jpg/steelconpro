@@ -63,10 +63,10 @@ export function errorBox(e) {
 }
 
 // ------------------------------------------------------------------ ventanas modales
-export function modal({ title, icon: ic, width = 560, body, footer, onClose, wide, cls = '', closable = true }) {
+export function modal({ title, icon: ic, width = 560, body, footer, onClose, wide, cls = '', closable = true, floating = false, pos = null }) {
   const root = $('#overlay-root');
-  const back = h('div', { class: 'modal-back' });
-  const box = h('div', { class: `modal ${cls}`, style: { width: typeof width === 'number' ? `${width}px` : width }, role: 'dialog', 'aria-modal': 'true' });
+  const back = h('div', { class: `modal-back ${floating ? 'float' : ''}` });
+  const box = h('div', { class: `modal ${cls} ${floating ? 'floating' : ''}`, style: { width: typeof width === 'number' ? `${width}px` : width }, role: 'dialog', 'aria-modal': 'true' });
   const head = h('div', { class: 'modal-head' }, ic ? svg(ic, 20, 'brand') : null, h('h2', { text: title || '' }),
     closable ? iconBtn('x', 'Cerrar', () => close()) : null);
   const bd = h('div', { class: 'modal-body' }, body);
@@ -75,6 +75,23 @@ export function modal({ title, icon: ic, width = 560, body, footer, onClose, wid
   if (ft) box.append(ft);
   back.append(box);
   root.append(back);
+  // la ventana se arrastra por su titulo; las flotantes no tapan ni bloquean el visor
+  const place = (x, y) => {
+    box.style.position = 'fixed'; box.style.margin = '0'; box.style.transform = 'none';
+    box.style.left = `${Math.max(0, Math.min(innerWidth - 120, x))}px`; box.style.top = `${Math.max(0, Math.min(innerHeight - 40, y))}px`;
+  };
+  if (pos) requestAnimationFrame(() => place(pos.x ?? innerWidth - box.offsetWidth - 20, pos.y ?? 70));
+  head.style.cursor = 'move';
+  head.addEventListener('pointerdown', (ev) => {
+    if (ev.target.closest('button')) return;
+    const r = box.getBoundingClientRect();
+    const dx = ev.clientX - r.left, dy = ev.clientY - r.top;
+    place(r.left, r.top);
+    head.setPointerCapture(ev.pointerId);
+    const mv = (e) => place(e.clientX - dx, e.clientY - dy);
+    const up = () => { head.removeEventListener('pointermove', mv); head.removeEventListener('pointerup', up); };
+    head.addEventListener('pointermove', mv); head.addEventListener('pointerup', up);
+  });
   let closed = false;
   const close = (v) => {
     if (closed) return; closed = true;

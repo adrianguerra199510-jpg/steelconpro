@@ -140,7 +140,8 @@ table.t input.cell:hover { border-color: var(--border); } table.t input.cell:foc
 .ed-top .vr { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
 .conn-tabs { display: flex; gap: 4px; align-items: center; overflow-x: auto; } .conn-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font: inherit; color: var(--muted); white-space: nowrap; }
 .conn-tab.on { background: var(--brand-50); color: var(--brand); border-color: transparent; font-weight: 600; }
-.ed-body { display: grid; grid-template-columns: 330px minmax(0, 1fr) 400px; min-height: 0; } .ed-body.no-right { grid-template-columns: 330px minmax(0, 1fr); }
+.ed-body { display: grid; grid-template-columns: 330px minmax(0, 1fr) 6px var(--rw, 460px); min-height: 0; }
+.resizer { cursor: col-resize; background: var(--border); transition: background .12s; } .resizer:hover, .resizer.drag { background: var(--brand); }
 .panel { background: var(--surface); display: flex; flex-direction: column; min-height: 0; min-width: 0; } .panel.left { border-right: 1px solid var(--border); } .panel.right { border-left: 1px solid var(--border); }
 .panel .ph { display: flex; align-items: center; gap: 8px; padding: 11px 12px 8px 14px; } .panel .ph h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); flex: 1; }
 .panel .scroll { overflow: auto; min-height: 0; flex: 1; padding: 0 8px 12px; }
@@ -172,3 +173,14 @@ table.t input.cell:hover { border-color: var(--border); } table.t input.cell:foc
 
 .icon-btn.txt { width: auto; padding: 0 9px; font: inherit; font-size: 12.5px; font-weight: 550; color: var(--muted); } .icon-btn.txt:hover { color: var(--text); }
 .modal .tabs.pill .tabbar, .panel.right .tabs.pill .tabbar { flex-wrap: wrap; overflow: visible; }
+
+.modal-back.float { background: transparent; pointer-events: none; display: block; padding: 0; } .modal-back.float .modal { pointer-events: auto; box-shadow: 0 10px 34px rgba(16,24,40,.28), 0 0 0 1px var(--border-strong); }
+.modal.floating { resize: both; overflow: hidden; min-width: 320px; min-height: 160px; } .modal.floating .modal-body { overflow: auto; }
+.vlabel.load { background: rgba(255,255,255,.92); border-width: 1.5px; border-style: solid; font-size: 11.5px; } :root[data-theme="dark"] .vlabel.load { background: rgba(22,28,36,.92); }
+
+.rview, .pview { display: flex; flex-direction: column; min-height: 0; flex: 1; } .hidden { display: none !important; }
+.pview .pedit { display: flex; align-items: center; gap: 10px; padding: 12px 10px 10px 14px; border-bottom: 1px solid var(--border); } .pview .pedit h3 { font-size: 14px; flex: 1; text-transform: none; letter-spacing: 0; color: var(--text); }
+.pview .pbody { padding: 12px 12px 18px; } .pview .pfoot { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface-2); justify-content: flex-end; }
+.tabbar .btn.calc { margin: 3px 6px; height: 28px; align-self: center; }
+.vtool .group select { height: 28px; border: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--text); }
+.report-dock { display: flex; flex-direction: column; min-height: 0; height: 100%; }

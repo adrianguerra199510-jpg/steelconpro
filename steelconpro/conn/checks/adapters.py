@@ -92,9 +92,19 @@ def build_items(nd: Nodo):
         sup_kind = support_kind(nd, info)
         cope = _cope_of(nd, m.name)
         cp = dict(cope_top=cope.cope_top, cope_bot=cope.cope_bot, cope_len=cope.cope_len) if cope else {}
+        if not cope:
+            from ..assembly import auto_cope_for
+            ac = auto_cope_for(nd, m, op)                                    # corte automatico de la viga secundaria
+            if ac is not None:
+                cp = dict(cope_top=ac[0], cope_bot=ac[1], cope_len=ac[2])
         if op.kind in (OP_TAB, OP_WELD):
+            from ..assembly import tab_dims
+            from ..common import bolt_db
+            n_, s_, cols_, g_, H_, W_, a_ = tab_dims(op, m, beam, bolt_db(op.bolt_size)) if beam is not None else (max(int(op.n_bolts), 2), op.bolt_s, 1, 3.0, 9.0, 5.0, m.gap + 2.5)
+            n_ = max(n_, 2)
             spec = ShearTab(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,
-                            bolt_size=op.bolt_size, bolt_grade=op.bolt_grade, n=max(int(op.n_bolts), 2), s=op.bolt_s, a=m.gap + 2.5,
+                            bolt_size=op.bolt_size, bolt_grade=op.bolt_grade, n=n_, s=s_, a=a_, cols=cols_, gage=g_,
+                            lev_p=max((H_ - (n_ - 1) * s_) / 2.0, 0.25), leh_p=max(W_ - a_ - (cols_ - 1) * g_, 0.25),
                             tp=op.plate_t, plate_steel=op.plate_steel, gap=m.gap, weld_size=op.weld_size, **cp)
             items.append(Item(op, m, "shear", spec, None, engine=shear_tab))
             if op.kind == OP_WELD:                                  # alas soldadas: ademas de la placa del alma, la fuerza de las alas

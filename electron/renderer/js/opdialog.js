@@ -2,7 +2,7 @@
 // Los cambios se ven en vivo en el 3D; «Cancelar» los revierte.
 import { call } from './api.js';
 import { S } from './state.js';
-import { h, svg, btn, modal, tabs, field, selectInput, checkInput, segmented, chip, errorBox, clear, numInput } from './ui.js';
+import { h, svg, btn, tabs, field, selectInput, checkInput, segmented, chip, errorBox, clear, numInput } from './ui.js';
 import { renderItems, getPath, setPath } from './forms.js';
 import { sectionPicker } from './sectionpicker.js';
 import { baseplateForm } from './bpform.js';
@@ -81,12 +81,20 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Elementos' }),
       h('div', { class: 'form-grid' }, memberSelect('Miembro que se conecta', false), h('div', { class: 'field' }, h('span', { class: 'lbl', text: 'Se conecta a' }), h('div', { class: 'input row', style: { background: 'var(--surface-2)' } }, svg('component', 15), h('span', { text: `Miembro principal «${nd.main_name}»` }))))));
     const items = [];
+    const isTab = kind === K.TAB;
     if (vis.bolt_size) items.push({ path: 'bolt_size', label: 'Diámetro de los pernos', type: 'combo', items: C.bolt_sizes }, { path: 'bolt_grade', label: 'Calidad de los pernos', type: 'combo', items: C.bolt_grades });
-    if (vis.n_bolts) items.push({ path: 'n_bolts', label: kind.startsWith('Cartela') ? 'Filas de pernos' : 'Pernos por fila', type: 'int', lo: 1, hi: 12 }, numField('Separación de los pernos', 'bolt_s', 'L', 1, 24));
+    if (vis.n_bolts) items.push({ path: 'n_bolts', label: isTab ? 'Filas de pernos' : kind.startsWith('Cartela') ? 'Filas de pernos' : 'Pernos por fila', type: 'int', lo: 1, hi: 14 });
+    if (isTab) items.push({ path: 'n_cols', label: 'Columnas de pernos', type: 'int', lo: 1, hi: 4, help: 'Con más de una columna los pernos se verifican por el método elástico del grupo (conservador).' });
+    if (vis.n_bolts) items.push(numField(isTab ? 'Separación entre filas' : 'Separación de los pernos', 'bolt_s', 'L', 1, 24));
+    if (isTab) items.push(numField('Separación entre columnas', 'bolt_g', 'L', 1, 24),
+      numField('Alto de la placa (0 = automático)', 'tab_H', 'L', 0, 60, null, null, 'A lo largo del peralte de la viga. 0 = (filas − 1)·separación + 3 in.'),
+      numField('Ancho de la placa (0 = automático)', 'tab_W', 'L', 0, 40, null, null, 'A lo largo de la viga, desde la cara del soporte. 0 = hasta la última columna + 1.5 in.'));
     items.push(numField(kind.startsWith('Cartela') ? 'Espesor de la cartela' : 'Espesor de placa / ángulo', 'plate_t', 'L', 0.0625, 4, 0.0625),
       { path: 'plate_steel', label: 'Acero de la placa', type: 'combo', items: C.plate_steels.map((s) => s.name) });
     if (vis.weld_size) items.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625));
     if (vis.ep_ext) items.push(numField('Extensión de la placa extrema', 'ep_ext', 'L', 0.5, 24));
+    if (isTab || kind === K.DANG) items.push({ path: 'cope_auto', label: 'Cortar la viga secundaria si choca con las alas del principal', type: 'check', wide: true,
+      help: 'Calcula, según la posición de la viga en el espacio, el corte (cope) superior e inferior y su largo para que encaje en la viga principal.' });
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Pernos, placas y soldadura' }), addForm(items)));
   } else if (kind === K.COPE || kind === K.CUT) {                   // corte
     const tg = new Set(op.targets && op.targets.length ? op.targets : [op.member]);
@@ -120,17 +128,20 @@ export async function openOperation(E, index, { isNew = false } = {}) {
       addForm([numField('Cortante de diseño', 'force_V', 'F', 0, 1e6, 1), numField('Tracción de diseño', 'force_T', 'F', 0, 1e6, 1)])));
   }
 
+  // la edicion ocurre en el panel derecho (el visor queda libre): «Cerrar» (X) conserva los cambios, «Cancelar» los revierte
   return new Promise((resolve) => {
+    let done = false;
     const finish = (ok) => {
+      if (done) return; done = true;
       if (!ok) {
         if (isNew) nd.operations.splice(index, 1); else Object.assign(op, orig);
         E.changed({ geometry: true });
       }
-      m.close(); resolve(ok);
+      panel.close('done'); resolve(ok);
     };
-    const m = modal({ title: isNew ? `Nueva operación` : 'Editar operación', icon: OP_ICON[kind] || 'box', width: kind === K.BASE ? 860 : 640, cls: 'tall', body,
-      footer: [btn('Cancelar', { onClick: () => finish(false) }), btn(isNew ? 'Agregar' : 'Aceptar', { kind: 'primary', icon: 'check', onClick: () => finish(true) })], closable: true, onClose: () => resolve(true) });
-    m.back.addEventListener('mousedown', () => {});
+    const panel = E.showPanel({ title: `${isNew ? 'Nueva operación' : 'Operación'} ${index + 1}`, icon: OP_ICON[kind] || 'box', color: opColor(kind), body,
+      footer: [btn('Cancelar', { onClick: () => finish(false) }), btn(isNew ? 'Agregar' : 'Aceptar', { kind: 'primary', icon: 'check', onClick: () => finish(true) })],
+      onClose: () => { if (!done) { done = true; resolve(true); } } });
   });
 }
 

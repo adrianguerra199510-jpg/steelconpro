@@ -262,7 +262,7 @@ def mesh(args) -> dict:
             faces += [[tuple(map(float, q)) for q in f] for f in pr.faces()]
         pts += [q for f in faces for q in f]
         sc = _faces_scene(faces, _rgb(FS.COLORS.get(part.kind, FS.COLORS["other"])), 1.0 if part.kind != "support" else 0.55)
-        parts.append(_scene_to_json(sc, part.name, part.kind, {"label": part.label}))
+        parts.append(_scene_to_json(sc, part.name, part.kind, {"label": part.label, "owner": getattr(part, "owner", "")}))
     for w in mdl.welds:
         pr = FS.weld_prism(w)
         faces = [[tuple(map(float, q)) for q in f] for f in pr.faces()]
@@ -282,7 +282,7 @@ def mesh(args) -> dict:
         fl = [[tuple(map(float, q)) for q in f] for f in faces]
         pts += [q for f in fl for q in f]
         sc = _faces_scene(fl, _rgb(color), alpha, edges=tag != "conc")
-        parts.append(_scene_to_json(sc, f"Placa base · {tag}", "base_" + tag, {"label": "Placa base"}))
+        parts.append(_scene_to_json(sc, f"Placa base · {tag}", "base_" + tag, {"label": "Placa base", "owner": "op:base"}))
     P = np.asarray(pts, float).reshape(-1, 3)
     lo, hi = (P.min(axis=0).tolist(), P.max(axis=0).tolist()) if len(P) else ([0, 0, 0], [1, 1, 1])
     dims = [{"a": list(map(float, a)), "b": list(map(float, b)), "off": list(map(float, off)),

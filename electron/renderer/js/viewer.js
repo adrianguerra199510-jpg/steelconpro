@@ -62,6 +62,7 @@ export class Viewer {
     this.selected = new Set();
     this.hidden = new Set();
     this.dimGroup = new THREE.Group(); this.scene.add(this.dimGroup);
+    this.loadGroup = new THREE.Group(); this.scene.add(this.loadGroup); this.loadEls = []; this.showLoads = true;
     this.overlay = document.createElement('div'); this.overlay.className = 'vlabels'; container.append(this.overlay);
     this.uniforms = { uCam: { value: new THREE.Vector3(0, 0, 1) }, uL: { value: new THREE.Vector3(0.4, -0.5, 0.75).normalize() } };
     this._raf = 0;
@@ -84,7 +85,7 @@ export class Viewer {
     for (const p of this.parts) for (const m of p.objs) { m.geometry.dispose(); m.material.dispose(); this.root.remove(m); }
     this.parts = [];
     this.dimGroup.clear();
-    this.overlay.replaceChildren();
+    this.overlay.replaceChildren(); this.loadEls = [];
   }
 
   _mat(transparent) {
@@ -97,7 +98,7 @@ export class Viewer {
   setModel(data, { keepView = true } = {}) {
     this.clear();
     for (const pd of data.parts) {
-      const part = { name: pd.name, kind: pd.kind, label: pd.label, objs: [], mats: [] };
+      const part = { name: pd.name, kind: pd.kind, label: pd.label, owner: pd.owner || '', objs: [], mats: [] };
       for (const [key, transparent] of [['o', false], ['t', true]]) {
         const arr = b64ToFloat32(pd[key]);
         if (!arr.length) continue;
@@ -169,6 +170,68 @@ export class Viewer {
       this.dimEls.push({ el: e, p: d.p, views: d.views });
     }
   }
+
+  // ---------------------------------------------------------------- cargas (flechas de fuerza y arcos de momento, como en PlacaBase Pro)
+  // items: [{ pos:[x,y,z], F:[fx,fy,fz], M:[mx,my,mz], textF, textM, color }]; la flecha de fuerza llega al punto de aplicacion
+  clearLoads() {
+    for (const o of [...this.loadGroup.children]) { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); this.loadGroup.remove(o); }
+    for (const l of this.loadEls) l.el.remove();
+    this.loadEls = [];
+  }
+
+  setLoads(items) {
+    this.clearLoads();
+    if (!items || !items.length) { this.requestRender(); return; }
+    const diag = this.bounds.getSize(new THREE.Vector3()).length() || 100;
+    const fmax = Math.max(1e-9, ...items.map((i) => Math.hypot(...(i.F || [0, 0, 0]))));
+    const Lmax = 0.26 * diag, rad = 0.0075 * diag, head = 0.045 * diag;
+    const mat = (c) => new THREE.MeshBasicMaterial({ color: c, depthTest: false, transparent: true, opacity: 0.95 });
+    const add = (geo, c) => { const m = new THREE.Mesh(geo, mat(c)); m.renderOrder = 30; m.raycast = () => {}; this.loadGroup.add(m); return m; };
+    const label = (p, text, c) => {
+      if (!text) return;
+      const e = document.createElement('div'); e.className = 'vlabel load'; e.textContent = text; e.style.borderColor = c; e.style.color = c;
+      this.overlay.append(e); this.loadEls.push({ el: e, p: p.clone() });
+    };
+    const up = new THREE.Vector3(0, 1, 0);
+    const arrow = (tail, tip, c) => {
+      const d = tip.clone().sub(tail); const len = d.length(); if (len < 1e-9) return;
+      const dir = d.clone().normalize();
+      const sh = add(new THREE.CylinderGeometry(rad, rad, Math.max(len - head, 1e-6), 10), c);
+      sh.position.copy(tail).addScaledVector(dir, (len - head) / 2); sh.quaternion.setFromUnitVectors(up, dir);
+      const hd = add(new THREE.ConeGeometry(rad * 2.6, head, 14), c);
+      hd.position.copy(tip).addScaledVector(dir, -head / 2); hd.quaternion.setFromUnitVectors(up, dir);
+    };
+    for (const it of items) {
+      const P = new THREE.Vector3(...it.pos);
+      const c = it.color || '#d62728';
+      const F = new THREE.Vector3(...(it.F || [0, 0, 0])); const f = F.length();
+      if (f > 1e-9) {
+        const len = Math.max(0.3, f / fmax) * Lmax; const dir = F.clone().normalize();
+        const tail = P.clone().addScaledVector(dir, -len);
+        arrow(tail, P, c);
+        label(tail.clone().addScaledVector(dir, -0.02 * diag), it.textF, c);
+      }
+      const M = new THREE.Vector3(...(it.M || [0, 0, 0])); const mm = M.length();
+      if (mm > 1e-9) {
+        const ax = M.clone().normalize();
+        const ref = Math.abs(ax.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+        const u = new THREE.Vector3().crossVectors(ax, ref).normalize(); const v = new THREE.Vector3().crossVectors(ax, u);
+        const R = 0.075 * diag; const pts = [];
+        for (let k = 0; k <= 36; k++) { const a = (k / 36) * Math.PI * 1.5; pts.push(P.clone().addScaledVector(u, R * Math.cos(a)).addScaledVector(v, R * Math.sin(a))); }
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const tube = add(new THREE.TubeGeometry(curve, 40, rad * 0.8, 8, false), it.colorM || '#8e44ad');
+        const end = pts[pts.length - 1], prev = pts[pts.length - 3];
+        const tdir = end.clone().sub(prev).normalize();
+        const hd = add(new THREE.ConeGeometry(rad * 2.6, head, 14), it.colorM || '#8e44ad');
+        hd.position.copy(end).addScaledVector(tdir, head * 0.2); hd.quaternion.setFromUnitVectors(up, tdir);
+        label(pts[Math.floor(pts.length / 2)].clone(), it.textM, it.colorM || '#8e44ad');
+      }
+    }
+    this.loadGroup.visible = this.showLoads;
+    this.requestRender();
+  }
+
+  setLoadsVisible(on) { this.showLoads = on; this.loadGroup.visible = on; this.requestRender(); }
 
   setDimFormatter(fn) { this._fmt = fn; }
   setDimTexts(fn) { (this.dimLabels || []).forEach((d, i) => { if (this.dimEls[i] && typeof d.text === 'number') this.dimEls[i].el.textContent = fn(d.text); }); }
@@ -258,6 +321,11 @@ export class Viewer {
     for (const l of this.labelEls || []) {
       const q = this._proj(l.p);
       l.el.style.display = this.showLabels && q.z < 1 ? 'block' : 'none';
+      l.el.style.left = `${q.x}px`; l.el.style.top = `${q.y}px`;
+    }
+    for (const l of this.loadEls || []) {
+      const q = this._proj(l.p);
+      l.el.style.display = this.showLoads && q.z < 1 ? 'block' : 'none';
       l.el.style.left = `${q.x}px`; l.el.style.top = `${q.y}px`;
     }
     for (const l of this.dimEls || []) {

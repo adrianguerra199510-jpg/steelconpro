@@ -156,23 +156,48 @@ def solve_one(prj, name: str, vals, rec: Recorder | None):
              "AISC Tabla J3.4")
 
     # ---------------------------------------------------------------- pernos
-    ic = ic_vertical_line(ys, a)
+    cols = max(int(getattr(st, "cols", 1)), 1)
+    gcol = float(getattr(st, "gage", 3.0))
     rn = bolt_shear_rn(db, st.bolt_grade)
     phi_rn = PHI_BOLT * rn
-    cap_b = phi_rn * ic.C
-    k = Vu / ic.C if ic.C > 0 else 0.0                              # fuerza real = f_i · Vu / C
-    Fx = [fx * k for fx in ic.fx]
-    Fy = [fy * k for fy in ic.fy]
-    if rec:
-        rec.section("PERNOS — metodo del centro instantaneo")
-        rec.add("rn", "Fnv·Ab", f"{rec.f('S', FNV[st.bolt_grade])} · {rec.f('A', math.pi * db ** 2 / 4)}", rn, "F", "AISC J3.6")
-        rec.add("φrn", "0.75·rn", "", phi_rn, "F")
-        rec.add("C", "coeficiente del grupo (centro instantaneo)",
-                f"e = a = {rec.f('L', a)};  n = {n};  s = {rec.f('L', st.s)};  CI a {rec.f('L', ic.x_ic)} del centroide",
-                ic.C, "-", "Manual Parte 7 (Crawford-Kulak, Δmax = 0.34 in)",
-                note=f"el metodo elastico daria C = {ic.C_elastic:.3f} (conservador)")
-    _chk(ck, rec, "bolt_shear", f"Pernos — cortante con excentricidad (IC, C = {ic.C:.2f})", Vu, cap_b, "kip", "AISC J3.6",
-         f"{n} × Ø{st.bolt_size} {st.bolt_grade}; φ·C·rn")
+    if cols == 1:
+        ic = ic_vertical_line(ys, a)
+        cap_b = phi_rn * ic.C
+        k = Vu / ic.C if ic.C > 0 else 0.0                              # fuerza real = f_i · Vu / C
+        Fx = [fx * k for fx in ic.fx]
+        Fy = [fy * k for fy in ic.fy]
+        if rec:
+            rec.section("PERNOS — metodo del centro instantaneo")
+            rec.add("rn", "Fnv·Ab", f"{rec.f('S', FNV[st.bolt_grade])} · {rec.f('A', math.pi * db ** 2 / 4)}", rn, "F", "AISC J3.6")
+            rec.add("φrn", "0.75·rn", "", phi_rn, "F")
+            rec.add("C", "coeficiente del grupo (centro instantaneo)",
+                    f"e = a = {rec.f('L', a)};  n = {n};  s = {rec.f('L', st.s)};  CI a {rec.f('L', ic.x_ic)} del centroide",
+                    ic.C, "-", "Manual Parte 7 (Crawford-Kulak, Δmax = 0.34 in)",
+                    note=f"el metodo elastico daria C = {ic.C_elastic:.3f} (conservador)")
+        _chk(ck, rec, "bolt_shear", f"Pernos — cortante con excentricidad (IC, C = {ic.C:.2f})", Vu, cap_b, "kip", "AISC J3.6",
+             f"{n} × Ø{st.bolt_size} {st.bolt_grade}; φ·C·rn")
+    else:                                                               # varias columnas: metodo elastico del grupo (conservador)
+        e_g = a + (cols - 1) * gcol / 2.0
+        xs_ = [(j - (cols - 1) / 2.0) * gcol for j in range(cols) for i in range(n)]
+        ys_ = [ys[i] for j in range(cols) for i in range(n)]
+        Nb = len(xs_)
+        Ip = sum(x * x + y * y for x, y in zip(xs_, ys_))
+        Mg = Vu * e_g
+        Fxs = [Mg * y / Ip for y in ys_]
+        Fys = [Vu / Nb + Mg * x / Ip for x in xs_]
+        Rb = [math.hypot(fx, fy) for fx, fy in zip(Fxs, Fys)]
+        Rmax = max(Rb) if Rb else 0.0
+        wi = Rb.index(Rmax) if Rb else 0
+        if rec:
+            rec.section("PERNOS — metodo elastico del grupo (varias columnas)")
+            rec.add("rn", "Fnv·Ab", f"{rec.f('S', FNV[st.bolt_grade])} · {rec.f('A', math.pi * db ** 2 / 4)}", rn, "F", "AISC J3.6")
+            rec.add("φrn", "0.75·rn", "", phi_rn, "F")
+            rec.add("e", "a + (columnas−1)·g / 2", f"{rec.n('L', a)} + {cols - 1}·{rec.n('L', gcol)} / 2", e_g, "L", note="excentricidad del grupo respecto de la soldadura")
+            rec.add("Ip", "Σ(x² + y²)", "", Ip, "-", note="momento polar del grupo de pernos")
+            rec.add("Rmax", "√((V/N + M·x/Ip)² + (M·y/Ip)²)", f"M = Vu·e = {rec.n('M', Mg)}", Rmax, "F", note=f"perno mas cargado: #{wi + 1}")
+        _chk(ck, rec, "bolt_shear", f"Pernos — cortante, grupo elastico ({n}×{cols})", Rmax, phi_rn, "kip", "AISC J3.6",
+             f"{Nb} × Ø{st.bolt_size} {st.bolt_grade}; metodo elastico (conservador) con e = {u.q('L', e_g)}")
+        Fx, Fy = Fxs, Fys
 
     def bearing_row(label, key, t, Fu, Lc_v, Lc_h_edge_bolts, ref):
         """Aplastamiento por perno: la componente vertical y la horizontal se combinan en elipse.
@@ -191,16 +216,27 @@ def solve_one(prj, name: str, vals, rec: Recorder | None):
              f"perno #{wi + 1} (desde arriba): {math.hypot(Fx[wi], Fy[wi]):.1f} kip")
         return worst
 
-    # placa: empujada hacia abajo; la componente horizontal empuja hacia el borde libre en los pernos de abajo
-    lev_pl = st.lev_p - dh / 2
-    bearing_row("Pernos — aplastamiento y desgarramiento en la placa", "brg_plate", tp, pl.Fu,
-                lambda i: (lev_pl if i == n - 1 else st.s - dh),
-                {i: st.leh_p - dh / 2 for i in range(n) if ys[i] < -1e-9}, "AISC J3.10")
-    # alma: empujada hacia arriba; hacia el extremo de la viga empujan los pernos de abajo
-    lev_web_t = (g["lev_t"] - dh / 2) if g["ct"] > 0 else 1e9
-    bearing_row("Pernos — aplastamiento y desgarramiento en el alma de la viga", "brg_web", tw, bm.Fu,
-                lambda i: (lev_web_t if i == 0 else st.s - dh),
-                {i: g["leh_b"] - dh / 2 for i in range(n) if ys[i] < -1e-9}, "AISC J3.10")
+    def bearing_group(label, key, t, Fu, Lc, ref):
+        """Varias columnas: el perno mas cargado contra la distancia libre mas desfavorable (conservador)."""
+        r = PHI_BOLT * bearing_rn(db, t, Fu, Lc)
+        _chk(ck, rec, key, label, Rmax, r, "kip", ref, f"perno mas cargado; Lc = {u.q('L', Lc)} (la menor distancia libre)")
+
+    if cols > 1:
+        Lc_pl = min(st.lev_p - dh / 2, st.leh_p - dh / 2, st.s - dh, gcol - dh)
+        bearing_group("Pernos — aplastamiento y desgarramiento en la placa", "brg_plate", tp, pl.Fu, Lc_pl, "AISC J3.10")
+        Lc_web = min(g["leh_b"] - dh / 2, st.s - dh, gcol - dh, (g["lev_t"] - dh / 2) if g["ct"] > 0 else 1e9)
+        bearing_group("Pernos — aplastamiento y desgarramiento en el alma de la viga", "brg_web", tw, bm.Fu, Lc_web, "AISC J3.10")
+    else:
+        # placa: empujada hacia abajo; la componente horizontal empuja hacia el borde libre en los pernos de abajo
+        lev_pl = st.lev_p - dh / 2
+        bearing_row("Pernos — aplastamiento y desgarramiento en la placa", "brg_plate", tp, pl.Fu,
+                    lambda i: (lev_pl if i == n - 1 else st.s - dh),
+                    {i: st.leh_p - dh / 2 for i in range(n) if ys[i] < -1e-9}, "AISC J3.10")
+        # alma: empujada hacia arriba; hacia el extremo de la viga empujan los pernos de abajo
+        lev_web_t = (g["lev_t"] - dh / 2) if g["ct"] > 0 else 1e9
+        bearing_row("Pernos — aplastamiento y desgarramiento en el alma de la viga", "brg_web", tw, bm.Fu,
+                    lambda i: (lev_web_t if i == 0 else st.s - dh),
+                    {i: g["leh_b"] - dh / 2 for i in range(n) if ys[i] < -1e-9}, "AISC J3.10")
 
     # ----------------------------------------------------------------- placa
     Agv = tp * Lp
@@ -220,13 +256,14 @@ def solve_one(prj, name: str, vals, rec: Recorder | None):
     Rbs = PHI_RUPT * block_shear_rn(pl.Fy, pl.Fu, tp, Lgv, Lnv, Lnt)
     _chk(ck, rec, "plate_bs", "Placa — bloque de cortante", Vu, Rbs, "kip", "AISC J4.3",
          f"Lgv = {u.q('L', Lgv)}, Lnv = {u.q('L', Lnv)}, Lnt = {u.q('L', Lnt)}, Ubs = 1.0 (una fila)")
-    Mu = Vu * a
+    a_e = a + (cols - 1) * gcol / 2.0                   # excentricidad del centro del grupo respecto de la soldadura
+    Mu = Vu * a_e
     Z = tp * Lp ** 2 / 4.0
     phiMp = PHI_FLEX * pl.Fy * Z
     phiVp = PHI_YIELD * 0.6 * pl.Fy * Agv
     ratio_vm = Mu / max(phiMp, 1e-9) + (Vu / max(phiVp, 1e-9)) ** 2
     if rec:
-        rec.add("Mu", "Vu·a  (en la soldadura)", f"{rec.n('F', Vu)}·{rec.n('L', a)}", Mu, "M", "Manual Parte 10")
+        rec.add("Mu", "Vu·a  (en la soldadura)", f"{rec.n('F', Vu)}·{rec.n('L', a_e)}", Mu, "M", "Manual Parte 10")
         rec.add("φMp", "0.90·Fy·Z", f"0.9·{rec.n('S', pl.Fy)}·{Z / u.fl ** 3:.4g} {u.L}³", phiMp, "M", "AISC F11")
     _chk(ck, rec, "plate_m", "Placa — flexion (fluencia) en la soldadura", Mu, phiMp, "kip·in", "AISC F11 / Manual Parte 10")
     _chk(ck, rec, "plate_vm", "Placa — interaccion flexion-cortante (plastica)", ratio_vm, 1.0, "-",
@@ -237,11 +274,11 @@ def solve_one(prj, name: str, vals, rec: Recorder | None):
          "Manual Parte 10", f"Snet = {Sn / u.fl ** 3:.4g} {u.L}³; M = Vu·a (conservador)")
 
     # ------------------------------------------------------------- soldadura
-    f, cap_w, th, fv, fh = weld_pair_vertical(Vu, a, Lp, st.weld_size, FEXX, st.weld_dir)
+    f, cap_w, th, fv, fh = weld_pair_vertical(Vu, a_e, Lp, st.weld_size, FEXX, st.weld_dir)
     if rec:
         rec.section("SOLDADURA PLACA-SOPORTE (filete a ambos lados, metodo elastico)")
         rec.add("fv", "Vu / (2·L)", "", fv, "LF")
-        rec.add("fh", "3·Vu·a / L²", "", fh, "LF")
+        rec.add("fh", "3·Vu·a / L²", f"a = {rec.f('L', a_e)}", fh, "LF")
         rec.add("θ", "atan(fh / fv)", f"{th:.1f}°", None, "-", note="angulo de la resultante respecto al eje de la soldadura")
     _chk(ck, rec, "weld", "Soldadura placa-soporte — filete a ambos lados", f, cap_w, "kip/in", "AISC J2.4",
          f"w = {M.float_to_frac(st.weld_size)}\", {st.electrode}, θ = {th:.0f}°"

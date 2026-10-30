@@ -151,6 +151,11 @@ class Operation:
     cols: int = 2                # pernos en la direccion transversal
     bolt_g: float = 3.0          # separacion transversal de los pernos, in
     cut_at: str = "Inicio"       # extremo donde se corta: Inicio | Fin
+    # ---- placa simple / doble angulo: tamaño de la placa, columnas de pernos y corte automatico de la viga secundaria
+    tab_H: float = 0.0           # alto de la placa simple (a lo largo del peralte de la viga), in (0 = automatico)
+    tab_W: float = 0.0           # ancho de la placa simple (a lo largo de la viga), in (0 = automatico)
+    n_cols: int = 1              # columnas de pernos de la placa simple (separacion: bolt_g)
+    cope_auto: bool = True       # corta la viga secundaria (cope) lo necesario para librar las alas de la viga principal
     force_V: float = 0.0         # fuerza cortante de diseño de la operacion (kip), opcional
     force_T: float = 0.0         # fuerza de traccion de diseño de la operacion (kip), opcional
 

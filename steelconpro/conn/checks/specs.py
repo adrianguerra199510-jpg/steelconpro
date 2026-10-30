@@ -65,6 +65,8 @@ class ShearTab:
     n: int = 3                   # pernos en la fila (2 a 12 en la configuracion convencional)
     s: float = 3.0               # separacion vertical, in
     a: float = 3.0               # distancia de la soldadura a la fila de pernos, in
+    cols: int = 1                # columnas de pernos (mas de una: metodo elastico del grupo, conservador)
+    gage: float = 3.0            # separacion entre columnas de pernos, in
     # --- placa
     tp: float = 0.375
     plate_steel: str = "ASTM A36"

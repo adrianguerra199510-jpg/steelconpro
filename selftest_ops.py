@@ -121,6 +121,29 @@ def run():
             fail("nodal: la placa base debe verificar los casos del nudo")
         print(f"{'analisis nodal':34} equilibrio ΣF = ΣM = 0, carga externa, y cargas de la placa base desde el nudo (Pu {b['Pu']:.1f}, Mux {b['Mux']:.0f}, Vuy {b['Vuy']:.1f}): OK")
 
+        # ---- placa simple: filas × columnas, tamaño de la placa y corte automatico de la secundaria
+        from steelconpro.conn import assembly as AS_
+        ex = api.book_load({"path": os.path.join("ejemplos", "CN-02_viga_con_secundarias.scp")})["connections"][0]
+        o_tab = next(o for o in ex["node"]["operations"] if o["kind"] == K["TAB"])
+        o_tab.update(n_cols=2, n_bolts=3, tab_H=10.0, tab_W=7.0)
+        mt = api.mesh({"connection": ex})
+        nb = len([1 for p_ in mt["parts"] if p_["name"] == "Pernos"])
+        vt = api.verify({"connection": ex})
+        grp = [c for c in vt["checks"] if c["group"].startswith("1.")]
+        if not any("grupo elastico" in c["title"] for c in grp) or not nb:
+            fail("placa simple: con dos columnas de pernos debe verificar el grupo elastico")
+        from steelconpro.api import _prj
+        pe = _prj(ex)
+        mem = next(m for m in pe.node.members if m.name == o_tab["member"])
+        pl_ = [p_ for p_ in AS_.build_model(pe).parts if p_.name.startswith("Placa S")]
+        mdl_ = AS_.build_model(pe)
+        if len(mdl_.bolts) < 6 or not any(w.A.startswith("Placa S2") or w.A.startswith("Placa " + mem.name) for w in mdl_.welds):
+            fail("placa simple: faltan los pernos (3×2) o las soldaduras sobre la cara del soporte")
+        ac = AS_.auto_cope_for(pe.node, next(m for m in pe.node.members if m.name == "S3"))
+        if ac is None or ac[0] <= 0 or ac[2] <= 0:
+            fail(f"corte automatico: la viga S3 entra en la viga principal y debe cortarse ({ac})")
+        print(f"{'placa simple y corte automatico':34} 3×2 pernos, placa 10×7 in con filetes en la cara del soporte, grupo elastico verificado, corte automatico de S3 {tuple(round(x, 2) for x in ac)}: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")

@@ -290,6 +290,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             nm = o.name
             if hw:
                 mdl.parts.append(Part(nm, "stiff" if o.role == "Rigidizador" else "plate", f"{o.role} PL {spec['t']:g}", Fy, Fu, [pr], t=spec["t"]))
+                mdl.parts[-1].owner = f"op:{i}"
             ent.update(ok=True, ff=ff, spec=spec, parent=parent, plate_name=nm, e=(e1, e2, e3), centre=centre)
             reg[nm] = {"type": "plate", "faces": plate_faces(centre, e1, e2, e3, spec["L1"], spec["L2"], spec["t"]), "part": nm, "t": spec["t"], "Fy": Fy, "Fu": Fu,
                        "lines": None}

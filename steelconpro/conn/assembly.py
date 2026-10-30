@@ -17,7 +17,7 @@ import numpy as np
 from .. import materials as M
 from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN
 from .common import hole_std, bolt_db
-from .fem.model3d import Model3D, Part, Bolt, Prism, unit
+from .fem.model3d import Model3D, Part, Bolt, Prism, Weld, unit
 from . import ops as OPS
 from .ops import member_faces, FaceFrame
 from .specs import (OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
@@ -214,6 +214,8 @@ class _Ctx:
         self.db = bolt_db(self.op.bolt_size)
         self.t = max(float(self.op.plate_t), 0.125)
         self.parts, self.bolts, self.notes = [], [], []
+        self.welds = []
+        self.main_name = ""
 
     def at(self, s, lat=0.0, v=0.0):
         """Punto a `s` del apoyo Q a lo largo del miembro, `lat` en sx y `v` en sy."""
@@ -231,21 +233,38 @@ def _n_rows(ctx, hmax, edge=1.5):
     return n, s
 
 
+def tab_dims(op, m, shp, db):
+    """Medidas de la placa simple: (filas, separacion, columnas, separacion entre columnas, alto, ancho, a) en in; `a` = distancia de la soldadura a la primera columna."""
+    s = max(op.bolt_s, 3 * db * 0.8)
+    n = max(1, int(op.n_bolts))
+    g = max(op.bolt_g, 3 * db * 0.8)
+    cols = max(1, int(getattr(op, "n_cols", 1)))
+    a = m.gap + 2.5
+    H = op.tab_H if op.tab_H > 0 else (n - 1) * s + 3.0
+    Wd = op.tab_W if op.tab_W > 0 else a + (cols - 1) * g + 1.5
+    return n, s, cols, g, H, Wd, a
+
+
 def _tab_geometry(ctx, tag):
-    """Placa simple (pernos en una fila vertical).  Devuelve el largo de la placa desde Q."""
+    """Placa simple sobre la cara del soporte (soldada con filete a ambos lados) y atornillada al alma de la viga: filas × columnas de pernos."""
     m, shp = ctx.m, ctx.shape
     t = ctx.t
-    n, s = _n_rows(ctx, _clear_depth(shp))
-    sb = m.gap + 2.5                                   # fila de pernos: 2.5 in del extremo del miembro
-    Lp = sb + 1.5
-    H = (n - 1) * s + 3.0
+    n, s, cols, g, H, Wd, a = tab_dims(ctx.op, m, shp, ctx.db)
+    hmax = _clear_depth(shp)
+    if n > 1 and (n - 1) * s + 2 * 1.0 > hmax + 1e-9:
+        fit = max(1, int((hmax - 2.0) / s) + 1)
+        ctx.notes.append(f"{ctx.m.name}: caben {fit} pernos en {hmax:.1f} in; se dibujan {fit} de {n}.")
+        n = fit
+        H = min(H, (n - 1) * s + 3.0) if ctx.op.tab_H <= 0 else H
     lat = (_halfw(shp) + t / 2.0) if _is_open(shp) else 0.0
-    poly = [(-EMBED, -H / 2), (Lp, -H / 2), (Lp, H / 2), (-EMBED, H / 2)]
-    # plano (dir, sy): U×V = dir×sy = -sx  → el espesor se mide hacia -sx; se coloca con o desplazado
+    Lp = Wd
+    poly = [(0.0, -H / 2), (Lp, -H / 2), (Lp, H / 2), (0.0, H / 2)]            # la placa nace en la cara del soporte (x = 0)
     pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
-    ctx.parts.append(Part(name, "plate", f"Placa simple PL {t:g}", Fy, Fu, [pr], t=t))
+    ctx.parts.append(Part(name, "plate", f"Placa simple PL {t:g} × {H:g} × {Wd:g}", Fy, Fu, [pr], t=t))
+    if ctx.op.tab_H <= 0 or True:
+        pass
     zs = [(i - (n - 1) / 2.0) * s for i in range(n)]
     if _is_open(shp):
         grip = [(name, 0.0, t), (ctx.partname, t, t + shp.tw)]
@@ -255,8 +274,19 @@ def _tab_geometry(ctx, tag):
         grip = [(ctx.partname, 0.0, shp.bf)]
         p0 = shp.bf / 2.0
         nut = shp.bf
-    for i, z in enumerate(zs):
-        ctx.bolts.append(_bolt(f"{tag}-B{i + 1}", ctx.at(sb, p0, z), -ctx.sx, ctx.db, 0.0, nut, grip, ctx.op.bolt_grade))
+    k = 0
+    for j in range(cols):
+        for i, z in enumerate(zs):
+            k += 1
+            ctx.bolts.append(_bolt(f"{tag}-B{k}", ctx.at(a + j * g, p0, z), -ctx.sx, ctx.db, 0.0, nut, grip, ctx.op.bolt_grade))
+    # soldaduras de filete en la cara del soporte, una a cada lado de la placa
+    if ctx.main_name:
+        w = float(ctx.op.weld_size)
+        for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
+            p0_ = ctx.Q + lat_face * ctx.sx - ctx.sy * (H / 2.0)
+            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (H / 2.0)
+            ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
+                                  tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.dir)), w, 70.0, tag))
     return Lp
 
 
@@ -387,6 +417,73 @@ def cope_prisms(shape, o, sx, sy, A, s0, s1, ct, cb, cl):
     return [web,
             Prism(poly=[(-bf / 2, d / 2 - tf), (bf / 2, d / 2 - tf), (bf / 2, d / 2), (-bf / 2, d / 2)], o=o, U=U, V=V, w0=float(st), w1=float(s1)),
             Prism(poly=[(-bf / 2, -d / 2), (bf / 2, -d / 2), (bf / 2, -d / 2 + tf), (-bf / 2, -d / 2 + tf)], o=o, U=U, V=V, w0=float(sb), w1=float(s1))]
+
+
+def _in_prism(pr, P, c=0.0):
+    """Mascara de los puntos P (N, 3) que caen dentro del prisma `pr` (envolvente de su poligono) inflado en c (in)."""
+    o, U, V = np.asarray(pr.o, float), np.asarray(pr.U, float), np.asarray(pr.V, float)
+    W = np.cross(U, V)
+    d = P - o
+    u, v, w = d @ U, d @ V, d @ W
+    inw = (w >= pr.w0 - c) & (w <= pr.w1 + c)
+    if pr.circle is not None:
+        return inw & (np.hypot(u, v) <= pr.circle[0] + c)
+    poly = np.asarray(pr.poly, float)
+    return inw & (u >= poly[:, 0].min() - c) & (u <= poly[:, 0].max() + c) & (v >= poly[:, 1].min() - c) & (v <= poly[:, 1].max() + c)
+
+
+def auto_cope(shp, base, dirv, sx, sy, solids, c=0.5, step=0.25):
+    """Corte (cope) minimo de una viga I para que sus alas y su alma libren los solidos `solids` (prismas del miembro principal) con una holgura `c`.
+    `base` = punto donde empieza la viga (su extremo), `dirv` = hacia afuera; las coordenadas (x, y) de la seccion son (sx, sy).  -> (ct, cb, cl) en in."""
+    pts, ys, ss = [], [], []
+    ss_ = np.arange(step / 2.0, 18.0, step)
+    for (x0, y0, x1, y1) in shp.rects():
+        xs_ = np.arange(x0 + step / 2.0, x1, step) if x1 - x0 > step else np.array([(x0 + x1) / 2.0])
+        ys_ = np.arange(y0 + step / 2.0, y1, step) if y1 - y0 > step else np.array([(y0 + y1) / 2.0])
+        X, Y, S = np.meshgrid(xs_, ys_, ss_, indexing="ij")
+        X, Y, S = X.ravel(), Y.ravel(), S.ravel()
+        pts.append(base + np.outer(S, dirv) + np.outer(X, sx) + np.outer(Y, sy))
+        ys.append(Y)
+        ss.append(S)
+    if not pts:
+        return 0.0, 0.0, 0.0
+    P, Y, S = np.vstack(pts), np.concatenate(ys), np.concatenate(ss)
+    hit = np.zeros(len(P), bool)
+    for pr in solids:
+        hit |= _in_prism(pr, P, c)
+    if not hit.any():
+        return 0.0, 0.0, 0.0
+    Yh, Sh = Y[hit], S[hit]
+    top, bot = Yh[Yh > 0], Yh[Yh <= 0]
+    up = lambda v: math.ceil(v / 0.25 - 1e-9) * 0.25            # noqa: E731
+    ct = up(shp.d / 2.0 - float(top.min())) if len(top) else 0.0
+    cb = up(float(bot.max()) + shp.d / 2.0) if len(bot) else 0.0
+    ct = max(ct, up(shp.tf)) if ct > 0 else 0.0
+    cb = max(cb, up(shp.tf)) if cb > 0 else 0.0
+    cl = up(float(Sh.max()) + step / 2.0)
+    return ct, cb, cl
+
+
+def auto_cope_for(nd, m, op=None):
+    """Cope automatico de la viga `m` (viga I que llega al principal con placa simple o doble angulo): (ct, cb, cl) o None si no hace falta o no aplica."""
+    op = op or next((o for o in nd.operations if o.is_connection and o.member == m.name), None)
+    if op is None or op.kind not in (OP_TAB, OP_DANG) or not getattr(op, "cope_auto", False):
+        return None
+    shp = shape_of(m.shape)
+    if shp.kind != W_SHAPE or any(o.kind in (OP_COPE, OP_CUT) and (o.member == m.name or m.name in (o.targets or [])) for o in nd.operations):
+        return None
+    mshape = shape_of(nd.main_shape)
+    A, msx, msy = main_frame(nd)
+    lneg, lpos = nd.lengths()
+    if lneg + lpos < 1.0:
+        lneg = lpos = 24.0
+    solids = section_prisms(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos)
+    info = attach_info(nd, m)
+    if not info["touches"]:
+        return None
+    _, sx, sy = member_frame(m)
+    ct, cb, cl = auto_cope(shp, info["Q"] + info["dir"] * max(m.gap, 0.0), info["dir"], sx, sy, solids)
+    return (ct, cb, cl) if (ct > 0 or cb > 0) else None
 
 
 # ================================================================================================== cartelas (placa comun por plano)
@@ -669,6 +766,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
         conn_op = conns[0] if (conns and hw) else None
         c = _Ctx(m, conn_op, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
         c.partname = m.name
+        c.main_name = nd.main_name
         diag = abs(m.el) >= DIAG_MIN
         ms = max(m.gap, 0.0)                          # distancia desde Q hasta el inicio del miembro
         tag = m.name
@@ -707,11 +805,20 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
         else:
             if cope is not None and shp.kind != W_SHAPE:
                 mdl.notes.append(f"{m.name}: el corte solo se dibuja en perfiles I.")
-            prisms = section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0))
+            auto = auto_cope_for(nd, m, conn_op) if (conn_op is not None and cope is None) else None
+            if auto is not None:
+                ct_, cb_, cl_ = auto
+                mdl.notes.append(f"{m.name}: corte automático para librar las alas de «{nd.main_name}» (superior {ct_:g} in, inferior {cb_:g} in, largo {cl_:g} in).")
+                prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0), ct_, cb_, cl_)
+            else:
+                prisms = section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0))
         mdl.parts.append(Part(m.name, "brace" if diag else "beam", f"{m.name} {shp.label}", Fy_m, Fu_m, prisms, t=shp.tw, stub=True))
+        mdl.parts[-1].owner = m.name
         for p in c.parts:
+            p.owner = m.name
             mdl.parts.append(p)
         mdl.bolts += c.bolts
+        mdl.welds += c.welds
         mdl.notes += c.notes
         end = Q + dirv * (ms + max(m.L, 1.0))
         mdl.tags.append((tuple(map(float, end)), m.name))

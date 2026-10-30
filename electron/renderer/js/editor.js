@@ -34,6 +34,8 @@ export async function enter(app, params) {
 }
 
 export async function leave() {
+  if (E.panel) E.panel.close('switch');
+  if (E.report) E.report.win.close();
   window.removeEventListener('keydown', onKey);
   save.cancel();
   if (E.dirty) await saveNow();
@@ -106,6 +108,7 @@ const runMesh = debounce(async () => {
     E.mesh = data;
     E.viewer.setModel(data, { keepView: true });
     E.viewer.setDimTexts((v) => S.us.q('L', v));
+    applyLoads();
     highlight();
     renderNotes(data.notes || []);
   } catch (e) { setStatus(`No se pudo dibujar el modelo: ${e.message}`, true); }
@@ -119,7 +122,7 @@ const runVerify = debounce(async () => {
     if (!r) return;
     E.res = r; E.stale = false;
     try { E.nodal = await call('nodal', { connection: E.conn() }); } catch (e) { E.nodal = null; }
-    renderResults(); renderNodal(); renderTree(); setVerdict();
+    renderResults(); renderNodal(); applyLoads(); renderTree(); setVerdict(); if (E.report) E.report.refresh();
   } catch (e) { E.res = null; setVerdict('error', e.message); renderResults(e.message); }
 }, 700);
 
@@ -164,16 +167,13 @@ function build(app) {
   ui.connTabs = h('div', { class: 'conn-tabs' });
   ui.undo = iconBtn('undo', 'Deshacer (Ctrl+Z)', undo); ui.redo = iconBtn('redo', 'Rehacer (Ctrl+Y)', redo);
   ui.verdict = h('span', { class: 'big-chip idle' });
-  ui.calc = btn('Calcular', { icon: 'play', kind: 'primary', onClick: () => { runVerify.flush(); } });
   const libBtn = btn('Bibliotecas', { icon: 'library', onClick: (e) => menu(e.currentTarget, [
     { label: 'Secciones y Section Designer', icon: 'shapes', onClick: () => openSections(E) }, { label: 'Materiales', icon: 'database', onClick: () => openMaterials(E) },
     { label: 'Plantillas de conexión', icon: 'copy', onClick: () => openTemplates(E) }]) });
-  const repBtn = btn('Informe', { icon: 'file-text', onClick: (e) => menu(e.currentTarget, [
-    { label: 'Informe PDF…', icon: 'file-down', onClick: () => exportReport('pdf') }, { label: 'Informe Word (.docx)…', icon: 'file-down', onClick: () => exportReport('docx') },
-    { label: 'Exportar STEP…', icon: 'box', onClick: exportStep }, '-', { label: 'Guardar proyecto', icon: 'save', hint: 'Ctrl+S', onClick: () => saveNow(true) }]) });
+  const repBtn = btn('Informe', { icon: 'file-text', onClick: () => openReport() });
   const top = h('div', { class: 'ed-top' },
     iconBtn('arrow-left', 'Volver al inicio', () => go('home')), ui.title, h('div', { class: 'vr' }), ui.connTabs, h('span', { class: 'grow' }),
-    ui.undo, ui.redo, h('div', { class: 'vr' }), libBtn, repBtn, ui.calc);
+    ui.undo, ui.redo, h('div', { class: 'vr' }), libBtn, repBtn);
 
   // ---- panel izquierdo (árbol)
   ui.tree = h('div', { class: 'scroll' });
@@ -191,19 +191,32 @@ function build(app) {
       ui.hwBtn = iconBtn('bolt', 'Mostrar placas, pernos y soldaduras', () => { const nd = E.conn().node; nd.show_hw = !nd.show_hw; ui.hwBtn.classList.toggle('on', nd.show_hw); E.changed({}); }),
       iconBtn('download', 'Guardar imagen', async () => { const f = await native.saveFile('conexion.png', [{ name: 'Imagen PNG', extensions: ['png'] }]); if (f) { try { await call('save_png', { path: f, data: E.viewer.screenshot() }); toast('Imagen guardada', 'ok'); } catch (e) { errorBox(e); } } })));
   ui.tagBtn.classList.add('on');
+  ui.loadSel = h('select', { title: 'Caso de carga que se dibuja', onchange: () => { E.loadCase = parseInt(ui.loadSel.value, 10) || 0; applyLoads(); } });
+  ui.loadBtn = iconBtn('zap', 'Mostrar las cargas', () => { E.showLoadsOn = !E.showLoadsOn; ui.loadBtn.classList.toggle('on', E.showLoadsOn); E.viewer.setLoadsVisible(E.showLoadsOn); ui.loadSel.style.display = E.showLoadsOn ? '' : 'none'; });
+  ui.loadBtn.classList.add('on'); E.showLoadsOn = true;
+  vtool.append(h('div', { class: 'group' }, ui.loadBtn, ui.loadSel));
   ui.fembar = h('div', { class: 'vhud' });
   const center = h('div', { class: 'viewer-wrap' }, ui.vhost, vtool, ui.note, ui.fembar);
 
   // ---- panel derecho (resultados)
-  ui.right = h('div', { class: 'panel right' });
-  const body = h('div', { class: 'ed-body' }, left, center, ui.right);
+  ui.rview = h('div', { class: 'rview' });
+  ui.pview = h('div', { class: 'pview hidden' });
+  ui.right = h('div', { class: 'panel right' }, ui.rview, ui.pview);
+  ui.resizer = h('div', { class: 'resizer', title: 'Arrastre para cambiar el ancho del panel' });
+  const body = h('div', { class: 'ed-body' }, left, center, ui.resizer, ui.right);
+  ui.resizer.addEventListener('pointerdown', (ev) => {
+    ui.resizer.setPointerCapture(ev.pointerId); ui.resizer.classList.add('drag');
+    const mv = (e) => { const w = Math.max(360, Math.min(900, body.getBoundingClientRect().right - e.clientX)); body.style.setProperty('--rw', `${w}px`); };
+    const up = () => { ui.resizer.classList.remove('drag'); ui.resizer.removeEventListener('pointermove', mv); ui.resizer.removeEventListener('pointerup', up); };
+    ui.resizer.addEventListener('pointermove', mv); ui.resizer.addEventListener('pointerup', up);
+  });
 
   ui.status = h('span', { text: '' });
   ui.units = h('span', { class: 'grow', style: { textAlign: 'right' } });
   const bar = h('div', { class: 'statusbar' }, ui.status, ui.units);
   root.append(top, body, bar);
 
-  E.viewer = new Viewer(ui.vhost, { onPick: (name) => pickPart(name) });
+  E.viewer = new Viewer(ui.vhost, { onPick: (name, part) => pickPart(name, part) });
   buildRight();
 }
 
@@ -249,6 +262,7 @@ function connMenu(i, e) {
     { label: 'Eliminar', icon: 'trash', danger: true, disabled: E.conns.length < 2, onClick: async () => { if (await confirmBox(`¿Eliminar la conexión ${E.conns[i].element}?`, { danger: true, ok: 'Eliminar' })) { E.snap(); E.conns.splice(i, 1); E.idx = Math.min(E.idx, E.conns.length - 1); markDirty(); switchConn(E.idx); } } }], { x: e.clientX, y: e.clientY });
 }
 function switchConn(i) {
+  if (E.panel) E.panel.close('switch');
   E.idx = i; E.sel = null; E.res = null; E.femView = false; applyUnits(); refreshAll();
 }
 
@@ -303,7 +317,7 @@ function renderTree() {
   const members = [{ name: nd.main_name, shape: nd.main_shape, main: true }, ...nd.members.map((m) => ({ name: m.name, shape: m.shape }))];
   const ml = h('div', { class: 'sect' });
   for (const m of members) ml.append(item({ ic: 'component', name: m.name, sub: m.shape, star: m.main, sel: E.sel === `m:${m.name}`,
-    onClick: () => select(`m:${m.name}`), onDbl: () => openMember(E, m.name),
+    onClick: () => select(`m:${m.name}`),
     acts: [iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); openMember(E, m.name); })] }));
   box.append(ml);
   // ---- operaciones
@@ -317,7 +331,7 @@ function renderTree() {
   const draw = (o, i, depth) => {
     const node = h('div');
     node.append(item({ ic: OP_ICON[o.kind] || 'box', color: opColor(o.kind), name: `${i + 1}. ${opTitle(o)}`, sub: opSub(o), sel: E.sel === `o:${i}`, ratio: opRatio(i),
-      onClick: () => select(`o:${i}`), onDbl: () => editOperation(i),
+      onClick: () => select(`o:${i}`),
       acts: [iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); editOperation(i); }), iconBtn('trash', 'Eliminar', (e) => { e.stopPropagation(); deleteOperation(i); })] }));
     const kids = o.kind === K.PLATE ? children(i) : [];
     if (kids.length) node.append(h('div', { class: 'tree-children' }, kids.map(([c, j]) => draw(c, j, depth + 1))));
@@ -335,9 +349,14 @@ function renderTree() {
   box.scrollTop = scroll;
 }
 
-function select(sel) {
+function select(sel, open = true) {
   E.sel = sel; renderTree(); highlight();
   if (sel && sel.startsWith('o:')) scrollToGroup(parseInt(sel.slice(2), 10));
+  if (open && sel) openFor(sel);
+}
+function openFor(sel) {
+  if (sel.startsWith('m:')) openMember(E, sel.slice(2));
+  else if (sel.startsWith('o:')) editOperation(parseInt(sel.slice(2), 10));
 }
 function highlight() {
   if (!E.viewer) return;
@@ -359,13 +378,17 @@ function highlight() {
   }
   E.viewer.select(names.filter(Boolean));
 }
-function pickPart(name) {
-  const nd = E.conn().node;
+function pickPart(name, part) {
+  const nd = E.conn().node, K = S.C.op;
   if (!name) { E.sel = null; renderTree(); highlight(); return; }
   if (name === nd.main_name || nd.members.some((m) => m.name === name)) return select(`m:${name}`);
-  const oi = nd.operations.findIndex((o) => o.name === name);
+  const oi = nd.operations.findIndex((o) => o.name === name && o.kind === K.PLATE);
   if (oi >= 0) return select(`o:${oi}`);
-  const part = E.viewer.parts.find((p) => p.name === name);
+  const owner = part ? part.owner : '';
+  if (owner === 'op:base') { const bi = nd.operations.findIndex((o) => o.kind === K.BASE); if (bi >= 0) return select(`o:${bi}`); }
+  if (owner && owner.startsWith('op:')) return select(`o:${parseInt(owner.slice(3), 10)}`);
+  if (owner) { const ci = nd.operations.findIndex((o) => o.member === owner && S.C.ops.connection.includes(o.kind)); if (ci >= 0) return select(`o:${ci}`); }
+  if (part && part.kind === 'gusset') { const gi = nd.operations.findIndex((o) => o.kind === K.GUSSET || o.kind === K.GUSSET_W); if (gi >= 0) return select(`o:${gi}`); }
   if (part && part.label) setStatus(part.label);
 }
 
@@ -461,11 +484,12 @@ function setVerdict(state, msg) {
   else if (r) { cls = 'stale'; txt = `Desactualizado · último D/C ${r.max_ratio.toFixed(3)}`; ic = 'refresh-cw'; }
   v.className = `big-chip ${cls}`; v.replaceChildren(svg(ic, 16), h('span', { text: txt }));
   if (E.ui.vbadge) { E.ui.vbadge.className = `big-chip ${cls}`; E.ui.vbadge.replaceChildren(svg(ic, 16), h('span', { text: txt })); }
+  if (E.ui.pchip) { E.ui.pchip.className = `big-chip ${cls}`; E.ui.pchip.style.height = '26px'; E.ui.pchip.style.padding = '0 10px'; E.ui.pchip.style.fontSize = '12px'; E.ui.pchip.replaceChildren(h('span', { text: txt })); }
 }
 
 // ---------------------------------------------------------------------------------------------------- panel derecho
 function buildRight() {
-  const right = E.ui.right; clear(right);
+  const right = E.ui.rview; clear(right);
   const hasBase = E.conn().node.operations.some((o) => o.kind === S.C.op.BASE);
   E.ui.vbadge = h('span', { class: 'big-chip idle' });
   const items = [
@@ -476,10 +500,42 @@ function buildRight() {
   if (hasBase) items.push({ id: 'fem', label: 'FEM', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
   const t = tabs(items, { active: E.ui.rtab && items.some((i) => i.id === E.ui.rtab) ? E.ui.rtab : 'res', cls: 'pill', onChange: (id) => { E.ui.rtab = id; } });
   E.ui.rtabs = t;
+  const calc = btn('Calcular', { icon: 'play', kind: 'primary', onClick: () => runVerify.flush() });
+  calc.classList.add('calc');
+  const memTab = t.querySelector('.tab[data-id="mem"]');
+  if (memTab) memTab.before(calc); else t.querySelector('.tabbar').append(calc);
   right.append(h('div', { style: { padding: '10px 12px 4px', display: 'flex', gap: '8px', alignItems: 'center' } }, E.ui.vbadge), t);
   t.style.padding = '0 8px';
   setVerdict();
 }
+
+// ---- edicion en el panel derecho (operaciones y miembros): reemplaza las ventanas que tapaban el visor
+E.panel = null;
+E.showPanel = ({ title, icon: ic, color, body, footer, onClose }) => {
+  if (E.panel) E.panel.close('switch');
+  const ui = E.ui;
+  clear(ui.pview);
+  const chip = h('span', { class: 'big-chip idle', style: { height: '26px', padding: '0 10px', fontSize: '12px', boxShadow: 'none' } });
+  ui.pchip = chip;
+  const closeBtn = iconBtn('x', 'Cerrar (conserva los cambios)', () => api.close('close'));
+  const head = h('div', { class: 'pedit' }, color ? h('span', { class: 'dot', style: { background: color, width: '11px', height: '11px', borderRadius: '4px' } }) : svg(ic || 'wrench', 18), h('h3', { text: title }), chip, closeBtn);
+  ui.pview.append(head, h('div', { class: 'scroll pbody' }, body));
+  if (footer && footer.length) ui.pview.append(h('div', { class: 'pfoot' }, footer));
+  ui.rview.classList.add('hidden'); ui.pview.classList.remove('hidden');
+  let closed = false;
+  const api = {
+    body,
+    close(reason = 'close') {
+      if (closed) return; closed = true;
+      if (E.panel === api) E.panel = null;
+      if (reason !== 'switch') { ui.pview.classList.add('hidden'); ui.rview.classList.remove('hidden'); clear(ui.pview); ui.pchip = null; }
+      if (onClose) onClose(reason);
+    },
+  };
+  E.panel = api;
+  setVerdict();
+  return api;
+};
 
 function scrollToGroup(i) {
   if (!E.ui.rtabs) return;
@@ -488,8 +544,9 @@ function scrollToGroup(i) {
   if (el) { el.classList.remove('closed'); el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.animate([{ background: 'var(--brand-50)' }, { background: 'transparent' }], { duration: 1200 }); }
 }
 
-function renderResults(err) {
-  const box = E.ui.resBox; if (!box) return;
+function renderResults(err) { if (E.ui.resBox) fillResults(E.ui.resBox, err); }
+
+function fillResults(box, err, { forceOpen = false, pick = true } = {}) {
   clear(box);
   const r = E.res;
   const us = S.us;
@@ -515,14 +572,14 @@ function renderResults(err) {
     const evaluated = list.filter((c) => !c.skip);
     const max = evaluated.length ? Math.max(...evaluated.map((c) => c.ratio)) : null;
     const ok = max == null || max <= 1 + 1e-9;
-    const gh = h('div', { class: 'gh', onclick: () => { grp.classList.toggle('closed'); if (oi >= 0) select(`o:${oi}`); } },
+    const gh = h('div', { class: 'gh', onclick: () => { grp.classList.toggle('closed'); if (pick && oi >= 0) select(`o:${oi}`); } },
       o ? h('span', { class: 'dot', style: { background: opColor(o.kind), width: '9px', height: '9px', borderRadius: '3px', flex: 'none' } }) : svg('check', 15),
       h('span', { class: 'name', text: g }), max != null ? dcBar(max) : chip('sin evaluar', ''), svg('chevron-down', 14));
     const gb = h('div', { class: 'gb' }, list.map((c) => h('div', { class: `chk ${c.skip ? 'na' : ''}` },
       h('div', { class: 't', text: c.title }), c.ref ? h('div', { class: 'r', text: c.ref }) : null,
       c.skip ? h('div', { class: 'v', text: c.note || 'No evaluado' }) : h('div', { class: 'v', text: `${fmt(c.demand)} ${c.unit || ''} ≤ ${fmt(c.capacity)} ${c.unit || ''}` }),
       h('div', { class: 'dcw' }, dcBar(c.ratio, c.skip)))));
-    const grp = h('div', { class: `res-group ${ok ? 'closed' : ''}`, dataset: { op: String(oi) } }, gh, gb);
+    const grp = h('div', { class: `res-group ${ok || forceOpen ? (forceOpen ? '' : 'closed') : ''}`, dataset: { op: String(oi) } }, gh, gb);
     box.append(grp);
   }
   if (r.combos && r.combos.length > 1) box.append(combosTable(r));
@@ -534,6 +591,23 @@ function combosTable(r) {
   const tb = h('table', { class: 't compact' }, h('thead', null, h('tr', null, h('th', { text: 'Combinación' }), h('th', { class: 'num', text: 'D/C' }))),
     h('tbody', null, r.combos.map((row, i) => h('tr', { class: i === r.combo_gov ? 'sel' : '' }, h('td', { text: Array.isArray(row) ? row[0] : (row.name ?? String(i + 1)) }), h('td', { class: 'num', text: Array.isArray(row) ? Number(row[row.length - 1]).toFixed(3) : Number(row.ratio ?? row.dc ?? 0).toFixed(3) })))));
   return h('div', { class: 'res-group', style: { marginTop: '10px' } }, h('div', { class: 'gh' }, svg('list', 15), h('span', { class: 'name', text: 'Combinaciones de carga' })), h('div', { class: 'gb' }, tb));
+}
+
+const FORCE_COL = { member: '#d62728', ext: '#c0392b', main: '#d62728', reaction: '#1e8449', base: '#e8731a' };
+function applyLoads() {
+  const v = E.viewer; if (!v) return;
+  const a = E.nodal, us = S.us, sel = E.ui.loadSel;
+  if (sel) {
+    const n = a ? a.cases.length : 0;
+    if (sel.options.length !== n) { sel.replaceChildren(...(a ? a.cases : []).map((c, i) => h('option', { value: String(i), text: c.case }))); }
+    E.loadCase = Math.min(E.loadCase || 0, Math.max(n - 1, 0)); sel.value = String(E.loadCase);
+    sel.style.display = n && E.showLoadsOn ? '' : 'none';
+  }
+  if (!a || !a.cases.length || E.femView) { v.setLoads([]); return; }
+  const c = a.cases[Math.min(E.loadCase || 0, a.cases.length - 1)];
+  const nrm = (x) => Math.hypot(x[0], x[1], x[2]);
+  v.setLoads(c.draw.map((d) => ({ pos: d.pos, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
+    textF: nrm(d.F) > 1e-9 ? `${d.name}: ${us.q('F', nrm(d.F), 2)}` : '', textM: nrm(d.M) > 1e-9 ? `${d.name}: ${us.q('M', nrm(d.M), 1)}` : '' })));
 }
 
 function renderNodal() {
@@ -630,7 +704,30 @@ function colorbar(cb) {
     h('div', { style: { display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: '11.5px' } }, h('b', { text: cb.title }), h('span', { text: fmt(cb.vmax) }), h('span', { text: fmt((cb.vmax + cb.vmin) / 2) }), h('span', { text: fmt(cb.vmin) })));
 }
 
+// ---------------------------------------------------------------------------------------------------- informe (ventana flotante y movible)
+function openReport() {
+  if (E.report) { E.report.win.close(); return; }
+  const box = h('div', { class: 'scroll', style: { padding: '4px 14px 14px' } });
+  const mem = h('div', { class: 'memory', style: { padding: '4px 18px 18px', overflow: 'auto', flex: 1 } });
+  const nod = h('div', { class: 'scroll', style: { padding: '4px 14px 14px' } });
+  const t = tabs([
+    { id: 'res', label: 'Resultados por operación', icon: 'check', render: () => { fillResults(box, null, { forceOpen: true, pick: false }); return box; } },
+    { id: 'mem', label: 'Memoria de cálculo (fórmulas)', icon: 'file-text', render: () => { mem.innerHTML = E.res && E.res.memory ? E.res.memory : '<p class="muted" style="padding:14px">Sin memoria: calcule primero.</p>'; return mem; } },
+    { id: 'nod', label: 'Análisis nodal', icon: 'zap', render: () => { const keep = E.ui.nodBox; E.ui.nodBox = nod; renderNodal(); E.ui.nodBox = keep; return nod; } },
+  ], { cls: 'pill' });
+  t.style.flex = '1'; t.style.minHeight = '0';
+  const body = h('div', { class: 'report-dock' }, t);
+  const win = modal({ title: `Informe de cálculo — ${E.conn().name || E.conn().element}`, icon: 'file-text', width: 880, floating: true, pos: { x: Math.max(20, innerWidth - 920), y: 64 }, body,
+    footer: [btn('PDF…', { icon: 'file-down', onClick: () => exportReport('pdf') }), btn('Word…', { icon: 'file-down', onClick: () => exportReport('docx') }), btn('STEP…', { icon: 'box', onClick: exportStep }), h('span', { class: 'grow' }),
+      btn('Cerrar', { onClick: () => win.close() })],
+    onClose: () => { E.report = null; } });
+  win.el.style.height = '70vh';
+  win.body.style.padding = '0'; win.body.style.display = 'flex';
+  E.report = { win, refresh: () => { if (!E.report) return; const cur = t.current(); t.show(cur); } };
+}
+
 // ---------------------------------------------------------------------------------------------------- informes
+
 async function exportReport(format) {
   const c = E.conn();
   const f = await native.saveFile(`${c.name || 'conexion'}_${c.element || ''}.${format}`, [{ name: format === 'pdf' ? 'PDF' : 'Word', extensions: [format] }]);
