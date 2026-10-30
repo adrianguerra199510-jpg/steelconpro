@@ -53,6 +53,15 @@ const os = require('os');
     await wait(2500);
     await page.screenshot({ path: path.join(shots, 'fem_2_malla.png') });
   });
+  await step('fembase', async () => {
+    await home(); await open('CN-04');
+    await page.click('.tabbar >> text=FEM');
+    await wait(800);
+    await page.locator('text=Ver malla en el visor').nth(1).click();
+    for (let i = 0; i < 90; i++) { if (await page.evaluate(() => /Malla: /.test(document.body.innerText))) break; await wait(1000); }
+    await wait(2500);
+    await page.screenshot({ path: path.join(shots, 'fem_3_malla_placa_base.png') });
+  });
   console.log(errors.length ? 'Errores: ' + errors.slice(0, 5).join(' | ') : 'sin errores de consola');
   await app.close();
 })();

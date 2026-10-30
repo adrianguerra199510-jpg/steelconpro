@@ -621,6 +621,93 @@ def job_cancel(args) -> dict:
     return {"ok": True}
 
 
+BASE_MESH = {}                                                      # sig3d -> (Result3D con la malla, proyecto de la combinacion)
+
+
+def fem_base_mesh_start(args) -> dict:
+    """Genera solo la malla (Gmsh) de la placa base para una combinacion, para verla en el visor."""
+    from . import mesh3d
+    from .view3d import Result3D, read_mesh_inp, skin, classify_parts
+    p = _prj(args["connection"])
+    if p.node.base_op() is None:
+        raise ApiError("La conexion no tiene la operacion de placa base.")
+    q = BP.derive(p, p.node).with_combo(int(args.get("combo", 0)))
+    jid = uuid.uuid4().hex[:10]
+    job = {"id": jid, "state": "running", "messages": [], "done": False, "error": "", "cancel": None}
+    JOBS[jid] = job
+    sig = q.sig3d()
+    if sig in BASE_MESH and not args.get("force"):
+        job.update(state="done", done=True)
+        return {"job": jid}
+    tok = mesh3d.CancelToken()
+    job["cancel"] = tok
+    base = Path(args.get("folder") or os.path.join(os.path.expanduser("~"), "SteelConPro", "fem"))
+    folder = base / f"{p.element or 'placa'}_malla_base"
+
+    def run():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            lc = mesh3d.mesh_size_for(q)
+            job["messages"].append("1/2  Escribiendo la geometria solida ...")
+            geo = str(folder / "malla.geo")
+            mesh3d.export_3d(q, geo, lc)
+            job["messages"].append(f"2/2  Mallando con Gmsh (elemento de {lc:.2f} in) ...")
+            ok, out, mesh_inp = mesh3d.run_gmsh(geo, cancel=tok)
+            if tok.cancelled:
+                job.update(state="cancelled", done=True)
+                return
+            if not ok:
+                job.update(state="error", error="Gmsh no genero la malla.\n\n" + out[-2000:], done=True)
+                return
+            mesh3d._strip_shells(mesh_inp)
+            nodes, elems = read_mesh_inp(mesh_inp)
+            r = Result3D()
+            r.nodes, r.elems, r.tris, r.ok = nodes, elems, skin(elems), True
+            r.n_nodes, r.n_elems = len(nodes), len(elems)
+            r.parts = classify_parts(r, q)
+            BASE_MESH[sig] = (r, q)
+            job.update(state="done", done=True)
+        except Exception as e:                                                  # noqa: BLE001
+            job.update(state="error", error=f"{type(e).__name__}: {e}", done=True)
+            job["trace"] = traceback.format_exc()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job": jid}
+
+
+def fem_base_mesh_scene(args) -> dict:
+    """Escena de la malla de la placa base (piel de cada pieza con todas sus aristas)."""
+    from .view3d import PART_LABELS
+    from .conn.fem.model3d import COLORS
+    from .scene3d import Scene
+    p = _prj(args["connection"])
+    q = BP.derive(p, p.node).with_combo(int(args.get("combo", 0)))
+    ent = BASE_MESH.get(q.sig3d())
+    if ent is None:
+        raise ApiError("No hay una malla vigente de esa combinacion: genérela primero (los cambios en la placa base la invalidan).")
+    res = ent[0]
+    kl = q.units().fl
+    colors = {"plate": COLORS["plate"], "column": COLORS["column"], "stiff": COLORS["stiff"], "lug": "#a6a6a6", "washer": "#d9d9d9"}
+    only = args.get("part", "all")
+    sc = Scene()
+    pts = []
+    for key, tris in res.parts.items():
+        if only != "all" and key != only:
+            continue
+        faces = [[tuple(np.asarray(res.nodes[n], float) / kl) for n in t] for t in tris]
+        pts += [c for f in faces for c in f]
+        sc.group = "mesh_" + key
+        sc.add_faces(faces, FS._rgb(colors.get(key, "#bbbbbb")), 1.0, edges=True, all_edges=True)
+    sc.group = "other"
+    sc.pts = pts
+    d = {"parts": [_scene_to_json(sc, "Malla", "fem")], "message": ""}
+    P = np.asarray(pts, float).reshape(-1, 3) if pts else np.zeros((1, 3))
+    d["bounds"] = [P.min(axis=0).tolist(), P.max(axis=0).tolist()]
+    d["mesh"] = {"nodes": int(res.n_nodes), "elements": int(res.n_elems), "parts": []}
+    d["parts_list"] = [{"id": "all", "label": "Todo el conjunto"}] + [{"id": k, "label": PART_LABELS.get(k, k)} for k in res.parts]
+    return d
+
+
 def fem_scene(args) -> dict:
     """Escena (mallas con color por vertice) del campo de resultados del analisis FEM de la placa base, para el visor."""
     from . import scene3d

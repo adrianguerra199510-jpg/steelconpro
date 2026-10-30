@@ -663,7 +663,7 @@ function renderFem() {
   if (hasBase) box.append(h('div', { style: { height: '12px' } }), femSection('base', { title: 'Análisis sólido 3D de la placa base',
     desc: 'Mallado y análisis de la placa base con anclajes, concreto, llave de corte y rigidizadores. Sus resultados (tracción en pernos, presión de contacto, von Mises y fuerzas en la soldadura) entran al veredicto de la placa base.',
     start: () => call('fem_start', { connection: E.conn() }), scene: (st) => call('fem_scene', { connection: E.conn(), combo: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
-    cases: () => E.conn().combos.map((x, i) => ({ value: String(i), label: x.name })), caseLabel: 'Combinación' }));
+    cases: () => E.conn().combos.map((x, i) => ({ value: String(i), label: x.name })), caseLabel: 'Combinación', mesh: true, meshApi: ['fem_base_mesh_start', 'fem_base_mesh_scene', 'combo'] }));
 }
 // opciones del análisis FEM del nudo (se guardan con la conexión: conn.fea)
 function femConfig() {
@@ -689,20 +689,21 @@ async function showMesh(kind, cfg, status) {
   const st = E.fems[kind];
   try {
     status.textContent = 'Generando la malla…';
-    const r = await call('fem_mesh_start', { connection: E.conn(), case: parseInt(st.combo, 10) || 0, force: false });
+    const [startFn, sceneFn, key] = cfg.meshApi || ['fem_mesh_start', 'fem_mesh_scene', 'case'];
+    const r = await call(startFn, { connection: E.conn(), [key]: parseInt(st.combo, 10) || 0, force: false });
     for (;;) {
       const j = await call('job_status', { job: r.job });
       status.textContent = j.message || 'Generando la malla…';
       if (j.done) { if (j.state !== 'done') throw new Error(j.error || 'No se pudo generar la malla.'); break; }
       await new Promise((ok) => setTimeout(ok, 800));
     }
-    const d = await call('fem_mesh_scene', { connection: E.conn(), case: parseInt(st.combo, 10) || 0, part: st.meshPart || 'all' });
+    const d = await call(sceneFn, { connection: E.conn(), [key]: parseInt(st.combo, 10) || 0, part: st.meshPart || 'all' });
     E.femView = true;
     E.viewer.setModel(d, { keepView: true });
     E.viewer.setLoads([]);
     clear(E.ui.fembar);
     st.meshParts = d.parts_list;
-    status.textContent = `Malla: ${d.mesh.nodes.toLocaleString('es')} nodos · ${d.mesh.elements.toLocaleString('es')} elementos tetraédricos de 10 nodos`;
+    status.textContent = `Malla: ${d.mesh.nodes.toLocaleString('es')} nodos · ${d.mesh.elements.toLocaleString('es')} elementos tetraédricos`;
     setStatus(status.textContent);
   } catch (e) { status.textContent = ''; errorBox(e); }
 }
