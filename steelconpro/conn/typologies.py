@@ -75,7 +75,8 @@ def build_nodo(kind: str, params: dict | None = None) -> Nodo:
         for k, (az, el) in enumerate(plan[:int(v["n_braces"])]):
             nd.members.append(_member(f"D{k + 1}", v["brace_shape"], az, el, 0.0, L=72.0))
             nd.operations.append(Operation(kind=OP_GUSSET, member=f"D{k + 1}", plate_t=0.5))
-        nd.loads = [Load("Caso 1", nd.main_name, N=-40.0, side=1 if not top else -1)]
+        nd.balance_end = 1 if top else -1                          # la acción de la columna sobre el nudo sale del equilibrio: no se le asignan cargas
+        nd.loads = []
         for k, m in enumerate(nd.members):
             nd.loads.append(Load("Caso 1", m.name, N=-10.0 if k % 2 == 0 else 10.0))
         return nd
@@ -84,7 +85,7 @@ def build_nodo(kind: str, params: dict | None = None) -> Nodo:
     for k, (az, el) in enumerate(plan[:int(v["n_members"])]):
         nd.members.append(_member(f"M{k + 1}", v["brace_shape"], az, el, 0.0, L=60.0))
         nd.operations.append(Operation(kind=OP_GUSSET, member=f"M{k + 1}", plate_t=0.5))
-    nd.loads = [Load("Caso 1", nd.main_name, N=10.0, side=1)]
+    nd.loads = []                                                    # el principal pasa por el nudo: su acción sale del equilibrio
     for k, m in enumerate(nd.members):
         nd.loads.append(Load("Caso 1", m.name, N=-10.0 if k % 2 == 0 else 10.0))
     return nd

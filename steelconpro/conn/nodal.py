@@ -25,7 +25,10 @@ KEYS = ("N", "Vy", "Vz", "T", "My", "Mz")
 def cases_of(nd: Nodo):
     """[(caso, [Load])] en orden de aparicion."""
     out = {}
+    intermediate = nd.end_index == 0                         # el principal pasa por el nudo: sus lados los da el equilibrio, no se le asignan cargas
     for x in nd.loads:
+        if intermediate and x.member == nd.main_name:
+            continue
         out.setdefault(x.case, []).append(x)
     return list(out.items())
 

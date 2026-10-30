@@ -94,19 +94,26 @@ export function openLoads(E) {
   E.snap();
   const before = JSON.stringify([nd.loads, nd.balance_end]);
   const NODE = '@nudo';
-  const names = () => [{ value: nd.main_name, label: `${nd.main_name} (principal)` }, ...nd.members.map((x) => ({ value: x.name, label: x.name })), { value: NODE, label: 'Carga externa en el nudo (ejes globales)' }];
+  const intermediate = () => !nd.main_end || nd.main_end === S.C.end_labels[0];      // el principal pasa por el nudo: no lleva cargas (su acción sale del equilibrio)
+  const names = () => [...(intermediate() ? [] : [{ value: nd.main_name, label: `${nd.main_name} (principal)` }]), ...nd.members.map((x) => ({ value: x.name, label: x.name })), { value: NODE, label: 'Carga externa en el nudo (ejes globales)' }];
   const cols = [['N', 'F'], ['Vy', 'F'], ['Vz', 'F'], ['T', 'M'], ['My', 'M'], ['Mz', 'M']];
   const tb = h('tbody');
   const sideLbl = (v) => (v < 0 ? 'Lado −' : v > 0 ? 'Lado +' : 'Auto');
+  const off_ = (l) => l.member === nd.main_name && intermediate();
   const draw = () => {
     tb.replaceChildren();
     nd.loads.forEach((l, i) => {
-      const tr = h('tr');
+      const tr = h('tr', { title: off_(l) ? 'Nudo intermedio: el miembro principal no lleva cargas; se ignora esta fila' : '' });
       const isMain = l.member === nd.main_name;
+      const off = isMain && intermediate();
       tr.append(h('td', null, textInput({ value: l.case, onChange: (v) => { l.case = v; E.changed({ loads: true }); } })),
         h('td', null, selectInput({ value: l.member, options: names(), onChange: (v) => { l.member = v; if (v !== nd.main_name) l.side = 0; draw(); E.changed({ loads: true }); } })),
         h('td', null, isMain ? selectInput({ value: String(l.side || 0), options: [{ value: '0', label: 'Auto (el opuesto)' }, { value: '-1', label: 'Lado −' }, { value: '1', label: 'Lado +' }], onChange: (v) => { l.side = parseInt(v, 10); E.changed({ loads: true }); } }) : null));
-      for (const [k, u] of cols) tr.append(h('td', { class: 'num' }, numInput({ value: us.out(u, l[k]), dec: us.dec(u === 'M' ? 'F' : u), onChange: (v) => { l[k] = us.inn(u, v); E.changed({ loads: true }); } })));
+      for (const [k, u] of cols) {
+        const inp = numInput({ value: us.out(u, l[k]), dec: us.dec(u === 'M' ? 'F' : u), onChange: (v) => { l[k] = us.inn(u, v); E.changed({ loads: true }); } });
+        if (off) { const i_ = inp.querySelector('input'); if (i_) { i_.disabled = true; i_.title = 'Nudo intermedio: el miembro principal no lleva cargas'; } inp.style.opacity = '0.45'; }
+        tr.append(h('td', { class: 'num' }, inp));
+      }
       tr.append(h('td', null, iconBtn('trash', 'Quitar', () => { nd.loads.splice(i, 1); draw(); E.changed({ loads: true }); })));
       tb.append(tr);
     });
@@ -117,7 +124,7 @@ export function openLoads(E) {
   const balSel = selectInput({ value: String(nd.balance_end ?? -1), options: [{ value: '-1', label: `Lado − de «${nd.main_name}»` }, { value: '1', label: `Lado + de «${nd.main_name}»` }], onChange: (v) => { nd.balance_end = parseInt(v, 10); E.changed({ loads: true }); } });
   const body = h('div', { class: 'col gap-12' },
     h('p', { class: 'hint-text', text: 'Análisis nodal: escriba la ACCIÓN DE CADA MIEMBRO SOBRE EL NUDO en su extremo junto al nudo, en sus ejes locales (x a lo largo del miembro hacia afuera del nudo, N > 0 = tracción; z el peralte; y = z × x). '
-      + 'Una carga externa aplicada al nudo se escribe en ejes globales (N = Fx, Vy = Fy, Vz = Fz, T = Mx). El miembro principal da sus cargas en un lado; la acción en el otro lado (el que equilibra) se calcula por equilibrio de fuerzas y momentos del nudo '
+      + 'Una carga externa aplicada al nudo se escribe en ejes globales (N = Fx, Vy = Fy, Vz = Fz, T = Mx). En un nudo intermedio (el principal pasa por el nudo) el principal no lleva cargas: su acción sale del equilibrio de fuerzas y momentos. Si el principal termina en el nudo (placa base o nudo superior), se le da la carga de su extremo libre; la del lado que equilibra se calcula '
       + 'y de ella salen las combinaciones de la placa base.' }),
     h('div', { class: 'card-sec' }, h('div', { class: 'form-grid' }, field('Lado del principal que equilibra el nudo', balSel))),
     h('div', { style: { overflow: 'auto' } }, h('table', { class: 't compact' }, h('thead', null, head), tb)),
