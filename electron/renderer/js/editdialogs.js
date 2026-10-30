@@ -54,7 +54,7 @@ export async function openMember(E, name) {
     items.push({ path: 'main_end', label: 'Extremo', type: 'combo', items: C.end_labels }, num('Largo del lado − (abajo si es vertical)', 'main_len_neg', 'L', 0, 4000), num('Largo del lado +', 'main_len_pos', 'L', 0, 4000));
   } else {
     items.push(num('Posición sobre el principal', 'pos', 'L', -4000, 4000, null, null, 'Medida desde el nudo, a lo largo del eje del principal.'), num('Desplazamiento (peralte del principal)', 'off', 'L', -400, 400),
-      num('Desplazamiento (ancho del principal)', 'off2', 'L', -400, 400), num('Largo dibujado', 'L', 'L', 1, 4000), num('Retranqueo del extremo', 'gap', 'L', 0, 48));
+      num('Desplazamiento (ancho del principal)', 'off2', 'L', -400, 400), num('Largo dibujado', 'L', 'L', 1, 4000), num('Desplazamiento sobre su eje (+ hacia atrás)', 'gap', 'L', -120, 240));
   }
   body.append(h('div', { class: 'card-sec' }, h('h4', { text: isMain ? 'Miembro principal' : 'Miembro conectado' }), h('div', { class: 'form-grid' }, field('Nombre', nameInp)),
     h('div', { style: { height: '10px' } }), renderItems(items, ctx)));

@@ -178,9 +178,7 @@ function build(app) {
 
   // ---- panel izquierdo (árbol)
   ui.tree = h('div', { class: 'scroll' });
-  const addBtn = btn('Agregar operación', { icon: 'plus', kind: 'primary', onClick: (e) => addMenu(e.currentTarget) });
-  addBtn.classList.add('add-menu-btn');
-  const left = h('div', { class: 'panel left' }, ui.tree, h('div', { style: { padding: '8px 0 12px', borderTop: '1px solid var(--border)' } }, addBtn));
+  const left = h('div', { class: 'panel left' }, ui.tree);
 
   // ---- visor
   ui.vhost = h('div', { class: 'viewer' });
@@ -327,7 +325,7 @@ function renderTree() {
     acts: [iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); openMember(E, m.name); })] }));
   box.append(ml);
   // ---- operaciones
-  box.append(sec('Operaciones', 'wrench'));
+  box.append(sec('Operaciones', 'wrench', iconBtn('plus', 'Agregar operación', (e) => addMenu(e.currentTarget))));
   const ol = h('div', { class: 'sect' });
   const ops = nd.operations;
     const plateIdx = (name) => ops.findIndex((p) => (p.kind === K.PLATE || p.kind === K.ANGLE) && p.name === name);
@@ -337,7 +335,8 @@ function renderTree() {
     const node = h('div');
     node.append(item({ ic: OP_ICON[o.kind] || 'box', color: opColor(o.kind), name: `${i + 1}. ${opTitle(o)}`, sub: opSub(o), sel: E.sel === `o:${i}`, ratio: opRatio(i),
       onClick: () => select(`o:${i}`),
-      acts: [iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); editOperation(i); }), iconBtn('trash', 'Eliminar', (e) => { e.stopPropagation(); deleteOperation(i); })] }));
+      acts: [iconBtn('chevron-up', 'Subir (se aplica antes)', (e) => { e.stopPropagation(); moveOperation(i, -1); }), iconBtn('chevron-down', 'Bajar (se aplica después)', (e) => { e.stopPropagation(); moveOperation(i, 1); }),
+        iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); editOperation(i); }), iconBtn('trash', 'Eliminar', (e) => { e.stopPropagation(); deleteOperation(i); })] }));
     const kids = (o.kind === K.PLATE || o.kind === K.ANGLE) ? children(i) : [];
     if (kids.length) node.append(h('div', { class: 'tree-children' }, kids.map(([c, j]) => draw(c, j, depth + 1))));
     return node;
@@ -451,7 +450,6 @@ async function createOperation(kind) {
     const r = await call('add_operation', { connection: E.conn(), kind, params });
     E.replaceConn(r.connection);
     E.sel = `o:${r.index}`;
-    if (E.conn().node.operations.length <= before && kind !== K.BASE) toast(`La nueva operación reemplaza la conexión que ya tenía «${params.member}».`, 'info', 5000);
     E.changed({ structure: true });
     const ok = await openOperation(E, r.index, { isNew: true });
     if (!ok) { revertSnap(); return; }
@@ -467,6 +465,17 @@ async function editOperation(i) {
   if (JSON.stringify(E.conn()) === before) E.dropSnap();
   else E.changed({ structure: true });
   renderTree();
+}
+
+// las operaciones se aplican en el orden de la lista: una posterior puede apoyarse en lo que dejó una anterior
+function moveOperation(i, d) {
+  const ops = E.conn().node.operations;
+  const j = i + d;
+  if (j < 0 || j >= ops.length) return;
+  E.snap();
+  [ops[i], ops[j]] = [ops[j], ops[i]];
+  E.sel = `o:${j}`;
+  E.changed({ structure: true });
 }
 
 async function deleteOperation(i) {
@@ -492,9 +501,9 @@ function setVerdict(state, msg) {
   let cls = 'idle', txt = 'Sin calcular', ic = 'circle-help';
   if (state === 'calc') { cls = 'idle'; txt = 'Calculando…'; ic = 'loader'; }
   else if (state === 'error') { cls = 'bad'; txt = msg || 'Error'; ic = 'circle-alert'; }
-  else if (r && !E.stale && state !== 'stale' && !r.checks.length) { cls = 'idle'; txt = 'Sin verificaciones'; ic = 'circle-help'; }
+  else if (r && !E.stale && state !== 'stale' && (!r.checks.length || !(r.max_ratio > 0))) { cls = 'idle'; txt = 'Sin verificaciones'; ic = 'circle-help'; }
   else if (r && !E.stale && state !== 'stale') { cls = r.ok ? 'ok' : 'bad'; txt = `${r.ok ? 'CUMPLE' : 'NO CUMPLE'} · D/C máx ${r.max_ratio.toFixed(3)}`; ic = r.ok ? 'check' : 'circle-alert'; }
-  else if (r) { cls = 'stale'; txt = `Desactualizado · último D/C ${r.max_ratio.toFixed(3)}`; ic = 'refresh-cw'; }
+  else if (r) { cls = 'stale'; txt = 'Desactualizado: calcule de nuevo'; ic = 'refresh-cw'; }
   v.className = `big-chip ${cls}`; v.replaceChildren(svg(ic, 16), h('span', { text: txt }));
   if (E.ui.vbadge) { E.ui.vbadge.className = `big-chip ${cls}`; E.ui.vbadge.replaceChildren(svg(ic, 16), h('span', { text: txt })); }
   if (E.ui.pchip) { E.ui.pchip.className = `big-chip ${cls}`; E.ui.pchip.style.height = '26px'; E.ui.pchip.style.padding = '0 10px'; E.ui.pchip.style.fontSize = '12px'; E.ui.pchip.replaceChildren(h('span', { text: txt })); }

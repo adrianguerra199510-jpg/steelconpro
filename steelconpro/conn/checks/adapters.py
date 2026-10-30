@@ -16,7 +16,7 @@ from ... import materials as M
 from ...design import Check
 from ...explain import Recorder
 from ...shapes import CATALOG, W_SHAPE
-from ..assembly import attach_info
+from ..assembly import attach_info, gap_eff
 from ..specs import (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Operation, Member)
 from .specs import ShearTab, DoubleAngle, Seated, EndPlate, SUP_KINDS
 from . import shear_tab, double_angle, seated, endplate, generic
@@ -100,24 +100,24 @@ def build_items(nd: Nodo):
         if op.kind in (OP_TAB, OP_WELD):
             from ..assembly import tab_dims
             from ..common import bolt_db
-            n_, s_, cols_, g_, H_, W_, a_ = tab_dims(op, m, beam, bolt_db(op.bolt_size)) if beam is not None else (max(int(op.n_bolts), 2), op.bolt_s, 1, 3.0, 9.0, 5.0, m.gap + 2.5)
+            n_, s_, cols_, g_, H_, W_, a_ = tab_dims(op, m, beam, bolt_db(op.bolt_size)) if beam is not None else (max(int(op.n_bolts), 2), op.bolt_s, 1, 3.0, 9.0, 5.0, gap_eff(m) + 2.5)
             n_ = max(n_, 2)
             spec = ShearTab(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,
                             bolt_size=op.bolt_size, bolt_grade=op.bolt_grade, n=n_, s=s_, a=a_, cols=cols_, gage=g_,
                             lev_p=max((H_ - (n_ - 1) * s_) / 2.0, 0.25), leh_p=max(W_ - a_ - (cols_ - 1) * g_, 0.25),
-                            tp=op.plate_t, plate_steel=op.plate_steel, gap=m.gap, weld_size=op.weld_size, **cp)
+                            tp=op.plate_t, plate_steel=op.plate_steel, gap=gap_eff(m), weld_size=op.weld_size, **cp)
             items.append(Item(op, m, "shear", spec, None, engine=shear_tab))
             if op.kind == OP_WELD:                                  # alas soldadas: ademas de la placa del alma, la fuerza de las alas
                 items.append(Item(op, m, "flange", None, None, engine=generic))
         elif op.kind == OP_DANG:
             spec = DoubleAngle(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,
                                angle=_angle_label(op.plate_t), angle_steel=op.plate_steel, bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
-                               n=max(int(op.n_bolts), 2), s=op.bolt_s, L_ang=(op.dang_H if op.dang_H > 0 else (max(int(op.n_bolts), 2) - 1) * op.bolt_s + 3.0), gap=m.gap, weld_size=op.weld_size, **cp)
+                               n=max(int(op.n_bolts), 2), s=op.bolt_s, L_ang=(op.dang_H if op.dang_H > 0 else (max(int(op.n_bolts), 2) - 1) * op.bolt_s + 3.0), gap=gap_eff(m), weld_size=op.weld_size, **cp)
             items.append(Item(op, m, "shear", spec, None, engine=double_angle))
         elif op.kind == OP_SEAT:
             spec = Seated(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,
                           angle=_seat_angle_label(op.plate_t), angle_steel=op.plate_steel, bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
-                          setback=max(m.gap, 0.5), L_seat=(op.seat_W if op.seat_W > 0 else min(max(beam.bf if beam is not None else 8.0, 4.0), 12.0)))
+                          setback=max(gap_eff(m), 0.5), L_seat=(op.seat_W if op.seat_W > 0 else min(max(beam.bf if beam is not None else 8.0, 4.0), 12.0)))
             items.append(Item(op, m, "seat", spec, None, engine=seated))
         elif op.kind in (OP_EP_FLUSH, OP_EP_EXT):
             if mshape is None or mshape.kind != W_SHAPE or info["face"] != "ala":

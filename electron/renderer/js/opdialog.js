@@ -149,13 +149,6 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     mdlRoot = trimBody(body, E, op, ctx, info, el, nd, addForm);
   }
 
-  // ---- fuerzas de diseño (operaciones generales)
-  if (isGeneric && ![K.CUT, K.HOLE, K.TRIM].includes(kind)) {
-    body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Fuerzas de diseño de esta operación (opcional)' }),
-      h('p', { class: 'hint-text', text: 'Con estas fuerzas se verifica la unión (pernos, soldadura y placa). Déjelas en cero si solo quiere ver la geometría y las verificaciones geométricas.' }),
-      addForm([numField('Cortante de diseño', 'force_V', 'F', 0, 1e6, 1), numField('Tracción de diseño', 'force_T', 'F', 0, 1e6, 1)])));
-  }
-
   // la edicion ocurre en el panel derecho (el visor queda libre): «Cerrar» (X) conserva los cambios, «Cancelar» los revierte
   return new Promise((resolve) => {
     let done = false;

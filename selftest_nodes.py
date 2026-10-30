@@ -54,11 +54,11 @@ def run():
 
     # ---------------------------------------------------------------- posiciones a mano: columna W14X90 y viga W16X31 por el ala (az = 0)
     nd = PRE.build(MODE_COL, "int1", "I", "tab")
-    nd.members[0].gap = 0.5
+    nd.members[0].gap = 0.5                       # desplazamiento sobre el eje: la viga empieza a 0.5 + 0.5 del principal
     mdl = AS.build_nodo(nd)
     x0 = float(mdl.part("V1").bbox()[0][0])
-    if abs(x0 - (d / 2.0 + 0.5)) > 1e-6:
-        FAIL.append(f"nudos: la viga debe empezar en d/2 + retranqueo = {d / 2 + 0.5:.3f}; empieza en {x0:.4f}")
+    if abs(x0 - (d / 2.0 + 1.0)) > 1e-6:
+        FAIL.append(f"nudos: la viga debe empezar en d/2 + retranqueo = {d / 2 + 1.0:.3f}; empieza en {x0:.4f}")
     zmin, zmax = float(mdl.part("Columna").bbox()[0][2]), float(mdl.part("Columna").bbox()[1][2])
     if abs(zmin + 60.0) > 1e-9 or abs(zmax - 60.0) > 1e-9:
         FAIL.append(f"nudos: columna intermedia debe ir de -60 a 60: {zmin}..{zmax}")
@@ -102,8 +102,8 @@ def run():
     mb = AS.build_nodo(nb)
     wm = CATALOG.get(nb.main_shape)
     y0 = float(mb.part("S1").bbox()[0][1])
-    if abs(y0 - (wm.tw / 2.0 + nb.members[0].gap)) > 1e-6:
-        FAIL.append(f"nudos: la secundaria debe empezar en tw/2 + retranqueo = {wm.tw / 2 + 0.5:.4f}: {y0:.4f}")
+    if abs(y0 - (wm.tw / 2.0 + 0.5 + nb.members[0].gap)) > 1e-6:
+        FAIL.append(f"nudos: la secundaria debe empezar en tw/2 + retranqueo = {wm.tw / 2 + 1.0:.4f}: {y0:.4f}")
     nb.members[0].az = 0.0
     if not AS.build_nodo(nb).notes:
         FAIL.append("nudos: un miembro paralelo al principal debe dejar una advertencia")

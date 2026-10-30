@@ -261,6 +261,8 @@ export class Viewer {
     const r = Math.max(size.length() / 2, 1e-3);
     this._center = c; this._r = r;
     const dir = this._viewDir(this.view);
+    const upv = this.view === 'plan' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);       // en planta la mirada es vertical: «arriba» de la cámara es +Y
+    this.persp.up.copy(upv); this.ortho.up.copy(upv);
     const dist = r / Math.sin((this.persp.fov * Math.PI / 180) / 2) * 1.05;
     this.persp.position.copy(c).addScaledVector(dir, dist);
     this.persp.near = dist / 100; this.persp.far = dist * 20; this.persp.updateProjectionMatrix();
@@ -277,7 +279,7 @@ export class Viewer {
   }
 
   _viewDir(v) {
-    return { iso: new THREE.Vector3(0.62, -0.78, 0.55), plan: new THREE.Vector3(0, 0.0001, 1), front: new THREE.Vector3(0, -1, 0), side: new THREE.Vector3(1, 0, 0) }[v] || new THREE.Vector3(0.62, -0.78, 0.55);
+    return { iso: new THREE.Vector3(0.62, -0.78, 0.55), plan: new THREE.Vector3(0, 0, 1), front: new THREE.Vector3(0, -1, 0), side: new THREE.Vector3(1, 0, 0) }[v] || new THREE.Vector3(0.62, -0.78, 0.55);
   }
 
   setView(v, noRender) {

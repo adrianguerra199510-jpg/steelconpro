@@ -115,7 +115,7 @@ class Member:
     off2: float = 0.0            # idem, en el sentido del ancho del principal (in)
     L: float = 48.0              # largo libre dibujado del miembro, in
     roll: float = 0.0            # giro del miembro sobre su eje, grados
-    gap: float = 0.5             # retranqueo del extremo respecto de la cara del miembro principal, in
+    gap: float = 0.0             # desplazamiento del miembro sobre su propio eje, in (+ lo aleja del principal, − lo acerca)
 
 
 @dataclass

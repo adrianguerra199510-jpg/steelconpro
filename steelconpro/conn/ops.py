@@ -636,8 +636,6 @@ def add_operation(nd, kind: str, **kw) -> Operation:
         pp = next((x for x in nd.operations if x.makes_element and x.name == o.parent), None)
         if pp is not None:
             o.pl_s, o.pl_u = pp.pl_L / 2.0, 0.0               # sobre una placa: en su centro
-    if o.is_connection:
-        nd.operations = [x for x in nd.operations if not (x.member == o.member and x.is_connection)]
     if kind == OP_BASE:
         nd.operations = [x for x in nd.operations if x.kind != OP_BASE]
     nd.operations.append(o)
@@ -692,7 +690,7 @@ def convert_to_pieces(prj, member: str) -> dict:
     ref_pos = _bolt_positions(ref, f"{member}-B")
     idx = nd.operations.index(op)
     nd.operations.remove(op)
-    m.gap = L["t"]                                                  # el extremo del miembro queda a un espesor de placa del soporte
+    m.gap = L["t"] - 0.5                                            # el extremo del miembro queda a un espesor de placa del soporte (0.5 in + desplazamiento)
     first = len(nd.operations)
     pl = add_operation(nd, OP_PLATE, parent=member, face=FACES_END[0], shape=PLATE_SHAPES[0], pl_L=L["wide"], pl_W=2.0 * L["hh"], pl_s=L["bf"] / 2.0, pl_u=0.0,
                        plate_t=L["t"], plate_steel=op.plate_steel, attach=ATTACHES[0], weld_all=False, weld_edges=[], role="Refuerzo", orient=PLATE_ORIENTS[0])

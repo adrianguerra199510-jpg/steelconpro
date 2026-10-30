@@ -116,7 +116,7 @@ def draw_scheme(fig, nd, title="", us=None):
         d2 = (float(np.dot(dv, msx)), float(np.dot(dv, msy)))
         s_ex = AS.exit_dist(ext, o2, d2)
         Q = P0 + dv * (s_ex or 0.0)
-        items.append((m.name, _silhouette(shp, Q + dv * max(m.gap, 0.0), sx, sy, dv, 0.0, max(m.L, 1.0)), "#9dc3e6", "#1f3864", False))
+        items.append((m.name, _silhouette(shp, Q + dv * __import__('steelconpro.conn.assembly', fromlist=['gap_eff']).gap_eff(m), sx, sy, dv, 0.0, max(m.L, 1.0)), "#9dc3e6", "#1f3864", False))
     allp = np.vstack([it[1] for it in items])
     fmt = FuncFormatter(lambda v, _p: f"{v / fl:g}")
     for ax, (i, j), nm, xl, yl in ((axp, (0, 1), "Planta (X–Y)", "X", "Y"), (axe, (0, 2), "Elevación (X–Z)", "X", "Z")):

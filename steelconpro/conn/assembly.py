@@ -233,13 +233,18 @@ def _n_rows(ctx, hmax, edge=1.5):
     return n, s
 
 
+def gap_eff(m) -> float:
+    """Separacion del extremo del miembro a la cara del principal para las conexiones de corte: 1/2 in más el desplazamiento sobre el eje del miembro."""
+    return max(0.5 + float(m.gap), 0.0)
+
+
 def tab_dims(op, m, shp, db):
     """Medidas de la placa simple: (filas, separacion, columnas, separacion entre columnas, alto, ancho, a) en in; `a` = distancia de la soldadura a la primera columna."""
     s = max(op.bolt_s, 3 * db * 0.8)
     n = max(1, int(op.n_bolts))
     g = max(op.bolt_g, 3 * db * 0.8)
     cols = max(1, int(getattr(op, "n_cols", 1)))
-    a = m.gap + 2.5
+    a = gap_eff(m) + 2.5
     H = op.tab_H if op.tab_H > 0 else (n - 1) * s + 3.0
     Wd = op.tab_W if op.tab_W > 0 else a + (cols - 1) * g + 1.5
     return n, s, cols, g, H, Wd, a
@@ -295,7 +300,7 @@ def _dang_geometry(ctx, tag):
     m, shp = ctx.m, ctx.shape
     t = ctx.t
     n, s = _n_rows(ctx, _clear_depth(shp))
-    sb = m.gap + 2.5
+    sb = gap_eff(m) + 2.5
     la = ctx.op.dang_la if ctx.op.dang_la > 0 else sb + 1.5
     lo = max(ctx.op.dang_lo, 1.5)
     H = ctx.op.dang_H if ctx.op.dang_H > 0 else (n - 1) * s + 3.0
@@ -322,7 +327,7 @@ def _seat_geometry(ctx, tag):
     Lh, Lv = max(ctx.op.seat_Lh, 2.0), max(ctx.op.seat_Lv, 2.0)
     W = ctx.op.seat_W if ctx.op.seat_W > 0 else min(max(shp.bf if shp.bf > 0 else 6.0, 4.0), 12.0)
     yb = -shp.d / 2.0
-    g = m.gap
+    g = gap_eff(m)
     poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh, yb - t), (Lh, yb), (-EMBED, yb)]
     pr = _plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0)        # U×V = dir×sy = -sx (simetrico)
     Fy, Fu = _steel(ctx.op.plate_steel, True)
@@ -491,7 +496,7 @@ def auto_cope_for(nd, m, op=None):
     if not info["touches"]:
         return None
     _, sx, sy = member_frame(m)
-    ct, cb, cl = auto_cope(shp, info["Q"] + info["dir"] * max(m.gap, 0.0), info["dir"], sx, sy, solids)
+    ct, cb, cl = auto_cope(shp, info["Q"] + info["dir"] * gap_eff(m), info["dir"], sx, sy, solids)
     return (ct, cb, cl) if (ct > 0 or cb > 0) else None
 
 
@@ -653,7 +658,7 @@ def set_main(nd, name) -> list:
     nd.main_name, nd.main_shape, nd.main_steel = m.name, m.shape, m.steel
     nd.main_az, nd.main_el, nd.main_roll = m.az, m.el, m.roll
     nd.main_end = END_LABELS[2]
-    nd.main_len_neg, nd.main_len_pos = 0.0, max(s_ex + max(m.gap, 0.0) + m.L, 1.0)
+    nd.main_len_neg, nd.main_len_pos = 0.0, max(s_ex + gap_eff(m) + m.L, 1.0)
     A2, msx2, msy2 = main_frame(nd)
     frm2 = (A2, msx2, msy2)
 
@@ -678,7 +683,7 @@ def set_main(nd, name) -> list:
         if Lfree < 1.0:
             continue
         az, el = _angles(dirv)
-        new_members.append(Member(name="", shape=old.main_shape, steel=old.main_steel, az=az, el=el, pos=pos, off=off, off2=off2, L=Lfree, roll=old.main_roll, gap=0.0))
+        new_members.append(Member(name="", shape=old.main_shape, steel=old.main_steel, az=az, el=el, pos=pos, off=off, off2=off2, L=Lfree, roll=old.main_roll, gap=-0.5))      # sin separación: toca al nuevo principal
         new_sides.append(sgn)
     for mm, sgn in zip(new_members, new_sides):               # un solo tramo conserva el nombre; dos llevan + y −
         mm.name = old.main_name if len(new_members) == 1 else f"{old.main_name}{'+' if sgn > 0 else '−'}"
@@ -694,7 +699,7 @@ def set_main(nd, name) -> list:
             notes.append(f"«{x.name}» no toca al nuevo principal (su eje no cruza la sección); revise su posición.")
         if gap > 1e-6 and abs(gap - x.gap) > 1e-6:
             moved.append(x.name)
-        x.gap = max(gap, 0.0)
+        x.gap = gap
     if moved:
         notes.append("Quedan separados del nuevo principal (retranqueo) para no cambiar su posición: " + ", ".join(moved)
                      + ". Acérquelos o cambie sus operaciones.")
@@ -786,32 +791,38 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         Q = P0 + dirv * s_ex
         Lm = max(min(m.L, L_cap) if L_cap else m.L, 1.0)
         ops = nd.ops_of(m.name)
-        conns = [o for o in ops if o.is_connection]
-        if len(conns) > 1:
-            mdl.notes.append(f"{m.name}: tiene {len(conns)} operaciones de conexión; se dibuja solo la primera.")
-        conn_op = conns[0] if (conns and hw) else None
-        c = _Ctx(m, conn_op, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
-        c.partname = m.name
-        c.main_name = nd.main_name
+        conns = [o for o in ops if o.is_connection] if hw else []
+        conn_op = conns[0] if conns else None
         diag = abs(m.el) >= DIAG_MIN
-        ms = max(m.gap, 0.0)                          # distancia desde Q hasta el inicio del miembro
+        ctxs_m, mss = [], []
+        for k, cop in enumerate(conns or [None]):                 # cada operacion de conexion del miembro se arma en el orden de la lista
+            c = _Ctx(m, cop, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
+            c.partname = m.name
+            c.main_name = nd.main_name
+            tag = m.name if k == 0 else f"{m.name}.{k + 1}"
+            kind = cop.kind if cop else None
+            ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
+            if kind == OP_TAB:
+                _tab_geometry(c, tag)
+            elif kind == OP_DANG:
+                _dang_geometry(c, tag)
+            elif kind == OP_SEAT:
+                _seat_geometry(c, tag)
+            elif kind == OP_EP_FLUSH:
+                ms_k = _endplate_geometry(c, tag, False)
+            elif kind == OP_EP_EXT:
+                ms_k = _endplate_geometry(c, tag, True)
+            elif kind == OP_WELD:
+                ms_k = _weld_geometry(c, tag)
+            elif kind in GUSSET_OPS:
+                _, gl, ov, hm = _gusset_outline(c)
+                ms_k = gl if kind == OP_GUSSET else gl + 0.1
+            if ms_k is not None:
+                mss.append(ms_k)
+            ctxs_m.append(c)
+        c = ctxs_m[0]
+        ms = (max(mss) + float(m.gap)) if mss else gap_eff(m)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
         tag = m.name
-        kind = conn_op.kind if conn_op else None
-        if kind == OP_TAB:
-            _tab_geometry(c, tag)
-        elif kind == OP_DANG:
-            _dang_geometry(c, tag)
-        elif kind == OP_SEAT:
-            _seat_geometry(c, tag)
-        elif kind == OP_EP_FLUSH:
-            ms = _endplate_geometry(c, tag, False)
-        elif kind == OP_EP_EXT:
-            ms = _endplate_geometry(c, tag, True)
-        elif kind == OP_WELD:
-            ms = _weld_geometry(c, tag)
-        elif kind in GUSSET_OPS:
-            _, gl, ov, hm = _gusset_outline(c)
-            ms = gl if kind == OP_GUSSET else gl + 0.1
         for o in ops:
             if o.kind == OP_CONT and hw:
                 pl = _continuity(c, nd, tag, (A, msx, msy), mshape, o.cont_t)
@@ -840,12 +851,13 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 prisms = section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, Lm)
         mdl.parts.append(Part(m.name, "brace" if diag else "beam", f"{m.name} {shp.label}", Fy_m, Fu_m, prisms, t=shp.tw, stub=True))
         mdl.parts[-1].owner = m.name
-        for p in c.parts:
-            p.owner = m.name
-            mdl.parts.append(p)
-        mdl.bolts += c.bolts
-        mdl.welds += c.welds
-        mdl.notes += c.notes
+        for c_ in ctxs_m:
+            for p in c_.parts:
+                p.owner = m.name
+                mdl.parts.append(p)
+            mdl.bolts += c_.bolts
+            mdl.welds += c_.welds
+            mdl.notes += c_.notes
         end = Q + dirv * (ms + Lm)
         mdl.tags.append((tuple(map(float, end)), m.name))
         fem_ends[m.name] = (end, dirv, max(shp.d, shp.bf) / 2.0 + 1.0)
@@ -853,7 +865,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         free_ends[m.name], frames[m.name] = (Q + dirv * ms, end, dirv), (dirv, sx, sy)
         shapes_by_name[m.name] = shp
         reg[m.name] = {"type": "miembro", "part": m.name, "t": shp.tw, "Fy": Fy_m, "Fu": Fu_m, "faces": member_faces(shp, Q + dirv * ms, end, dirv, sx, sy)}
-        ctxs.append(c)
+        ctxs.extend(ctxs_m)
     _build_gussets(ctxs, nd, mdl)
     bop = nd.base_op()
     if bop is not None and prj is not None and hw and fem is None:

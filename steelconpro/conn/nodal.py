@@ -133,7 +133,7 @@ def _base_cases(prj, nd: Nodo):
         ext = AS.outer_extent(AS.shape_of(nd.main_shape))
         d2 = (float(np.dot(A_in0, msx)), float(np.dot(A_in0, msy)))
         s_ex = AS.exit_dist(ext, o2, d2) or 0.0
-        E = P0 + A_in0 * (s_ex + max(m.gap, 0.0) + max(m.L, 1.0))
+        E = P0 + A_in0 * (s_ex + AS.gap_eff(m) + max(m.L, 1.0))
         A_in, sx, sy = -A_in0, sx0, -sy0
     rot = math.radians(float(prj.section.rotation))
     c, s = math.cos(rot), math.sin(rot)

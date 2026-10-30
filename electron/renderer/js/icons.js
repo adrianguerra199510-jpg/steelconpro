@@ -15,6 +15,7 @@ export const ICONS = {
 "download": "<path d=\"M12 15V3\" /> <path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\" /> <path d=\"m7 10 5 5 5-5\" />",
 "upload": "<path d=\"M12 3v12\" /> <path d=\"m17 8-5-5-5 5\" /> <path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\" />",
 "play": "<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\" />",
+"chevron-up": "<path d=\"m18 15-6-6-6 6\" />",
 "chevron-down": "<path d=\"m6 9 6 6 6-6\" />",
 "chevron-right": "<path d=\"m9 18 6-6-6-6\" />",
 "chevron-left": "<path d=\"m15 18-6-6 6-6\" />",
