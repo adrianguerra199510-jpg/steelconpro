@@ -132,7 +132,7 @@ def base_con_diagonal() -> Project:
     nd.main_len_pos = 72.0
     nd.members = [Member(name="D1", shape="HSS5X5X3/8", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=45.0, pos=12.0, L=72.0)]
     nd.operations = [Operation(kind=OP_GUSSET, member="D1", plate_t=0.5), Operation(kind=OP_BASE, member=nd.main_name, end=-1)]
-    nd.loads = [Load("Caso 1", "D1", N=-20.0), Load("Caso 1", "@nudo", Vz=-60.0)]       # compresión en la diagonal y la carga de gravedad que baja por la columna
+    nd.loads = [Load("Caso 1", "D1", N=-20.0), Load("Caso 1", nd.main_name, N=-60.0, side=1)]       # compresión en la diagonal y en el extremo superior de la columna
     ref = load_book(str(OUT / "PB-01_W14X90.scp"))[0]
     for k in ("plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea", "combos"):
         setattr(p, k, getattr(ref, k))

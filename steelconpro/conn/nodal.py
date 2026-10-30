@@ -259,6 +259,6 @@ def analysis(prj, nd: Nodo) -> dict:
             cb, E, Fp, Mp = bc[i]
             b["base"] = {"Pu": cb.Pu, "Mux": cb.Mux, "Muy": cb.Muy, "Vux": cb.Vux, "Vuy": cb.Vuy}
             b["draw"] = [d for d in b["draw"] if d["kind"] != "reaction" or not _base_at_balance(nd)]      # la carga de la placa base ya es la reaccion
-            b["draw"].append({"pos": np.asarray(E).tolist(), "F": np.asarray(Fp).tolist(), "M": np.asarray(Mp).tolist(), "name": "Placa base", "kind": "base"})
+            # la carga de la placa base se calcula por dentro (se muestra en la pestaña Nudo), no se dibuja: las flechas van en los extremos de los miembros
         out.append(b)
     return {"cases": out, "balance_end": int(getattr(nd, "balance_end", -1)), "base": bool(bc)}

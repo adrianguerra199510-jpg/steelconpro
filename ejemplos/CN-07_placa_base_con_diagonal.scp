@@ -212,14 +212,14 @@
      },
      {
       "case": "Caso 1",
-      "member": "@nudo",
-      "N": 0.0,
+      "member": "Columna",
+      "N": -60.0,
       "Vy": 0.0,
-      "Vz": -60.0,
+      "Vz": 0.0,
       "T": 0.0,
       "My": 0.0,
       "Mz": 0.0,
-      "side": 0
+      "side": 1
      }
     ],
     "show_hw": true,
