@@ -112,12 +112,12 @@ def build_items(nd: Nodo):
         elif op.kind == OP_DANG:
             spec = DoubleAngle(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,
                                angle=_angle_label(op.plate_t), angle_steel=op.plate_steel, bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
-                               n=max(int(op.n_bolts), 2), s=op.bolt_s, L_ang=(max(int(op.n_bolts), 2) - 1) * op.bolt_s + 3.0, gap=m.gap, weld_size=op.weld_size, **cp)
+                               n=max(int(op.n_bolts), 2), s=op.bolt_s, L_ang=(op.dang_H if op.dang_H > 0 else (max(int(op.n_bolts), 2) - 1) * op.bolt_s + 3.0), gap=m.gap, weld_size=op.weld_size, **cp)
             items.append(Item(op, m, "shear", spec, None, engine=double_angle))
         elif op.kind == OP_SEAT:
             spec = Seated(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,
                           angle=_seat_angle_label(op.plate_t), angle_steel=op.plate_steel, bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
-                          setback=max(m.gap, 0.5), L_seat=min(max(beam.bf if beam is not None else 8.0, 4.0), 12.0))
+                          setback=max(m.gap, 0.5), L_seat=(op.seat_W if op.seat_W > 0 else min(max(beam.bf if beam is not None else 8.0, 4.0), 12.0)))
             items.append(Item(op, m, "seat", spec, None, engine=seated))
         elif op.kind in (OP_EP_FLUSH, OP_EP_EXT):
             if mshape is None or mshape.kind != W_SHAPE or info["face"] != "ala":
@@ -125,7 +125,8 @@ def build_items(nd: Nodo):
                 continue
             ext = op.kind == OP_EP_EXT
             spec = EndPlate(beam=m.shape, beam_steel=m.steel, col=nd.main_shape, col_steel=nd.main_steel, cont_plates=any(o.kind == OP_CONT and o.member == m.name for o in nd.operations),
-                            plate_steel=op.plate_steel, bp=(beam.bf if beam is not None else 7.0) + 1.5, tp=op.plate_t, bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
+                            plate_steel=op.plate_steel, bp=(op.ep_w if op.ep_w > 0 else (beam.bf if beam is not None else 7.0) + 1.5), tp=op.plate_t,
+                            **({'g': op.ep_g} if op.ep_g > 0 else {}), bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
                             pfo=1.75, pfi=1.75, e_ext=1.5, ext_t=ext, ext_c=ext, fw_size=op.weld_size, ww_size=op.weld_size)
             items.append(Item(op, m, "ep", spec, None, engine=endplate))
         elif op.kind in (OP_GUSSET, OP_GUSSET_W):

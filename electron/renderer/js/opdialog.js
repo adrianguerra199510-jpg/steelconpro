@@ -2,7 +2,7 @@
 // Los cambios se ven en vivo en el 3D; «Cancelar» los revierte.
 import { call } from './api.js';
 import { S } from './state.js';
-import { h, svg, btn, tabs, field, selectInput, checkInput, segmented, chip, errorBox, clear, numInput } from './ui.js';
+import { h, svg, btn, tabs, field, selectInput, checkInput, segmented, chip, errorBox, clear, numInput, toast } from './ui.js';
 import { renderItems, getPath, setPath } from './forms.js';
 import { sectionPicker } from './sectionpicker.js';
 import { baseplateForm } from './bpform.js';
@@ -76,6 +76,7 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     h('div', { class: 'grow' }, h('div', { style: { fontWeight: 700 }, text: kind }), h('div', { class: 'muted', style: { fontSize: '12.5px' }, text: HELP[kind] || '' })));
   body.append(head);
 
+  const hooks = {};
   const refreshers = [];
   const addForm = (items, opts) => { const g = renderItems(items, ctx, opts); refreshers.push(g.refresh); return g; };
 
@@ -96,9 +97,27 @@ export async function openOperation(E, index, { isNew = false } = {}) {
       { path: 'plate_steel', label: 'Acero de la placa', type: 'combo', items: C.plate_steels.map((s) => s.name) });
     if (vis.weld_size) items.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625));
     if (vis.ep_ext) items.push(numField('Extensión de la placa extrema', 'ep_ext', 'L', 0.5, 24));
+    if (kind === K.EP_FLUSH || kind === K.EP_EXT) items.push(numField('Ancho de la placa (0 = automático)', 'ep_w', 'L', 0, 60), numField('Alto total de la placa (0 = automático)', 'ep_h', 'L', 0, 120),
+      numField('Gramil de los pernos (0 = automático)', 'ep_g', 'L', 0, 40), { type: 'custom', render: () => epRows(op, ctx, us) });
+    if (isTab) items.push(numField('Desplazar la placa a lo largo del peralte', 'tab_y', 'L', -60, 60));
+    if (kind === K.DANG) items.push(numField('Pierna al soporte', 'dang_lo', 'L', 1.5, 12), numField('Pierna sobre el alma (0 = automático)', 'dang_la', 'L', 0, 12), numField('Largo del ángulo (0 = automático)', 'dang_H', 'L', 0, 60));
+    if (kind === K.SEAT) items.push(numField('Pierna horizontal (bajo el ala)', 'seat_Lh', 'L', 2, 14), numField('Pierna vertical (contra el soporte)', 'seat_Lv', 'L', 2, 14), numField('Ancho del asiento (0 = automático)', 'seat_W', 'L', 0, 40));
     if (isTab || kind === K.DANG) items.push({ path: 'cope_auto', label: 'Cortar la viga secundaria si choca con las alas del principal', type: 'check', wide: true,
       help: 'Calcula, según la posición de la viga en el espacio, el corte (cope) superior e inferior y su largo para que encaje en la viga principal.' });
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Pernos, placas y soldadura' }), addForm(items)));
+    if (kind === K.EP_FLUSH || kind === K.EP_EXT) {
+      body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Edición libre' }),
+        h('p', { class: 'hint-text', text: 'Convierte la placa extrema en operaciones generales (placa sobre el extremo del miembro, soldadura de contorno y grupos de pernos) para editar cada pieza por separado: forma, aberturas, pernos y soldaduras. No se puede deshacer salvo con «Cancelar».' }),
+        btn('Convertir en piezas editables', { icon: 'wrench', onClick: async () => {
+          try {
+            const r = await call('convert_connection', { connection: E.conn(), member: op.member });
+            E.replaceConn(r.connection);
+            E.changed({ structure: true });
+            hooks.converted && hooks.converted();
+            toast(r.notes[0] || 'Conexión convertida.', 'ok', 6000);
+          } catch (e) { errorBox(e); }
+        } })));
+    }
   } else if (kind === K.COPE || kind === K.CUT) {                   // corte
     const tg = new Set(op.targets && op.targets.length ? op.targets : [op.member]);
     const checks = h('div', { class: 'col gap-4' });
@@ -140,6 +159,7 @@ export async function openOperation(E, index, { isNew = false } = {}) {
   // la edicion ocurre en el panel derecho (el visor queda libre): «Cerrar» (X) conserva los cambios, «Cancelar» los revierte
   return new Promise((resolve) => {
     let done = false;
+    hooks.converted = () => { if (done) return; done = true; panel.close('done'); resolve(true); };
     const finish = (ok) => {
       if (done) return; done = true;
       if (!ok) {
@@ -411,3 +431,13 @@ function trimBody(body, E, op, ctx, info, el, nd, addForm) {
   return root;
 }
 function numField(label, path, uk, lo, hi, step, dec, help) { return { path, label, type: 'num', uk, lo, hi, step, dec, help }; }
+
+// posicion vertical de cada fila de pernos de la placa extrema (respecto del centro de la viga), separadas por comas; vacio = automatico
+function epRows(op, ctx, us) {
+  const inp = h('input', { class: 'input', type: 'text', placeholder: 'automático', value: (op.ep_rows || []).map((v) => +us.out('L', v).toFixed(3)).join(', ') });
+  inp.addEventListener('change', () => {
+    op.ep_rows = inp.value.split(/[,;\s]+/).filter(Boolean).map(Number).filter(Number.isFinite).map((v) => us.inn('L', v));
+    ctx.onChange();
+  });
+  return field('Posición vertical de cada fila de pernos (vacío = automático)', inp);
+}

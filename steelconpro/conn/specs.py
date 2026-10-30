@@ -165,6 +165,17 @@ class Operation:
     tab_H: float = 0.0           # alto de la placa simple (a lo largo del peralte de la viga), in (0 = automatico)
     tab_W: float = 0.0           # ancho de la placa simple (a lo largo de la viga), in (0 = automatico)
     n_cols: int = 1              # columnas de pernos de la placa simple (separacion: bolt_g)
+    tab_y: float = 0.0           # placa simple: desplazamiento del centro de la placa a lo largo del peralte de la viga, in
+    ep_w: float = 0.0            # placa extrema: ancho, in (0 = automático)
+    ep_h: float = 0.0            # placa extrema: alto total, in (0 = automático según la extensión)
+    ep_g: float = 0.0            # placa extrema: gramil (separación transversal de los pernos), in (0 = automático)
+    ep_rows: list = field(default_factory=list)      # placa extrema: posición vertical de cada fila de pernos respecto del centro, in (vacío = automático)
+    dang_lo: float = 3.5         # doble ángulo: pierna que va al soporte, in
+    dang_la: float = 0.0         # doble ángulo: pierna sobre el alma, in (0 = automático)
+    dang_H: float = 0.0          # doble ángulo: largo del ángulo, in (0 = automático)
+    seat_Lh: float = 5.0         # ángulo de asiento: pierna horizontal (bajo el ala), in
+    seat_Lv: float = 6.0         # ángulo de asiento: pierna vertical (contra el soporte), in
+    seat_W: float = 0.0          # ángulo de asiento: ancho, in (0 = automático)
     cope_auto: bool = True       # corta la viga secundaria (cope) lo necesario para librar las alas de la viga principal
     # ---- formas de placa, aberturas, agujeros y soldadura (operaciones generales)
     pl_L2: float = 0.0           # trapecio: ancho de la base superior, in (0 = igual al de la base)

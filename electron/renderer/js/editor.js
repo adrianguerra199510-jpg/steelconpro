@@ -8,6 +8,7 @@ import { native } from './native.js';
 import { openOperation, OP_ICON, opColor, groupOf } from './opdialog.js';
 import { openMember, openLoads, openProject, renameRefs } from './editdialogs.js';
 import { openSections, openMaterials, openTemplates } from './libraries.js';
+import { renderItems } from './forms.js';
 
 const join = (a, b) => `${a.replace(/[\\/]+$/, '')}/${b}`;
 
@@ -658,11 +659,52 @@ function renderFem() {
     desc: 'Modelo sólido con Gmsh + CalculiX: cada miembro se recorta a 30 in del nudo; el lado que equilibra del principal queda empotrado y en los demás extremos se aplican las cargas del análisis nodal. '
       + 'Los pernos son resortes entre cuerpos rígidos, los cordones de filete unen las placas, y el acero es elasto-plástico (φ·Fy). El veredicto incluye lo que sale del FEM: fuerza en los pernos, esfuerzo en las soldaduras y deformación plástica de miembros y placas.',
     start: (st) => call('fem_node_start', { connection: E.conn(), force: !!st.force }), scene: (st) => call('fem_node_scene', { connection: E.conn(), case: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
-    cases: () => (E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : []), caseLabel: 'Caso de carga' }));
+    cases: () => (E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : []), caseLabel: 'Caso de carga', mesh: true, config: femConfig }));
   if (hasBase) box.append(h('div', { style: { height: '12px' } }), femSection('base', { title: 'Análisis sólido 3D de la placa base',
     desc: 'Mallado y análisis de la placa base con anclajes, concreto, llave de corte y rigidizadores. Sus resultados (tracción en pernos, presión de contacto, von Mises y fuerzas en la soldadura) entran al veredicto de la placa base.',
     start: () => call('fem_start', { connection: E.conn() }), scene: (st) => call('fem_scene', { connection: E.conn(), combo: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
     cases: () => E.conn().combos.map((x, i) => ({ value: String(i), label: x.name })), caseLabel: 'Combinación' }));
+}
+// opciones del análisis FEM del nudo (se guardan con la conexión: conn.fea)
+function femConfig() {
+  const C = S.C; const F = C.fea;
+  const num = (label, path, uk, lo, hi, help) => ({ path, label, type: 'num', uk, lo, hi, help });
+  const ctx = { us: E.us(), get: () => E.conn().fea, onChange: () => { E.changed({ geometry: false }); }, hide: () => false };
+  const g1 = renderItems([
+    num('Largo de cada miembro modelado desde el nudo', 'fem_len', 'L', 8, 120, 'Más largo = más fiel el empotramiento, pero más elementos y más tiempo.'),
+    { path: 'mesh3d_mode', label: 'Calidad de la malla', type: 'combo', items: F.mesh_modes },
+    num('Tamaño de elemento manual (0 = automático)', 'mesh3d', 'L', 0, 10, 'Tamaño máximo en las placas; los miembros usan 1.6 veces este valor.'),
+    num('Tamaño de malla en las soldaduras (0 = automático)', 'weld_mesh', 'L', 0, 2),
+    { path: 'contacts', label: 'Contacto entre piezas (superficies que pueden separarse)', type: 'check', wide: true, help: 'Si se desactiva, las piezas quedan unidas donde se tocan: más estable pero menos realista.' },
+    { path: 'plastic', label: 'Acero elasto-plástico (límite φ·Fy)', type: 'check', wide: true },
+    num('Deformación plástica máxima admitida (%)', 'plastic_limit', '-', 0.1, 20),
+    { path: 'weld_model', label: 'Modelo de las soldaduras', type: 'combo', items: F.weld_models, wide: true },
+    { path: 'weld_criterion', label: 'Criterio de las soldaduras', type: 'combo', items: F.weld_criteria, wide: true },
+    num('Deformación plástica de la garganta con D/C = 1 (%)', 'weld_plastic_limit', '-', 1, 20),
+    num('Factor para el D/C pico de la soldadura', 'weld_peak_factor', '-', 1, 3)], ctx, { cols: 2 });
+  return h('details', { class: 'card-sec', style: { marginTop: '8px' } }, h('summary', { style: { cursor: 'pointer', fontWeight: 700 }, text: 'Configuración del análisis FEM' }), h('div', { style: { height: '8px' } }), g1);
+}
+// malla de elementos finitos en el visor (sin resolver)
+async function showMesh(kind, cfg, status) {
+  const st = E.fems[kind];
+  try {
+    status.textContent = 'Generando la malla…';
+    const r = await call('fem_mesh_start', { connection: E.conn(), case: parseInt(st.combo, 10) || 0, force: false });
+    for (;;) {
+      const j = await call('job_status', { job: r.job });
+      status.textContent = j.message || 'Generando la malla…';
+      if (j.done) { if (j.state !== 'done') throw new Error(j.error || 'No se pudo generar la malla.'); break; }
+      await new Promise((ok) => setTimeout(ok, 800));
+    }
+    const d = await call('fem_mesh_scene', { connection: E.conn(), case: parseInt(st.combo, 10) || 0, part: st.meshPart || 'all' });
+    E.femView = true;
+    E.viewer.setModel(d, { keepView: true });
+    E.viewer.setLoads([]);
+    clear(E.ui.fembar);
+    st.meshParts = d.parts_list;
+    status.textContent = `Malla: ${d.mesh.nodes.toLocaleString('es')} nodos · ${d.mesh.elements.toLocaleString('es')} elementos tetraédricos de 10 nodos`;
+    setStatus(status.textContent);
+  } catch (e) { status.textContent = ''; errorBox(e); }
 }
 const field2 = (l, c) => h('div', { class: 'field' }, h('span', { class: 'lbl', text: l }), c);
 
@@ -685,8 +727,15 @@ function femSection(kind, cfg) {
       field2('Deformada', selectInput({ value: String(st.scale), options: [{ value: '0', label: 'Sin deformar' }, { value: '10', label: '×10' }, { value: '50', label: '×50' }, { value: '200', label: '×200' }, { value: '1000', label: '×1000' }], onChange: (v) => { st.scale = parseFloat(v); show(); } })),
       field2('Pieza', selectInput({ value: st.part, options: parts.map((p) => ({ value: p.id, label: p.label })), onChange: (v) => { st.part = v; show(); } }))),
     h('div', { class: 'row', style: { marginTop: '8px' } }, btn('Mostrar en el visor', { icon: 'eye', onClick: show }), btn('Volver al modelo', { icon: 'box', onClick: backToModel })));
+  const meshStatus = h('div', { class: 'muted', style: { fontSize: '12.5px', marginTop: '6px' } });
+  const meshBox = cfg.mesh ? h('div', { style: { marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '10px' } }, h('h4', { text: 'Ver el modelo mallado', style: { marginBottom: '8px' } }),
+    h('p', { class: 'hint-text', text: 'Genera solo la malla (sin resolver) con el tamaño de elemento de la configuración y la muestra en el visor con sus aristas, pieza por pieza.' }),
+    h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } },
+      cases.length ? field2(cfg.caseLabel, selectInput({ value: st.combo, options: cases, onChange: (v) => { st.combo = v; } })) : null,
+      field2('Pieza', h('div', { class: 'mesh-part-slot' }, selectInput({ value: st.meshPart || 'all', options: [{ value: 'all', label: 'Todo el conjunto' }, ...(st.meshParts || []).filter((x) => x.id !== 'all').map((x) => ({ value: x.id, label: x.label }))], onChange: (v) => { st.meshPart = v; if (E.femView) showMesh(kind, cfg, meshStatus); } }))),
+      btn('Ver malla en el visor', { icon: 'layers', kind: 'primary', onClick: () => showMesh(kind, cfg, meshStatus) }), btn('Volver al modelo', { icon: 'box', onClick: backToModel })), meshStatus) : null;
   const card = h('div', { class: 'card-sec' }, h('h4', { text: cfg.title }), h('p', { class: 'hint-text', text: cfg.desc }),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '6px' } }), status, view);
+    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null, meshBox, view);
   if (E.jobs[kind]) pollJob(kind, status, run, stop, cfg);
   return card;
 }

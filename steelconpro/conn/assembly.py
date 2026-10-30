@@ -258,14 +258,15 @@ def _tab_geometry(ctx, tag):
         H = min(H, (n - 1) * s + 3.0) if ctx.op.tab_H <= 0 else H
     lat = (_halfw(shp) + t / 2.0) if _is_open(shp) else 0.0
     Lp = Wd
-    poly = [(0.0, -H / 2), (Lp, -H / 2), (Lp, H / 2), (0.0, H / 2)]            # la placa nace en la cara del soporte (x = 0)
+    ty = float(getattr(ctx.op, 'tab_y', 0.0))
+    poly = [(0.0, ty - H / 2), (Lp, ty - H / 2), (Lp, ty + H / 2), (0.0, ty + H / 2)]            # la placa nace en la cara del soporte (x = 0)
     pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
     ctx.parts.append(Part(name, "plate", f"Placa simple PL {t:g} × {H:g} × {Wd:g}", Fy, Fu, [pr], t=t))
     if ctx.op.tab_H <= 0 or True:
         pass
-    zs = [(i - (n - 1) / 2.0) * s for i in range(n)]
+    zs = [ty + (i - (n - 1) / 2.0) * s for i in range(n)]
     if _is_open(shp):
         grip = [(name, 0.0, t), (ctx.partname, t, t + shp.tw)]
         p0 = lat + t / 2.0
@@ -283,8 +284,8 @@ def _tab_geometry(ctx, tag):
     if ctx.main_name:
         w = float(ctx.op.weld_size)
         for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-            p0_ = ctx.Q + lat_face * ctx.sx - ctx.sy * (H / 2.0)
-            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (H / 2.0)
+            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty - H / 2.0)
+            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty + H / 2.0)
             ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                   tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.dir)), w, 70.0, tag))
     return Lp
@@ -295,9 +296,9 @@ def _dang_geometry(ctx, tag):
     t = ctx.t
     n, s = _n_rows(ctx, _clear_depth(shp))
     sb = m.gap + 2.5
-    la = sb + 1.5
-    lo = 3.5
-    H = (n - 1) * s + 3.0
+    la = ctx.op.dang_la if ctx.op.dang_la > 0 else sb + 1.5
+    lo = max(ctx.op.dang_lo, 1.5)
+    H = ctx.op.dang_H if ctx.op.dang_H > 0 else (n - 1) * s + 3.0
     l0 = _halfw(shp)
     Fy, Fu = _steel(ctx.op.plate_steel, True)
     for k, sg in enumerate((1, -1)):
@@ -318,8 +319,8 @@ def _dang_geometry(ctx, tag):
 def _seat_geometry(ctx, tag):
     m, shp = ctx.m, ctx.shape
     t = max(ctx.t, 0.375)
-    Lh, Lv = 5.0, 6.0
-    W = min(max(shp.bf if shp.bf > 0 else 6.0, 4.0), 12.0)
+    Lh, Lv = max(ctx.op.seat_Lh, 2.0), max(ctx.op.seat_Lv, 2.0)
+    W = ctx.op.seat_W if ctx.op.seat_W > 0 else min(max(shp.bf if shp.bf > 0 else 6.0, 4.0), 12.0)
     yb = -shp.d / 2.0
     g = m.gap
     poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh, yb - t), (Lh, yb), (-EMBED, yb)]
@@ -335,22 +336,19 @@ def _seat_geometry(ctx, tag):
     return max(g, 0.5)
 
 
-def _endplate_geometry(ctx, tag, extended):
-    m, shp = ctx.m, ctx.shape
-    t = max(ctx.t, 0.5)
+def endplate_layout(op, shp, extended):
+    """Medidas de la placa extrema: espesor, semialto, gramil, ancho y posicion vertical de cada fila de pernos (respecto del centro de la viga)."""
+    t = max(op.plate_t, 0.5)
     d = shp.d
     bf = shp.bf if shp.bf > 0 else shp.d
     hollow = shp.is_hollow
-    ext = max(ctx.op.ep_ext, 2.0) if (extended or hollow) else 0.5
-    hh = d / 2.0 + ext
-    gb = min(max(bf - 2.5, 2.5), 5.5)
-    wide = max(bf + 1.5, gb + 3.0)
-    poly = [(-wide / 2, -hh), (wide / 2, -hh), (wide / 2, hh), (-wide / 2, hh)]
-    pr = _plate_prism(poly, ctx.Q - ctx.dir * (-EMBED * 0.0), ctx.sx, ctx.sy, 0.0, t)      # U×V = sx×sy = dir: extruye hacia el miembro
-    Fy, Fu = _steel(ctx.op.plate_steel, True)
-    ctx.parts.append(Part(f"Placa extrema {tag}", "plate", f"Placa extrema PL {t:g}", Fy, Fu, [pr], t=t))
-    rows = []
-    if hollow:
+    ext = max(op.ep_ext, 2.0) if (extended or hollow) else 0.5
+    hh = op.ep_h / 2.0 if op.ep_h > 0 else d / 2.0 + ext
+    gb = op.ep_g if op.ep_g > 0 else min(max(bf - 2.5, 2.5), 5.5)
+    wide = op.ep_w if op.ep_w > 0 else max(bf + 1.5, gb + 3.0)
+    if op.ep_rows:
+        rows = [float(v) for v in op.ep_rows]
+    elif hollow:
         rows = [hh - 1.5, -(hh - 1.5)]
     else:
         tf = shp.tf if shp.tf > 0 else 0.5
@@ -358,6 +356,17 @@ def _endplate_geometry(ctx, tag, extended):
             rows = [d / 2.0 + ext - 1.5, d / 2.0 - tf - 1.75, -(d / 2.0 - tf - 1.75), -(d / 2.0 + ext - 1.5)]
         else:
             rows = [d / 2.0 - tf - 1.75, -(d / 2.0 - tf - 1.75)]
+    return {"t": t, "hh": hh, "gb": gb, "wide": wide, "rows": rows, "hollow": hollow, "bf": bf}
+
+
+def _endplate_geometry(ctx, tag, extended):
+    m, shp = ctx.m, ctx.shape
+    L = endplate_layout(ctx.op, shp, extended)
+    t, hh, gb, wide, rows, hollow = L["t"], L["hh"], L["gb"], L["wide"], L["rows"], L["hollow"]
+    poly = [(-wide / 2, -hh), (wide / 2, -hh), (wide / 2, hh), (-wide / 2, hh)]
+    pr = _plate_prism(poly, ctx.Q - ctx.dir * (-EMBED * 0.0), ctx.sx, ctx.sy, 0.0, t)      # U×V = sx×sy = dir: extruye hacia el miembro
+    Fy, Fu = _steel(ctx.op.plate_steel, True)
+    ctx.parts.append(Part(f"Placa extrema {tag}", "plate", f"Placa extrema PL {t:g}", Fy, Fu, [pr], t=t))
     for i, v in enumerate(rows):
         for k, sg in enumerate((1, -1)):
             ctx.bolts.append(_bolt(f"{tag}-B{i + 1}{k + 1}", ctx.at(t, sg * (gb / 2.0 if not hollow else wide / 2.0 - 1.25), v), -ctx.dir, ctx.db, 0.0, t + 1.0,

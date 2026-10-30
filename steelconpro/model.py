@@ -404,6 +404,8 @@ class FEAOpts:
     weld_criterion: str = "Plastico 5 % (Ghimire et al. 2023)"   # ver WELD_CRITERIA
     weld_plastic_limit: float = 5.0     # deformacion plastica de la garganta a la que el D/C del cordon vale 1, %
     weld_mesh: float = 0.0              # tamano del elemento sobre el cordon, in (0 = automatico, ~28 mm)
+    fem_len: float = 30.0               # FEM del nudo: largo de cada miembro que se modela desde el nudo, in
+    contacts: bool = True               # FEM del nudo: contacto entre piezas (si no, quedan unidas en las caras en contacto)
     weld_long_reduction: bool = True    # reduccion por cordon largo, AISC J2.2b(d): L > 100·w (el FEM no la captura)
 
 

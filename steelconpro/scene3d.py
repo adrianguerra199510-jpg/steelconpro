@@ -77,7 +77,7 @@ class Scene:
         self.vlabels = []         # etiquetas que solo aparecen en ciertas vistas: (pos, texto, fg, bg, borde, negrita, vistas)
 
     # ---------------------------------------------------------------- primitivas
-    def add_faces(self, faces, rgb, alpha=1.0, edges=True):
+    def add_faces(self, faces, rgb, alpha=1.0, edges=True, all_edges=False):
         """Poligonos 3D (lista de listas de (x, y, z)) con sombreado plano y aristas vivas opcionales."""
         tri_rows = []
         edge_map = {}
@@ -105,7 +105,7 @@ class Scene:
                            *(([0.3, 0.35, 0.4, 0.55] if alpha < 0.999 else [0.05, 0.07, 0.1, 0.75]))], float)
             seg = []
             for (a, b), ns in edge_map.items():
-                sharp = len(ns) == 1 or min(float(ns[0] @ n_) for n_ in ns[1:]) < 0.88
+                sharp = all_edges or len(ns) == 1 or min(float(ns[0] @ n_) for n_ in ns[1:]) < 0.88
                 if sharp:
                     for q in (a, b):
                         seg.append(np.concatenate([q, ec[3:]]))

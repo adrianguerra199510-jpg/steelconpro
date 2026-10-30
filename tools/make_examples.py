@@ -97,7 +97,8 @@ def refuerzo_con_placas() -> Project:
     nd = PRE.build(MODE_BEAM, "sec1", "I", "tab")
     nd.members[0].shape = "W18X35"
     nd.operations = []
-    a = _gen(nd, OP_PLATE, parent=nd.main_name, face=FACES_I[1], shape=PLATE_SHAPES[4], pl_L=14.0, pl_W=6.0, pl_L2=3.0, plate_t=0.5, pl_s=36.0)
+    nd.main_len_neg, nd.main_len_pos = 24.0, 24.0
+    a = _gen(nd, OP_PLATE, parent=nd.main_name, face=FACES_I[0], shape=PLATE_SHAPES[4], pl_L=14.0, pl_W=6.0, pl_L2=3.0, plate_t=0.5, pl_s=24.0)
     b = _gen(nd, OP_PLATE, parent=a.name, face="Cara +", role="Rigidizador", orient=PLATE_ORIENTS[1], pl_L=5.0, pl_W=3.0, plate_t=0.375)
     _gen(nd, OP_HOLE, parent=a.name, face="Cara +", rows=1, cols=2, bolt_g=3.0)
     _gen(nd, OP_FILLET, targets=[b.name], weld_size=0.1875)
@@ -113,10 +114,10 @@ def diagonal_en_inglete() -> Project:
     p = Project(); p.ctype = CT_NODE; p.element = "CN-06"; p.name = "Ejemplo: diagonal recortada con soldadura de contorno y ángulo"
     nd = PRE.build(MODE_COL, "int2", "I", "tab")
     nd.operations = []
-    nd.members = [Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=-45.0, pos=96.0, L=60.0)]
+    nd.members = [Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=-45.0, pos=10.0, L=60.0)]
     _gen(nd, OP_TRIM, targets=["D1"], parent=nd.main_name, face=FACES_I[0], trim_gap=0.0)
     _gen(nd, OP_FILLET, weld_mode=WELD_MODES[1], targets=["D1"], parent=nd.main_name, face=FACES_I[0], weld_size=0.1875)
-    _gen(nd, OP_ANGLE, parent=nd.main_name, face=FACES_I[2], attach=ATTACHES[1], pl_s=84.0, pl_L=6.0, rows=2, cols=1)
+    _gen(nd, OP_ANGLE, parent=nd.main_name, face=FACES_I[2], attach=ATTACHES[1], pl_s=40.0, pl_L=6.0, rows=2, cols=1)
     nd.loads = [Load("Caso 1", "D1", N=5.0)]
     p.node = nd
     return p

@@ -452,3 +452,10 @@ zona sin soldar transmite igual; por eso se prefiere el modelo de conectores.
 Verificacion: la reaccion del concreto menos la traccion de los pernos cierra con Pu; con conectores,
 ademas, el contacto menos la traccion de los cordones cierra con Pu y la suma del cortante de los cordones
 cierra con V.
+
+
+## Edición libre de las conexiones y malla del FEM
+
+- Las conexiones tipo tienen sus medidas editables: placa simple (alto, ancho, filas × columnas, desplazamiento), doble ángulo (piernas y largo), asiento (piernas y ancho) y placa extrema (ancho, alto, gramil y posición de cada fila de pernos).
+- **Convertir en piezas editables** (placa extrema a ras y extendida): la conexión se reemplaza por una placa sobre el extremo del miembro, la soldadura de contorno y un grupo de pernos por fila, con los mismos pernos que la original. Desde ahí se edita cada pieza (forma, aberturas, pernos, soldaduras).
+- Pestaña **FEM**: *Configuración del análisis FEM* (largo modelado de cada miembro, calidad y tamaño de malla, contacto, plasticidad, modelo y criterio de soldaduras) y **Ver malla en el visor** (genera solo la malla con Gmsh y la muestra pieza por pieza, sin resolver).

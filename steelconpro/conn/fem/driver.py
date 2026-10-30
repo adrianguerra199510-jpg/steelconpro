@@ -71,6 +71,9 @@ def run_fem(prj, vals, folder: str, stem: str = "modelo3d", progress=None, cance
         tag = "" if f == 1.0 else f"  (reintento con malla mas gruesa x{f:g})"
         try:
             say(f"1/4  Armando el modelo 3D ...{tag}")
+            vals = dict(vals or {})
+            if "case" in vals:
+                vals.setdefault("L", float(getattr(fea, "fem_len", 30.0)))
             mdl = build_model(prj, vals)
             params = mesh_params(mdl, fea, f)
             say(f"2/4  Mallando con Gmsh ...{tag}")
@@ -82,7 +85,7 @@ def run_fem(prj, vals, folder: str, stem: str = "modelo3d", progress=None, cance
                 continue
             say(f"3/4  Armando el modelo de CalculiX ...{tag}")
             mesh = ccxgen.Mesh(str(npz))
-            case = ccxgen.CcxCase(mdl, mesh, {"plastic": bool(getattr(fea, "plastic", True)), "contacts": True})
+            case = ccxgen.CcxCase(mdl, mesh, {"plastic": bool(getattr(fea, "plastic", True)), "contacts": bool(getattr(fea, "contacts", True))})
             say(f"4/4  Resolviendo con CalculiX ...{tag}")
             ok, msg, info = solve.solve_case(case, str(folder), stem, getattr(fea, "ccx_path", ""), cancel, say)
             if not ok:

@@ -167,6 +167,25 @@ def run():
             fail("nucleo: bordes de placa o verificaciones")
         print(f"{'nucleo geometrico':34} 7 formas de placa, abertura que rodea al miembro, ángulo, huecos/ranuras, recorte y soldadura de contorno: {len(m2['parts'])} piezas: OK")
 
+        # ---- conexion editable: la placa extrema se convierte en piezas con los mismos pernos; malla del FEM del nudo
+        ex1 = api._dump(__import__("steelconpro.model", fromlist=["load_book"]).load_book("ejemplos/CN-01_columna_con_vigas.scp")[0])
+        from steelconpro.conn import assembly as AS0
+        before = OPS._bolt_positions(AS0.build_model(api._prj(ex1)), "V1-B")
+        cv = api.convert_connection({"connection": ex1, "member": "V1"})
+        after = OPS._bolt_positions(AS0.build_model(api._prj(cv["connection"])), "B")
+        if before != after or not before or any(o["kind"] == SP.OP_EP_EXT for o in cv["connection"]["node"]["operations"] if o["member"] == "V1"):
+            fail(f"editable: la conversion de la placa extrema no conserva los pernos ({len(before)} vs {len(after)})")
+        import time
+        mj = api.fem_mesh_start({"connection": ex1, "case": 0})["job"]
+        t0 = time.time()
+        while not api.job_status({"job": mj})["done"] and time.time() - t0 < 300:
+            time.sleep(1)
+        js = api.job_status({"job": mj})
+        ms = api.fem_mesh_scene({"connection": ex1, "case": 0}) if js["state"] == "done" else None
+        if ms is None or ms["mesh"]["elements"] < 1000:
+            fail(f"fem: no se genero la malla ({js.get('state')}, {js.get('error', '')[:200]})")
+        print(f"{'conexion editable y malla FEM':34} placa extrema -> piezas con los mismos {len(before)} pernos; malla {ms['mesh']['elements'] if ms else 0:,} elementos: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")

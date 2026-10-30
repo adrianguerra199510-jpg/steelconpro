@@ -626,3 +626,45 @@ def delete_operation(nd, index: int) -> list:
                 queue.append(dep)
     nd.operations = [o for o in nd.operations if all(o is not r for r in removed)]
     return removed
+
+
+# ================================================================================================== convertir una conexion en piezas editables
+def _bolt_positions(mdl, prefix=None):
+    return sorted((round(b.p[0], 2), round(b.p[1], 2), round(b.p[2], 2)) for b in mdl.bolts if prefix is None or b.tag.startswith(prefix))
+
+
+def convert_to_pieces(prj, member: str) -> dict:
+    """Reemplaza la operacion de conexion del miembro (placa extrema a ras o extendida) por operaciones generales equivalentes: una placa sobre el
+    extremo del miembro, la soldadura de contorno del miembro y un grupo de pernos por fila; todo editable.  Devuelve {"created": [indices], "notes": [...]}."""
+    from . import assembly as AS
+    from .specs import OP_EP_FLUSH, OP_EP_EXT, PLATE_SHAPES, ATTACHES, WELD_MODES, FACES_END
+    nd = prj.node
+    m = nd.member_named(member)
+    if m is None:
+        raise ValueError(f"El miembro «{member}» no existe.")
+    op = next((o for o in nd.operations if o.is_connection and o.member == member), None)
+    if op is None or op.kind not in (OP_EP_FLUSH, OP_EP_EXT):
+        raise ValueError("Por ahora solo las placas extremas (a ras y extendida) se convierten en piezas editables.")
+    shp = AS.shape_of(m.shape)
+    L = AS.endplate_layout(op, shp, op.kind == OP_EP_EXT)
+    ref = AS.build_model(prj)                                       # posiciones de los pernos de la conexion original
+    ref_pos = _bolt_positions(ref, f"{member}-B")
+    idx = nd.operations.index(op)
+    nd.operations.remove(op)
+    m.gap = L["t"]                                                  # el extremo del miembro queda a un espesor de placa del soporte
+    first = len(nd.operations)
+    pl = add_operation(nd, OP_PLATE, parent=member, face=FACES_END[0], shape=PLATE_SHAPES[0], pl_L=L["wide"], pl_W=2.0 * L["hh"], pl_s=L["bf"] / 2.0, pl_u=0.0,
+                       plate_t=L["t"], plate_steel=op.plate_steel, attach=ATTACHES[0], weld_all=False, weld_edges=[], role="Refuerzo", orient=PLATE_ORIENTS[0])
+    add_operation(nd, OP_FILLET, weld_mode=WELD_MODES[1], targets=[member], parent=pl.name, face="Cara −", weld_size=op.weld_size)
+    sep = L["gb"] if not L["hollow"] else L["wide"] - 2.5
+    group = []
+    for v in L["rows"]:
+        group.append(add_operation(nd, OP_BOLTS, parent=pl.name, face="Cara −", targets=[nd.main_name], rows=2, cols=1, bolt_s=sep, bolt_g=3.0,
+                                   bolt_size=op.bolt_size, bolt_grade=op.bolt_grade, pl_s=L["wide"] / 2.0, pl_u=float(v)))
+    new_pos = _bolt_positions(AS.build_model(prj), "B")
+    if new_pos != ref_pos:                                          # el sentido vertical de la cara es el contrario: se invierte
+        for o in group:
+            o.pl_u = -o.pl_u
+        new_pos = _bolt_positions(AS.build_model(prj), "B")
+    notes = [f"La placa extrema de «{member}» ahora son piezas editables: placa {pl.name}, soldadura de contorno y {len(group)} grupos de pernos."]
+    return {"created": list(range(first, len(nd.operations))), "notes": notes, "replaced": idx}

@@ -26,6 +26,7 @@ import numpy as np
 from . import __version__
 from . import materials as M
 from . import units as UN
+from . import model as MODEL
 from .model import Project, new_connection, save_book, load_book
 from .shapes import CATALOG
 from .conn import assembly as AS, baseplate as BP, solve_conn, module_for
@@ -85,6 +86,7 @@ def constants(_=None) -> dict:
         "schema_baseplate": sch,
         "roles": SP.PLATE_ROLES, "openings": SP.OPENINGS, "weld_types": SP.WELD_TYPES, "weld_modes": SP.WELD_MODES, "hole_shapes": SP.HOLE_SHAPES,
         "trim_modes": SP.TRIM_MODES, "faces_angle": SP.FACES_ANGLE,
+        "fea": {"mesh_modes": MODEL.MESH3D_MODES, "weld_models": MODEL.WELD_MODELS, "weld_criteria": MODEL.WELD_CRITERIA},
     }
 
 
@@ -140,6 +142,17 @@ def plate_edges(args) -> dict:
     from .conn import plates as PL
     p = _prj(args["connection"])
     return {"edges": PL.edge_lengths(p.node.operations[int(args["index"])])}
+
+
+def convert_connection(args) -> dict:
+    """Convierte la conexión de un miembro (placa extrema) en operaciones generales editables.  Devuelve la conexión y los avisos."""
+    from .conn import ops as OPS
+    p = _prj(args["connection"])
+    try:
+        r = OPS.convert_to_pieces(p, args["member"])
+    except ValueError as e:
+        raise ApiError(str(e))
+    return {"connection": _dump(p), "created": r["created"], "notes": r["notes"]}
 
 
 def add_operation(args) -> dict:
@@ -340,7 +353,7 @@ def _check_json(us, ch):
 
 def _node_sig(p: Project) -> str:
     """Firma de lo que define el analisis FEM del nudo: miembros, operaciones, cargas y opciones del FEM (no el nombre ni las unidades)."""
-    d = {"node": asdict(p.node), "fea": {k: v for k, v in asdict(p.fea).items() if k in ("plastic", "plastic_limit", "mesh3d", "mesh3d_mode", "weld_peak_factor", "ccx_path")}}
+    d = {"node": asdict(p.node), "fea": {k: v for k, v in asdict(p.fea).items() if k in ("plastic", "plastic_limit", "mesh3d", "mesh3d_mode", "weld_peak_factor", "ccx_path", "fem_len", "contacts", "weld_model", "weld_criterion", "weld_plastic_limit", "weld_mesh")}}
     return hashlib.md5(json.dumps(d, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
@@ -485,6 +498,93 @@ def fem_node_start(args) -> dict:
     from . import mesh3d
     threading.Thread(target=run, daemon=True).start()
     return {"job": jid}
+
+
+NODE_MESH = {}                                                      # (firma, caso) -> {"npz": ruta, "stats": {...}}: mallas del nudo ya generadas
+
+
+def fem_mesh_start(args) -> dict:
+    """Genera solo la malla (Gmsh) del nudo para un caso de carga, para verla en el visor antes de resolver."""
+    from .conn.fem import driver
+    from .conn import nodal as NOD
+    p = _prj(args["connection"])
+    i = int(args.get("case", 0))
+    sig = _node_sig(p)
+    jid = uuid.uuid4().hex[:10]
+    job = {"id": jid, "state": "running", "messages": [], "done": False, "error": "", "cancel": None}
+    JOBS[jid] = job
+    if (sig, i) in NODE_MESH and not args.get("force") and Path(NODE_MESH[(sig, i)]["npz"]).exists():
+        job.update(state="done", done=True)
+        return {"job": jid}
+    if not NOD.cases_of(p.node):
+        raise ApiError("El nudo no tiene casos de carga: agregue al menos uno en «Cargas» (el modelo FEM lleva apoyos y cargas).")
+    from .mesh3d import CancelToken
+    from . import mesh3d
+    tok = CancelToken()
+    job["cancel"] = tok
+    base = Path(args.get("folder") or os.path.join(os.path.expanduser("~"), "SteelConPro", "fem"))
+    folder = base / f"{p.element or 'nudo'}_malla" / f"caso{i + 1}"
+
+    def run():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            job["messages"].append("1/2  Armando el modelo 3D ...")
+            fea = p.fea
+            f = float(args.get("coarsen", 1.0))
+            mdl = AS.build_model(p, {"case": i, "L": float(getattr(fea, "fem_len", 30.0))})
+            params = driver.mesh_params(mdl, fea, f)
+            job["messages"].append("2/2  Mallando con Gmsh ...")
+            npz, out = driver._mesh(mdl, params, folder, "nudo", tok)
+            if npz is None:
+                job.update(state="cancelled" if out == mesh3d.CANCELADO else "error", error=str(out), done=True)
+                return
+            NODE_MESH[(sig, i)] = {"npz": str(npz), "model": mdl}
+            job.update(state="done", done=True)
+        except Exception as e:                                                  # noqa: BLE001
+            job.update(state="error", error=f"{type(e).__name__}: {e}", done=True)
+            job["trace"] = traceback.format_exc()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"job": jid}
+
+
+def fem_mesh_scene(args) -> dict:
+    """Escena de la malla de elementos finitos del nudo (piel de cada pieza con sus aristas) para el visor."""
+    from .conn.fem import ccxgen
+    from .conn.fem.model3d import COLORS
+    from .scene3d import Scene
+    p = _prj(args["connection"])
+    i = int(args.get("case", 0))
+    ent = NODE_MESH.get((_node_sig(p), i))
+    if ent is None or not Path(ent["npz"]).exists():
+        raise ApiError("No hay una malla vigente de ese caso: genérela primero (los cambios en el nudo o en las opciones la invalidan).")
+    mesh = ccxgen.Mesh(ent["npz"])
+    mdl = ent["model"]
+    kinds = {pt.name: pt.kind for pt in mdl.parts}
+    only = args.get("part", "all")
+    sc = Scene()
+    pts, stats, total_e = [], [], 0
+    for key in mesh.names:
+        n_el = int(len(mesh.E[key]))
+        total_e += n_el
+        stats.append({"id": key, "label": key, "elements": n_el, "nodes": int(len(mesh.part_nodes(key)))})
+        if only != "all" and key != only:
+            continue
+        col = FS._rgb(COLORS.get(kinds.get(key, "other"), COLORS["other"]))
+        faces = []
+        for (_e, _f, nodes, _c, _n) in mesh.skin(key):
+            faces.append([tuple(mesh.coord(n)) for n in nodes[:3]])
+        pts += [q for fc in faces for q in fc]
+        sc.group = "mesh_" + key
+        sc.add_faces(faces, col, 1.0, edges=True, all_edges=True)
+    sc.group = "other"
+    sc.pts = pts
+    d = {"parts": [_scene_to_json(sc, "Malla", "fem")], "message": ""}
+    P = np.asarray(pts, float).reshape(-1, 3) if pts else np.zeros((1, 3))
+    d["bounds"] = [P.min(axis=0).tolist(), P.max(axis=0).tolist()]
+    d["mesh"] = {"nodes": int(len(mesh.node_ids)), "elements": total_e, "parts": stats}
+    d["parts_list"] = [{"id": "all", "label": "Todo el conjunto"}] + [{"id": k["id"], "label": f"{k['label']} ({k['elements']:,} elem.)"} for k in stats]
+    return d
 
 
 def fem_node_scene(args) -> dict:
