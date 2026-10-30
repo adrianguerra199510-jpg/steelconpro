@@ -20,7 +20,7 @@ from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, Weld, unit
 from . import ops as OPS
 from .ops import member_faces, FaceFrame
-from .specs import (OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
+from .specs import (GENERIC_OPS, OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
                     OP_COPE, OP_CONT, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
 
 EMBED = 0.35            # las placas entran un poco en el miembro principal para que no quede una rendija en las uniones esviadas
@@ -750,7 +750,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     ext = outer_extent(mshape)
     names = {m.name for m in nd.members}
     for o in nd.operations:
-        if o.member not in names and not (o.kind == OP_BASE and o.member == nd.main_name):
+        if o.member not in names and not (o.kind == OP_BASE and o.member == nd.main_name) and not (o.kind in GENERIC_OPS and not o.member):
             mdl.notes.append(f"Operación «{o.kind}»: el miembro «{o.member}» no existe.")
     ctxs = []
     reg = {}                                            # elementos con caras para las operaciones generales: nombre -> {type, faces, part, t, Fy, Fu}

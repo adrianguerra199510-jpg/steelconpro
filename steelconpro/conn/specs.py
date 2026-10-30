@@ -55,23 +55,32 @@ OP_PLATE = "Placa (refuerzo, cartela o rigidizador)"
 OP_BOLTS = "Pernos entre elementos"
 OP_FILLET = "Soldadura de filete entre elementos"
 OP_CUT = "Corte de elementos"
-OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT]
-GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT)
+OP_HOLE = "Huecos y ranuras"
+OP_ANGLE = "Ángulo (herraje)"
+OP_TRIM = "Recorte contra otro elemento"
+OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_CUT, OP_TRIM]
+GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM)
 # grupos del menu "Agregar operacion" (como la cinta de IDEA)
 OP_GROUPS = [("Conexión de corte", [OP_TAB, OP_DANG, OP_SEAT]),
              ("Conexión de momento", [OP_EP_FLUSH, OP_EP_EXT, OP_WELD]),
              ("Conexión de diagonal", [OP_GUSSET, OP_GUSSET_W]),
-             ("Placas, pernos y soldaduras", [OP_PLATE, OP_BOLTS, OP_FILLET]),
-             ("Modificar elementos", [OP_COPE, OP_CUT]),
+             ("Placas, pernos y soldaduras", [OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET]),
+             ("Modificar elementos", [OP_COPE, OP_CUT, OP_TRIM, OP_HOLE]),
              ("Rigidizar el miembro principal", [OP_CONT]),
              ("Apoyo del miembro", [OP_BASE])]
 PLATE_ROLES = ["Refuerzo", "Cartela", "Rigidizador"]
 PLATE_ORIENTS = ["Paralela a la cara", "Perpendicular, transversal", "Perpendicular, longitudinal"]
-PLATE_SHAPES = ["Rectangular", "Triangular", "Con esquina recortada"]
+PLATE_SHAPES = ["Rectangular", "Triangular", "Con esquina recortada", "Circular", "Trapecio", "Ranurada (extremos redondeados)", "Polígono libre"]
+OPENINGS = ["Ninguna", "Circular", "Rectangular", "Rodea al miembro"]
+HOLE_SHAPES = ["Circular", "Ranura", "Rectangular"]
+WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcial)"]
+WELD_MODES = ["Bordes de la placa", "Contorno del miembro"]
 ATTACHES = ["Soldada", "Atornillada"]
-FACES_I = ["Ala superior", "Ala inferior", "Alma +", "Alma −"]
-FACES_BOX = ["Cara +X", "Cara −X", "Cara +Y", "Cara −Y"]
+FACES_END = ["Extremo inicio", "Extremo fin"]
+FACES_I = ["Ala superior", "Ala inferior", "Alma +", "Alma −"] + FACES_END
+FACES_BOX = ["Cara +X", "Cara −X", "Cara +Y", "Cara −Y"] + FACES_END
 FACES_PLATE = ["Cara +", "Cara −"]
+FACES_ANGLE = ["Pierna sobre la cara", "Pierna saliente +", "Pierna saliente −"]
 FACE_LABELS = {"I": FACES_I, "box": FACES_BOX, "plate": FACES_PLATE}
 CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
 MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD)
@@ -156,6 +165,32 @@ class Operation:
     tab_W: float = 0.0           # ancho de la placa simple (a lo largo de la viga), in (0 = automatico)
     n_cols: int = 1              # columnas de pernos de la placa simple (separacion: bolt_g)
     cope_auto: bool = True       # corta la viga secundaria (cope) lo necesario para librar las alas de la viga principal
+    # ---- formas de placa, aberturas, agujeros y soldadura (operaciones generales)
+    pl_L2: float = 0.0           # trapecio: ancho de la base superior, in (0 = igual al de la base)
+    pts: list = field(default_factory=list)          # polígono libre: vértices [u, v] respecto del centro de la placa, in
+    opening: str = OPENINGS[0]
+    op_D: float = 2.0            # abertura circular: diametro, in
+    op_W: float = 4.0            # abertura rectangular: ancho, in
+    op_H: float = 4.0            # abertura rectangular: alto, in
+    op_x: float = 0.0            # desplazamiento de la abertura respecto del centro de la placa, in
+    op_y: float = 0.0
+    op_member: str = ""          # «Rodea al miembro»: miembro cuya sección atraviesa la placa
+    op_clear: float = 0.25       # holgura de la abertura alrededor del miembro, in
+    weld_edges: list = field(default_factory=list)   # bordes de la placa que se sueldan (indices); con weld_all = True se sueldan todos
+    weld_type: str = WELD_TYPES[0]
+    weld_mode: str = WELD_MODES[0]
+    weld_a: float = 0.0          # inicio del cordon en cada borde (in desde su primer vertice)
+    weld_len: float = 0.0        # largo del cordon en cada borde, in (0 = todo el borde)
+    hole_shape: str = HOLE_SHAPES[0]
+    hole_D: float = 0.8125       # hueco circular: diametro; ranura: ancho; in
+    hole_L: float = 1.5          # ranura o hueco rectangular: largo, in
+    hole_W: float = 0.8125       # hueco rectangular: ancho, in
+    hole_rot: float = 0.0
+    leg_a: float = 4.0           # angulo: pierna sobre la cara, in
+    leg_b: float = 4.0           # angulo: pierna saliente, in
+    leg_side: int = 1            # angulo: pierna saliente hacia +1 o −1 (a lo ancho de la cara)
+    trim_gap: float = 0.0        # recorte contra elemento: holgura, in
+    trim_end: str = "Inicio"     # extremo del miembro que se recorta
     force_V: float = 0.0         # fuerza cortante de diseño de la operacion (kip), opcional
     force_T: float = 0.0         # fuerza de traccion de diseño de la operacion (kip), opcional
 
@@ -165,7 +200,7 @@ class Operation:
 
     @property
     def makes_element(self) -> bool:
-        return self.kind == OP_PLATE
+        return self.kind in (OP_PLATE, OP_ANGLE)
 
 
 @dataclass

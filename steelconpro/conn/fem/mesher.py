@@ -32,7 +32,7 @@ def _prism_vol(occ, pr: Prism):
         pts = [occ.addPoint(*pr.to_global(u, v, pr.w0)) for (u, v) in poly]
         lns = [occ.addLine(pts[i], pts[(i + 1) % len(pts)]) for i in range(len(pts))]
         return occ.addCurveLoop(lns)
-    loops = [loop(pr.poly)] + [loop(h) for h in pr.holes]
+    loops = [loop(pr.poly)] + [loop(h) for h in pr.holes] + [loop(h) for h in pr.holes_extra]
     surf = occ.addPlaneSurface(loops)
     out = occ.extrude([(2, surf)], *(W * L))
     return next(dt for dt in out if dt[0] == 3)

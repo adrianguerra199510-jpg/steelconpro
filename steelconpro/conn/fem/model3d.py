@@ -39,6 +39,7 @@ class Prism:
     w1: float = 1.0
     circle: tuple = None
     holes: list = field(default_factory=list)         # solo para tubos poligonales (mismo numero de vertices que el exterior)
+    holes_extra: list = field(default_factory=list)   # agujeros de cualquier forma (poligonos en (u, v)): pernos, huecos y aberturas de las placas
 
     @property
     def W(self):
@@ -86,6 +87,8 @@ class Prism:
                 out.append(outs[0])
                 out.append(outs[1])
             return out
+        if self.holes_extra:
+            return self._faces_with_holes()
         P0 = [self.to_global(u, v, self.w0) for (u, v) in self.poly]
         P1 = [self.to_global(u, v, self.w1) for (u, v) in self.poly]
         n = len(P0)
@@ -106,6 +109,32 @@ class Prism:
             out.append(P0)
             out.append(P1)
         return out
+
+
+def _prism_faces_with_holes(self):
+    """Caras de un prisma con agujeros de cualquier forma: tapas triangulizadas (con puentes) y paredes de contorno y de agujeros."""
+    from ..geom2d import triangulate, ccw, cw
+    outer = ccw(self.poly)
+    holes = [cw(h) for h in list(self.holes) + list(self.holes_extra)]
+    out = []
+    g = self.to_global
+    n = len(outer)
+    for k in range(n):
+        a, b = outer[k], outer[(k + 1) % n]
+        out.append([g(a[0], a[1], self.w0), g(b[0], b[1], self.w0), g(b[0], b[1], self.w1), g(a[0], a[1], self.w1)])
+    for h in holes:
+        m = len(h)
+        for k in range(m):
+            a, b = h[k], h[(k + 1) % m]
+            out.append([g(a[0], a[1], self.w0), g(b[0], b[1], self.w0), g(b[0], b[1], self.w1), g(a[0], a[1], self.w1)])
+    pts = list(outer) + [q for h in holes for q in h]
+    for (i, j, k) in triangulate(outer, holes):
+        for w in (self.w0, self.w1):
+            out.append([g(pts[i][0], pts[i][1], w), g(pts[j][0], pts[j][1], w), g(pts[k][0], pts[k][1], w)])
+    return out
+
+
+Prism._faces_with_holes = _prism_faces_with_holes
 
 
 def box_prism(c, size, axes=((1, 0, 0), (0, 1, 0), (0, 0, 1))):
@@ -333,6 +362,7 @@ def model_from_dict(d: dict) -> Model3D:
         x = dict(x)
         x["poly"] = [tuple(q) for q in x.get("poly", [])]
         x["holes"] = [[tuple(q) for q in h] for h in x.get("holes", [])]
+        x["holes_extra"] = [[tuple(q) for q in h] for h in x.get("holes_extra", [])]
         for k in ("o", "U", "V"):
             x[k] = tuple(x[k])
         if x.get("circle") is not None:

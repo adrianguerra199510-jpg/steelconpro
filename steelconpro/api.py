@@ -73,7 +73,7 @@ def constants(_=None) -> dict:
         "version": __version__,
         "ops": {"kinds": SP.OPERATIONS, "groups": SP.OP_GROUPS, "connection": list(SP.CONNECTION_OPS), "base": SP.OP_BASE},
         "op": {"TAB": SP.OP_TAB, "DANG": SP.OP_DANG, "SEAT": SP.OP_SEAT, "EP_FLUSH": SP.OP_EP_FLUSH, "EP_EXT": SP.OP_EP_EXT, "WELD": SP.OP_WELD, "GUSSET": SP.OP_GUSSET,
-               "GUSSET_W": SP.OP_GUSSET_W, "COPE": SP.OP_COPE, "CONT": SP.OP_CONT, "BASE": SP.OP_BASE, "PLATE": SP.OP_PLATE, "BOLTS": SP.OP_BOLTS, "FILLET": SP.OP_FILLET, "CUT": SP.OP_CUT},
+               "GUSSET_W": SP.OP_GUSSET_W, "COPE": SP.OP_COPE, "CONT": SP.OP_CONT, "BASE": SP.OP_BASE, "PLATE": SP.OP_PLATE, "BOLTS": SP.OP_BOLTS, "FILLET": SP.OP_FILLET, "CUT": SP.OP_CUT, "HOLE": SP.OP_HOLE, "ANGLE": SP.OP_ANGLE, "TRIM": SP.OP_TRIM},
         "orients": SP.PLATE_ORIENTS, "shapes": SP.PLATE_SHAPES, "attaches": SP.ATTACHES, "faces_i": SP.FACES_I, "faces_box": SP.FACES_BOX,
         "end_labels": SP.END_LABELS,
         "bolt_sizes": SP.SHEAR_BOLT_SIZES, "bolt_grades": [b["name"] for b in bolt_steels],
