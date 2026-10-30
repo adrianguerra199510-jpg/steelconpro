@@ -752,7 +752,12 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     L_cap = None
     if fem is not None:
         L_cap = float(fem.get("L", FEM_LEN))
-        lneg, lpos = min(lneg, L_cap), min(lpos, L_cap)
+        # el tramo modelado del principal rodea a los puntos donde llegan los miembros (no al origen del nudo): de (menor posicion − L) a (mayor + L)
+        pos = [float(m.pos) for m in nd.members] or [0.0]
+        lo, hi = max(min(pos) - L_cap, -lneg), min(max(pos) + L_cap, lpos)
+        if hi - lo < 2.0 * L_cap * 0.25:
+            lo, hi = max(-lneg, min(pos) - L_cap), min(lpos, max(pos) + L_cap)
+        lneg, lpos = -lo, hi                                    # lneg puede ser negativo: el tramo empieza por encima del origen
     fem_ends = {}
     mdl.parts.append(Part(nd.main_name, "column", f"{nd.main_name} {mshape.label}", Fy, Fu,
                           section_prisms(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos), t=mshape.tw, stub=True))
@@ -851,7 +856,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         ctxs.append(c)
     _build_gussets(ctxs, nd, mdl)
     bop = nd.base_op()
-    if bop is not None and prj is not None and hw:
+    if bop is not None and prj is not None and hw and fem is None:
         from . import baseplate as BP
         place = BP.end_of_member(nd, bop, free_ends, frames)
         if place is None:
