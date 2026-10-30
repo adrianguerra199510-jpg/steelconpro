@@ -305,6 +305,7 @@ def thumbnail(args) -> dict:
 
 
 # ================================================================================================== verificacion
+NODE_FEM: dict = {}             # (firma del nudo, caso) -> FemResult del analisis FEM del nudo
 FEM_CACHE: dict = {}            # firma del proyecto de la placa base de una combinacion -> (Fem3D, resultado crudo)
 JOBS: dict = {}
 
@@ -329,9 +330,49 @@ def _check_json(us, ch):
             "skip": ch.skip, "ref": ch.ref, "note": ch.note}
 
 
+def _node_sig(p: Project) -> str:
+    """Firma de lo que define el analisis FEM del nudo: miembros, operaciones, cargas y opciones del FEM (no el nombre ni las unidades)."""
+    d = {"node": asdict(p.node), "fea": {k: v for k, v in asdict(p.fea).items() if k in ("plastic", "plastic_limit", "mesh3d", "mesh3d_mode", "weld_peak_factor", "ccx_path")}}
+    return hashlib.md5(json.dumps(d, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def _node_fem(p: Project) -> dict:
+    """{caso: FemResult vigente} del analisis FEM del nudo."""
+    sig = _node_sig(p)
+    return {i: R for (sg, i), R in NODE_FEM.items() if sg == sig}
+
+
+def _fem_node_checks(p: Project):
+    """Verificaciones y avisos que salen del analisis FEM de cada caso de carga del nudo."""
+    from .conn.fem import post
+    from .conn import nodal as NOD
+    from .design import Check
+    names = [c for c, _l in NOD.cases_of(p.node)]
+    out, warns = [], []
+    for i, R in sorted(_node_fem(p).items()):
+        nm = names[i] if i < len(names) else f"Caso {i + 1}"
+        grp = f"FEM — {nm}"
+        cks = post.fem_checks(R.model, R, p)
+        if R.screened:
+            cks.append(Check("fem_vm_avg", "FEM 3D — esfuerzo de von Mises promediado máximo / φ·Fy", R.screen_ratio, 1.0, "-", "φ·Fy del acero",
+                             "máximo del conjunto; el pico puntual depende de la malla"))
+        for c in cks:
+            c.key = f"{c.key}__n{i}"
+            c.group = grp
+        out += cks
+        for n in R.notes:
+            warns.append(f"FEM del nudo ({nm}): {n}")
+        if R.equil[1] > 0 and R.equil[0] > 0.02 * R.equil[1] + 0.05:
+            warns.append(f"FEM del nudo ({nm}): el equilibrio no cierra (residuo {R.equil[0]:.3g} kip de {R.equil[1]:.3g} kip aplicados).")
+    return out, warns
+
+
 def verify(args) -> dict:
     p = _prj(args["connection"])
     R = solve_conn(p, fem_map=_fem_map(p))
+    fc, fw = _fem_node_checks(p)
+    R.checks += fc
+    R.warnings += fw
     us = p.units()
     nd = p.node
     gov = R.governing
@@ -342,6 +383,7 @@ def verify(args) -> dict:
         "ok": bool(R.ok), "max_ratio": R.max_ratio, "governing": gov.title if gov else "",
         "checks": [_check_json(us, c) for c in R.checks], "warnings": list(R.warnings), "combos": list(R.combo_rows or []), "combo_gov": R.combo_gov,
         "memory": R.rec.to_html() if R.rec is not None else "", "operations": ops, "has_fem": bool(_fem_map(p)),
+        "node_fem": sorted(_node_fem(p)),
     }
 
 
@@ -390,6 +432,71 @@ def fem_start(args) -> dict:
 
     threading.Thread(target=run, daemon=True).start()
     return {"job": jid}
+
+
+def fem_node_start(args) -> dict:
+    """Analisis FEM del nudo completo (miembros, placas, pernos y soldaduras) para cada caso de carga (o los de `cases`)."""
+    from .conn.fem import driver
+    from .conn import nodal as NOD
+    p = _prj(args["connection"])
+    cases = NOD.cases_of(p.node)
+    if not cases:
+        raise ApiError("El nudo no tiene casos de carga: agreguelos en «Cargas» (el analisis FEM aplica las cargas del analisis nodal).")
+    sig = _node_sig(p)
+    want = [int(i) for i in args.get("cases", range(len(cases))) if 0 <= int(i) < len(cases)]
+    todo = [i for i in want if (sig, i) not in NODE_FEM or args.get("force")]
+    jid = uuid.uuid4().hex[:10]
+    job = {"id": jid, "state": "running", "messages": [], "done": False, "error": "", "total": len(todo), "finished": 0, "cancel": None}
+    JOBS[jid] = job
+    if not todo:
+        job.update(state="done", done=True)
+        return {"job": jid}
+    from .mesh3d import CancelToken
+    tok = CancelToken()
+    job["cancel"] = tok
+    base = Path(args.get("folder") or os.path.join(os.path.expanduser("~"), "SteelConPro", "fem"))
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def run():
+        try:
+            for k, i in enumerate(todo):
+                pre = f"Caso {k + 1} de {len(todo)}: {cases[i][0]}\n"
+                R, msg = driver.run_fem(p, {"case": i}, str(base / f"{p.element or 'nudo'}_{stamp}" / f"caso{i + 1}"), "nudo",
+                                        progress=lambda m, pre=pre: job["messages"].append(pre + m), cancel=tok)
+                if R is None:
+                    job.update(state="cancelled" if str(msg).startswith(mesh3d.CANCELADO) else "error", error=str(msg), done=True)
+                    return
+                R.sig = sig
+                NODE_FEM[(sig, i)] = R
+                job["finished"] = k + 1
+            job.update(state="done", done=True)
+        except Exception as e:                                                  # noqa: BLE001
+            job.update(state="error", error=f"{type(e).__name__}: {e}", done=True)
+            job["trace"] = traceback.format_exc()
+
+    from . import mesh3d
+    threading.Thread(target=run, daemon=True).start()
+    return {"job": jid}
+
+
+def fem_node_scene(args) -> dict:
+    """Escena del campo de resultados del analisis FEM del nudo (von Mises, desplazamientos, deformacion plastica) para el visor."""
+    p = _prj(args["connection"])
+    i = int(args.get("case", 0))
+    R = NODE_FEM.get((_node_sig(p), i))
+    if R is None:
+        raise ApiError("No hay un analisis FEM vigente de ese caso: corralo primero (los cambios en el nudo lo invalidan).")
+    sc = FS.scene_fem(R, p, field=args.get("field", "vm"), scale=float(args.get("scale", 0.0)), part=args.get("part", "all"), loads=False, bolts=True)
+    d = {"parts": [_scene_to_json(sc, "Resultados", "fem")], "message": sc.message}
+    cb = sc.cbar
+    if cb is not None:
+        d["cbar"] = {"colors": np.asarray(cb["colors"], float).tolist(), "vmin": float(cb["vmin"]), "vmax": float(cb["vmax"]), "title": sc.title, "note": cb.get("note", "")}
+    P = np.asarray(sc.pts, float).reshape(-1, 3) if len(sc.pts) else np.zeros((1, 3))
+    d["bounds"] = [P.min(axis=0).tolist(), P.max(axis=0).tolist()]
+    d["summary"] = {"nodes": int(R.n_nodes), "elems": int(R.n_elems), "umax": float(R.umax), "vmmax": float(R.vmmax), "msg": R.msg, "notes": list(R.notes)}
+    d["parts_list"] = [{"id": k, "label": v} for k, v in FS.part_choices(R)]
+    d["fields"] = [{"id": k, "label": v} for k, v in FS.FIELDS if k != "peeq" or R.plastic]
+    return d
 
 
 def job_status(args) -> dict:

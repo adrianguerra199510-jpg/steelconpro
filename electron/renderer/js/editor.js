@@ -40,7 +40,7 @@ export async function leave() {
   save.cancel();
   if (E.dirty) await saveNow();
   if (E.viewer) { E.viewer.dispose(); E.viewer = null; }
-  if (E.pollTimer) clearInterval(E.pollTimer);
+  Object.values(E.pollers || {}).forEach((t) => t && clearInterval(t));
   return true;
 }
 
@@ -497,7 +497,7 @@ function buildRight() {
     { id: 'nod', label: 'Nudo', icon: 'zap', render: () => { E.ui.nodBox = h('div', { class: 'scroll', style: { padding: '0 12px 12px' } }); renderNodal(); return E.ui.nodBox; } },
     { id: 'mem', label: 'Memoria', icon: 'file-text', render: () => { E.ui.memBox = h('div', { class: 'scroll memory' }); renderMemory(); return E.ui.memBox; } },
   ];
-  if (hasBase) items.push({ id: 'fem', label: 'FEM', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
+  items.push({ id: 'fem', label: 'FEM', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
   const t = tabs(items, { active: E.ui.rtab && items.some((i) => i.id === E.ui.rtab) ? E.ui.rtab : 'res', cls: 'pill', onChange: (id) => { E.ui.rtab = id; } });
   E.ui.rtabs = t;
   const calc = btn('Calcular', { icon: 'play', kind: 'primary', onClick: () => runVerify.flush() });
@@ -641,60 +641,78 @@ function renderMemory() {
 function renderFem() {
   const box = E.ui.femBox; if (!box) return;
   clear(box);
-  const c = E.conn();
-  const combos = c.combos.map((x, i) => ({ value: String(i), label: x.name }));
-  const st = E.fem = E.fem || { combo: '0', field: 'vm', part: 'all', scale: 0 };
-  const status = h('div', { class: 'muted', style: { fontSize: '12.5px' } });
-  const run = btn('Ejecutar análisis 3D', { icon: 'cpu', kind: 'primary', onClick: async () => {
-    try {
-      const r = await call('fem_start', { connection: E.conn() });
-      E.job = r.job; pollJob(status, run, stop);
-    } catch (e) { errorBox(e); }
-  } });
-  const stop = btn('Cancelar', { icon: 'x', disabled: true, onClick: () => call('job_cancel', { job: E.job }) });
-  box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Análisis sólido 3D (Gmsh + CalculiX)' }),
-    h('p', { class: 'hint-text', text: 'Mallado y análisis de la placa base con elementos sólidos. Los resultados (tracción en pernos, presión de contacto, von Mises y fuerzas en la soldadura) entran al veredicto de la placa base.' }),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '8px' } }), status));
-  const view = h('div', { class: 'card-sec', style: { marginTop: '12px' } }, h('h4', { text: 'Ver resultados' }),
-    h('div', { class: 'form-grid' },
-      field2('Combinación', selectInput({ value: st.combo, options: combos, onChange: (v) => { st.combo = v; showFem(); } })),
-      field2('Resultado', selectInput({ value: st.field, options: [{ value: 'vm', label: 'Esfuerzo de von Mises' }, { value: 'u', label: 'Desplazamiento |U|' }, { value: 'uz', label: 'Desplazamiento vertical' }], onChange: (v) => { st.field = v; showFem(); } })),
-      field2('Escala de deformación', selectInput({ value: String(st.scale), options: [{ value: '0', label: 'Sin deformar' }, { value: '10', label: '×10' }, { value: '50', label: '×50' }, { value: '200', label: '×200' }], onChange: (v) => { st.scale = parseFloat(v); showFem(); } }))),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, btn('Mostrar en el visor', { icon: 'eye', onClick: showFem }), btn('Volver al modelo', { icon: 'box', onClick: backToModel })));
-  box.append(view);
-  if (E.job) pollJob(status, run, stop);
+  const hasBase = E.conn().node.operations.some((o) => o.kind === S.C.op.BASE);
+  box.append(femSection('node', { title: 'Análisis FEM del nudo (miembros, placas, pernos y soldaduras)',
+    desc: 'Modelo sólido con Gmsh + CalculiX: cada miembro se recorta a 30 in del nudo; el lado que equilibra del principal queda empotrado y en los demás extremos se aplican las cargas del análisis nodal. '
+      + 'Los pernos son resortes entre cuerpos rígidos, los cordones de filete unen las placas, y el acero es elasto-plástico (φ·Fy). El veredicto incluye lo que sale del FEM: fuerza en los pernos, esfuerzo en las soldaduras y deformación plástica de miembros y placas.',
+    start: (st) => call('fem_node_start', { connection: E.conn(), force: !!st.force }), scene: (st) => call('fem_node_scene', { connection: E.conn(), case: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
+    cases: () => (E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : []), caseLabel: 'Caso de carga' }));
+  if (hasBase) box.append(h('div', { style: { height: '12px' } }), femSection('base', { title: 'Análisis sólido 3D de la placa base',
+    desc: 'Mallado y análisis de la placa base con anclajes, concreto, llave de corte y rigidizadores. Sus resultados (tracción en pernos, presión de contacto, von Mises y fuerzas en la soldadura) entran al veredicto de la placa base.',
+    start: () => call('fem_start', { connection: E.conn() }), scene: (st) => call('fem_scene', { connection: E.conn(), combo: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
+    cases: () => E.conn().combos.map((x, i) => ({ value: String(i), label: x.name })), caseLabel: 'Combinación' }));
 }
 const field2 = (l, c) => h('div', { class: 'field' }, h('span', { class: 'lbl', text: l }), c);
 
-function pollJob(status, run, stop) {
-  if (E.pollTimer) clearInterval(E.pollTimer);
+function femSection(kind, cfg) {
+  E.fems = E.fems || {}; E.jobs = E.jobs || {};
+  const st = E.fems[kind] = E.fems[kind] || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  const status = h('div', { class: 'muted', style: { fontSize: '12.5px', whiteSpace: 'pre-line' } });
+  const run = btn('Ejecutar análisis', { icon: 'cpu', kind: 'primary', onClick: async () => {
+    try { const r = await cfg.start(st); E.jobs[kind] = r.job; pollJob(kind, status, run, stop, cfg); } catch (e) { errorBox(e); }
+  } });
+  const stop = btn('Cancelar', { icon: 'x', disabled: true, onClick: () => call('job_cancel', { job: E.jobs[kind] }) });
+  const cases = cfg.cases();
+  const fields = st.fields.length ? st.fields : [{ id: 'vm', label: 'Esfuerzo de von Mises' }, { id: 'u', label: 'Desplazamiento |U|' }, { id: 'uz', label: 'Desplazamiento vertical' }, { id: 'peeq', label: 'Deformación plástica (PEEQ)' }];
+  const parts = [{ id: 'all', label: 'Todo el conjunto' }, ...st.parts.filter((p) => p.id !== 'all')];
+  const show = () => showFem(kind, cfg);
+  const view = h('div', { style: { marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '10px' } }, h('h4', { text: 'Ver resultados: deformada y esfuerzos', style: { marginBottom: '8px' } }),
+    h('div', { class: 'form-grid' },
+      cases.length ? field2(cfg.caseLabel, selectInput({ value: st.combo, options: cases, onChange: (v) => { st.combo = v; show(); } })) : null,
+      field2('Resultado', selectInput({ value: st.field, options: fields.map((f) => ({ value: f.id, label: f.label })), onChange: (v) => { st.field = v; show(); } })),
+      field2('Deformada', selectInput({ value: String(st.scale), options: [{ value: '0', label: 'Sin deformar' }, { value: '10', label: '×10' }, { value: '50', label: '×50' }, { value: '200', label: '×200' }, { value: '1000', label: '×1000' }], onChange: (v) => { st.scale = parseFloat(v); show(); } })),
+      field2('Pieza', selectInput({ value: st.part, options: parts.map((p) => ({ value: p.id, label: p.label })), onChange: (v) => { st.part = v; show(); } }))),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, btn('Mostrar en el visor', { icon: 'eye', onClick: show }), btn('Volver al modelo', { icon: 'box', onClick: backToModel })));
+  const card = h('div', { class: 'card-sec' }, h('h4', { text: cfg.title }), h('p', { class: 'hint-text', text: cfg.desc }),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '6px' } }), status, view);
+  if (E.jobs[kind]) pollJob(kind, status, run, stop, cfg);
+  return card;
+}
+
+function pollJob(kind, status, run, stop, cfg) {
+  E.pollers = E.pollers || {};
+  if (E.pollers[kind]) clearInterval(E.pollers[kind]);
   run.disabled = true; stop.disabled = false;
   const tick = async () => {
     try {
-      const j = await call('job_status', { job: E.job });
+      const j = await call('job_status', { job: E.jobs[kind] });
       status.textContent = j.message || (j.done ? '' : 'Trabajando…');
       if (j.done) {
-        clearInterval(E.pollTimer); E.pollTimer = null; run.disabled = false; stop.disabled = true;
-        if (j.state === 'done') { status.textContent = 'Análisis terminado.'; toast('Análisis FEM terminado', 'ok'); E.job = null; runVerify.flush(); showFem(); }
-        else { status.textContent = j.state === 'cancelled' ? 'Cancelado.' : `Error: ${j.error}`; if (j.state !== 'cancelled') errorBox(new Error(j.error)); E.job = null; }
+        clearInterval(E.pollers[kind]); E.pollers[kind] = null; run.disabled = false; stop.disabled = true;
+        if (j.state === 'done') { status.textContent = 'Análisis terminado.'; toast('Análisis FEM terminado', 'ok'); E.jobs[kind] = null; runVerify.flush(); showFem(kind, cfg); }
+        else { status.textContent = j.state === 'cancelled' ? 'Cancelado.' : `Error: ${j.error}`; if (j.state !== 'cancelled') errorBox(new Error(j.error)); E.jobs[kind] = null; }
       }
-    } catch (e) { clearInterval(E.pollTimer); E.pollTimer = null; errorBox(e); }
+    } catch (e) { clearInterval(E.pollers[kind]); E.pollers[kind] = null; errorBox(e); }
   };
-  E.pollTimer = setInterval(tick, 900); tick();
+  E.pollers[kind] = setInterval(tick, 1000); tick();
 }
 
-async function showFem() {
-  const st = E.fem;
+async function showFem(kind, cfg) {
+  const st = E.fems[kind];
   try {
-    const d = await call('fem_scene', { connection: E.conn(), combo: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part });
+    const d = await cfg.scene(st);
     E.femView = true;
     E.viewer.setModel(d, { keepView: true });
+    E.viewer.setLoads([]);
     clear(E.ui.fembar);
     if (d.cbar) E.ui.fembar.append(colorbar(d.cbar));
+    if (d.parts_list) st.parts = d.parts_list;
+    if (d.fields) st.fields = d.fields;
+    if (d.summary) setStatus(`FEM: ${d.summary.nodes.toLocaleString('es')} nodos · |U|máx = ${S.us.q('L', d.summary.umax, 3)} · von Mises máx = ${S.us.q('S', d.summary.vmmax, 1)}`);
     if (d.message) toast(Array.isArray(d.message) ? d.message[0] : String(d.message), 'info');
   } catch (e) { errorBox(e); }
 }
-function backToModel() { E.femView = false; clear(E.ui.fembar); runMesh.flush(); }
+function backToModel() { E.femView = false; clear(E.ui.fembar); runMesh.flush(); applyLoads(); }
 
 function colorbar(cb) {
   const cv = h('canvas', { width: 14, height: 140, style: { borderRadius: '4px', border: '1px solid var(--border)' } });

@@ -189,6 +189,48 @@ def _draw_items(nd: Nodo, loads: list, bal: dict) -> list:
     return items
 
 
+def _box(E, R):
+    E = np.asarray(E, float)
+    return (float(E[0] - R), float(E[0] + R), float(E[1] - R), float(E[1] + R), float(E[2] - R), float(E[2] + R))
+
+
+def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, mshape):
+    """Apoyo y cargas del modelo FEM de un caso de carga: el lado que equilibra del principal se empotra; en el otro lado del principal y en el extremo libre de cada
+    miembro conectado se aplica la accion dada (fuerza y momento trasladados al extremo).  Devuelve (apoyos, cargas) del modelo 3D."""
+    from .fem.model3d import FaceSel, LoadApp, Support
+    A = AS.main_frame(nd)[0]
+    bal = balance(nd, loads)
+    sb = bal["side"]
+    Rm = max(mshape.d, mshape.bf) / 2.0 + 1.0
+    O = np.zeros(3)
+    E_of = lambda side: A * side * (lpos if side > 0 else lneg)             # noqa: E731
+    sups = [Support("Apoyo del principal", FaceSel(nd.main_name, _box(E_of(sb), Rm), tuple(float(x) for x in A * sb)), (1, 2, 3))]
+    lds = []
+    sg = -sb
+    Fg, Mg = np.zeros(3), np.zeros(3)
+    for l in loads:
+        if l.member == nd.main_name and (int(getattr(l, "side", 0)) or -sb) == sg:
+            F, M = _vec(l, local_axes(nd, nd.main_name, sg))
+            Fg, Mg = Fg + F, Mg + M
+        elif l.member == NODE:                                            # carga externa del nudo: se traslada al extremo del lado dado
+            Fg, Mg = Fg + np.array([l.N, l.Vy, l.Vz], float), Mg + np.array([l.T, l.My, l.Mz], float)
+    Eg = E_of(sg)
+    if np.linalg.norm(Fg) > 1e-9 or np.linalg.norm(Mg) > 1e-9:
+        lds.append(LoadApp(f"Carga de {nd.main_name}", FaceSel(nd.main_name, _box(Eg, Rm), tuple(float(x) for x in A * sg)), tuple(float(x) for x in Eg),
+                           tuple(float(x) for x in Fg), tuple(float(x) for x in (Mg + np.cross(O - Eg, Fg)))))
+    for l in loads:
+        if l.member in (nd.main_name, NODE) or l.member not in ends:
+            continue
+        F, M = _vec(l, local_axes(nd, l.member))
+        if np.linalg.norm(F) < 1e-9 and np.linalg.norm(M) < 1e-9:
+            continue
+        E, dirv, R = ends[l.member]
+        E = np.asarray(E, float)
+        lds.append(LoadApp(f"Carga de {l.member}", FaceSel(l.member, _box(E, R), tuple(float(x) for x in dirv)), tuple(float(x) for x in E),
+                           tuple(float(x) for x in F), tuple(float(x) for x in (M + np.cross(_node_point(nd, l.member) - E, F)))))
+    return sups, lds
+
+
 def analysis(prj, nd: Nodo) -> dict:
     """Resumen del analisis nodal para la interfaz: por caso, las filas del equilibrio, lo que se dibuja y las cargas que recibe la placa base."""
     cases = cases_of(nd)

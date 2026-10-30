@@ -720,14 +720,19 @@ def set_main(nd, name) -> list:
 
 
 def build_model(prj, vals=None) -> Model3D:
+    """Modelo 3D de la conexion.  `vals` = {"case": i} arma el modelo del analisis FEM del caso de carga i (miembros recortados, apoyo y cargas)."""
     from .specs import ATTR_OF
     nd = getattr(prj, ATTR_OF[prj.ctype])
-    return build_nodo(nd, name=prj.element or prj.ctype, prj=prj)
+    return build_nodo(nd, name=prj.element or prj.ctype, prj=prj, fem=vals if isinstance(vals, dict) else None)
 
 
-def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
-    """Modelo 3D del nudo: el miembro principal, los miembros conectados y el resultado de aplicar las operaciones en el orden de la lista."""
-    hw = nd.show_hw if hardware is None else hardware
+FEM_LEN = 30.0        # largo de miembro que se modela en el analisis FEM (in): mas alla, el esfuerzo ya no depende del nudo
+
+
+def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
+    """Modelo 3D del nudo: el miembro principal, los miembros conectados y el resultado de aplicar las operaciones en el orden de la lista.
+    Con `fem` ({"case": i}) los miembros se recortan a `FEM_LEN` y se agregan el apoyo del principal y las cargas del caso (analisis nodal)."""
+    hw = True if fem is not None else (nd.show_hw if hardware is None else hardware)
     mdl = Model3D(name)
     mshape = shape_of(nd.main_shape)
     A, msx, msy = main_frame(nd)
@@ -735,6 +740,11 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
     Fy, Fu = _steel(nd.main_steel)
     if lneg + lpos < 1.0:
         lneg = lpos = 24.0
+    L_cap = None
+    if fem is not None:
+        L_cap = float(fem.get("L", FEM_LEN))
+        lneg, lpos = min(lneg, L_cap), min(lpos, L_cap)
+    fem_ends = {}
     mdl.parts.append(Part(nd.main_name, "column", f"{nd.main_name} {mshape.label}", Fy, Fu,
                           section_prisms(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos), t=mshape.tw, stub=True))
     ext = outer_extent(mshape)
@@ -759,6 +769,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
             mdl.notes.append(f"{m.name}: su eje no toca al miembro principal (revise el azimut, la elevación o la posición).")
             s_ex = 0.0
         Q = P0 + dirv * s_ex
+        Lm = max(min(m.L, L_cap) if L_cap else m.L, 1.0)
         ops = nd.ops_of(m.name)
         conns = [o for o in ops if o.is_connection]
         if len(conns) > 1:
@@ -798,10 +809,10 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
             if 0 < cope.cope_top < shp.tf or 0 < cope.cope_bot < shp.tf:
                 mdl.notes.append(f"{m.name}: el corte es menos profundo que el espesor del ala ({shp.tf:g} in): el ala no queda eliminada.")
             if cope.kind == OP_CUT and cope.cut_at == "Fin":                  # corte en el extremo libre: se recorta el miembro visto desde su otro extremo
-                end_pt = Q + dirv * (ms + max(m.L, 1.0))
-                prisms = cope_prisms(shp, end_pt, sx, -sy, -dirv, 0.0, max(m.L, 1.0), cope.cope_bot, cope.cope_top, cope.cope_len)
+                end_pt = Q + dirv * (ms + Lm)
+                prisms = cope_prisms(shp, end_pt, sx, -sy, -dirv, 0.0, Lm, cope.cope_bot, cope.cope_top, cope.cope_len)
             else:
-                prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0), cope.cope_top, cope.cope_bot, cope.cope_len)
+                prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, Lm, cope.cope_top, cope.cope_bot, cope.cope_len)
         else:
             if cope is not None and shp.kind != W_SHAPE:
                 mdl.notes.append(f"{m.name}: el corte solo se dibuja en perfiles I.")
@@ -809,9 +820,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
             if auto is not None:
                 ct_, cb_, cl_ = auto
                 mdl.notes.append(f"{m.name}: corte automático para librar las alas de «{nd.main_name}» (superior {ct_:g} in, inferior {cb_:g} in, largo {cl_:g} in).")
-                prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0), ct_, cb_, cl_)
+                prisms = cope_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, Lm, ct_, cb_, cl_)
             else:
-                prisms = section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, max(m.L, 1.0))
+                prisms = section_prisms(shp, Q + dirv * ms, sx, sy, dirv, 0.0, Lm)
         mdl.parts.append(Part(m.name, "brace" if diag else "beam", f"{m.name} {shp.label}", Fy_m, Fu_m, prisms, t=shp.tw, stub=True))
         mdl.parts[-1].owner = m.name
         for p in c.parts:
@@ -820,8 +831,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
         mdl.bolts += c.bolts
         mdl.welds += c.welds
         mdl.notes += c.notes
-        end = Q + dirv * (ms + max(m.L, 1.0))
+        end = Q + dirv * (ms + Lm)
         mdl.tags.append((tuple(map(float, end)), m.name))
+        fem_ends[m.name] = (end, dirv, max(shp.d, shp.bf) / 2.0 + 1.0)
         axes.append((m.name, Q + dirv * ms, end, P0, float(m.pos)))
         free_ends[m.name], frames[m.name] = (Q + dirv * ms, end, dirv), (dirv, sx, sy)
         reg[m.name] = {"type": "miembro", "part": m.name, "t": shp.tw, "Fy": Fy_m, "Fu": Fu_m, "faces": member_faces(shp, Q + dirv * ms, end, dirv, sx, sy)}
@@ -847,8 +859,37 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None) -> Model3D:
                 "Cara inferior": FaceFrame(Ob - Fb[:, 0] * Bw / 2.0, Fb[:, 0], -Fb[:, 2], Bw, Nw / 2.0, tpb)}}
     mdl.generic = OPS.build_generic(mdl, nd, reg, hw)
     mdl.elems = reg
+    if fem is not None:
+        _fem_setup(mdl, nd, fem, fem_ends, lneg, lpos, mshape)
     _node_dims(mdl, A * (-lneg), A * lpos, axes)
     return mdl
+
+
+def _fem_setup(mdl, nd, fem, ends, lneg, lpos, mshape):
+    """Zona refinada del analisis FEM, apoyo del miembro principal y cargas del caso de carga `fem['case']` (analisis nodal)."""
+    from . import nodal
+    cases = nodal.cases_of(nd)
+    pts = [np.asarray(b.p, float) for b in mdl.bolts] + [np.asarray(w.p0, float) for w in mdl.welds] + [np.asarray(w.p1, float) for w in mdl.welds]
+    for p in mdl.parts:
+        if not p.stub:
+            for pr in p.prisms:
+                pts += list(pr.corners())
+    if pts:
+        P = np.asarray(pts)
+        lo, hi = P.min(axis=0) - 3.0, P.max(axis=0) + 3.0
+        r = max(mshape.d, mshape.bf) / 2.0 + 3.0
+        lo, hi = np.minimum(lo, -r), np.maximum(hi, r)
+    else:
+        lo, hi = np.full(3, -12.0), np.full(3, 12.0)
+    mdl.zone = (float(lo[0]), float(hi[0]), float(lo[1]), float(hi[1]), float(lo[2]), float(hi[2]))
+    i = int(fem.get("case", 0))
+    if not cases:
+        mdl.notes.append("Sin casos de carga: el análisis FEM necesita cargas (agréguelas en «Cargas»).")
+        sups, lds = nodal.fem_conditions(nd, [], ends, lneg, lpos, mshape)
+    else:
+        sups, lds = nodal.fem_conditions(nd, cases[min(i, len(cases) - 1)][1], ends, lneg, lpos, mshape)
+    mdl.supports += sups
+    mdl.loads += lds
 
 
 _PLANES = {"plan": (0, 1), "front": (0, 2), "side": (1, 2)}
