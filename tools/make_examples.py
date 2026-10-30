@@ -68,10 +68,11 @@ def columna_con_placa_base() -> Project:
     nd = PRE.build(MODE_COL, "int2", "I", "tab")
     nd.main_end = END_LABELS[2]                      # la columna nace en el nudo: la placa va en su extremo inferior
     nd.main_len_pos = 120.0
+    nd.main_len_pos = 72.0
     for m in nd.members:
-        m.pos = 96.0
+        m.pos = 30.0                                 # un solo nudo: las vigas y la diagonal llegan a la columna cerca de la placa base
     _set(nd, "V1", OP_EP_FLUSH)
-    nd.members.append(Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=-45.0, pos=84.0, L=60.0))
+    nd.members.append(Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=45.0, pos=20.0, L=60.0))
     nd.operations.append(Operation(kind=OP_GUSSET, member="D1", plate_t=0.5))
     nd.operations.append(Operation(kind=OP_BASE, member=nd.main_name, end=-1))
     nd.loads = [Load("Caso 1", "V1", Vz=-15.0), Load("Caso 1", "V2", Vz=-15.0), Load("Caso 1", "D1", N=2.0)]
