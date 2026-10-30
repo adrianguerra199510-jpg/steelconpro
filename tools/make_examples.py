@@ -124,9 +124,29 @@ def diagonal_en_inglete() -> Project:
     return p
 
 
+def base_con_diagonal() -> Project:
+    """Columna W14X90 sobre placa base con una diagonal HSS conectada con cartela (gusset) cerca de la base: un solo nudo, la diagonal descarga en la placa base."""
+    p = Project(); p.ctype = CT_NODE; p.element = "CN-07"; p.name = "Ejemplo: placa base con diagonal y cartela"
+    nd = PRE.build(MODE_COL, "int2", "I", "tab")
+    nd.main_end = END_LABELS[2]
+    nd.main_len_pos = 72.0
+    nd.members = [Member(name="D1", shape="HSS5X5X3/8", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=45.0, pos=12.0, L=72.0)]
+    nd.operations = [Operation(kind=OP_GUSSET, member="D1", plate_t=0.5), Operation(kind=OP_BASE, member=nd.main_name, end=-1)]
+    nd.loads = [Load("Caso 1", "D1", N=-20.0), Load("Caso 1", "@nudo", Vz=-60.0)]       # compresión en la diagonal y la carga de gravedad que baja por la columna
+    ref = load_book(str(OUT / "PB-01_W14X90.scp"))[0]
+    for k in ("plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea", "combos"):
+        setattr(p, k, getattr(ref, k))
+    p.u_len, p.u_force, p.u_stress, p.u_moment = ref.u_len, ref.u_force, ref.u_stress, ref.u_moment
+    p.combo_list()
+    p.apply_combo(0)
+    p.node = nd
+    return p
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     for fn, mk in (("CN-01_columna_con_vigas.scp", nodo_columna), ("CN-02_viga_con_secundarias.scp", viga_a_viga), ("CN-03_cordon_con_diagonales.scp", cruceta), ("CN-04_columna_con_placa_base.scp", columna_con_placa_base),
-                   ("CN-05_viga_con_placas_trapezoidales.scp", refuerzo_con_placas), ("CN-06_diagonal_con_recorte_y_angulo.scp", diagonal_en_inglete)):
+                   ("CN-05_viga_con_placas_trapezoidales.scp", refuerzo_con_placas), ("CN-06_diagonal_con_recorte_y_angulo.scp", diagonal_en_inglete),
+                   ("CN-07_placa_base_con_diagonal.scp", base_con_diagonal)):
         save_book(str(OUT / fn), [mk()])
         print("->", OUT / fn)
