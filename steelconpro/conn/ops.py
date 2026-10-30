@@ -157,6 +157,14 @@ def ordered(nd) -> list:
 # ================================================================================================== geometria (ver plates.py)
 
 
+def rot_pts(pts, deg):
+    """Gira los puntos (a, b) de un grupo alrededor de su centro, en el plano de la cara."""
+    if not deg:
+        return pts
+    c, sn = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    return [(a * c - b * sn, a * sn + b * c) for a, b in pts]
+
+
 def bolt_grid(rows, cols, s, g):
     """Posiciones (a lo largo, a lo ancho) de una cuadricula de pernos centrada."""
     return [((i - (rows - 1) / 2.0) * s, (j - (cols - 1) / 2.0) * g) for i in range(max(rows, 1)) for j in range(max(cols, 1))]
@@ -253,6 +261,37 @@ def _punch_all(mdl):
             part = parts.get(pn)
             if part is not None:
                 PL.punch(part, np.asarray(b.p, float), ax, PL.circle_fn(float(b.dh), 20))
+
+
+def _seg_dist(p, a, b):
+    a, b, p = np.asarray(a, float), np.asarray(b, float), np.asarray(p, float)
+    d = b - a
+    t = 0.0 if float(d @ d) < 1e-12 else max(0.0, min(1.0, float((p - a) @ d) / float(d @ d)))
+    return float(np.linalg.norm(p - (a + t * d)))
+
+
+def bolt_edge_distance(reg, names, ff, pts3):
+    """Menor distancia de un perno al borde de las piezas que atraviesa: contorno real de las placas (poligono) y borde de la cara de los miembros."""
+    best = 1e9
+    for nm in names:
+        e = reg.get(nm)
+        if e is None:
+            continue
+        for P in pts3:
+            if e.get("geo") is not None:
+                g = e["geo"]
+                u, v = float((P - g["o"]) @ g["e1"]), float((P - g["o"]) @ g["e2"])
+                poly = g["poly"]
+                d = min(_seg_dist((u, v), poly[k], poly[(k + 1) % len(poly)]) for k in range(len(poly)))
+            else:
+                fs = [f for f in e["faces"].values() if abs(float(f.N @ ff.N)) > 0.98 and f.L > 1.0]
+                if not fs:
+                    continue
+                f = min(fs, key=lambda f_: abs(float((P - f_.O) @ f_.N)))
+                s_, u_ = float((P - f.O) @ f.A), float((P - f.O) @ f.U)
+                d = min(s_, f.L - s_, f.uh - abs(u_))
+            best = min(best, d)
+    return best if best < 1e8 else None
 
 
 def build_generic(mdl, nd, reg: dict, hw: bool = True):
@@ -367,11 +406,13 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             layers = _bolt_layers(reg, names, ff.wall)
             layers[0] = (layers[0][0], ff.wall) if reg[o.parent]["type"] == "miembro" else layers[0]
             total = sum(t for _n, t in layers)
-            pts = bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g)
+            pts = rot_pts(bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g), o.pl_rot)
             grip, s0 = [], 0.0
             for nm_, t_ in layers:
                 grip.append((reg[nm_]["part"], s0, s0 + t_))
                 s0 += t_
+            pts3 = [ff.point(o.pl_s, o.pl_u) + ff.A * a + ff.U * b for a, b in pts]
+            ent["edge"] = bolt_edge_distance(reg, names, ff, pts3)
             if hw:
                 for k, (a, b) in enumerate(pts):
                     p = ff.point(o.pl_s, o.pl_u) + ff.A * a + ff.U * b
@@ -380,7 +421,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
         elif o.kind == OP_HOLE:
             ff = parent["faces"][o.face]
             part = next((p for p in mdl.parts if p.name == parent["part"]), None)
-            pts = bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g)
+            pts = rot_pts(bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g), o.pl_rot)
             if o.hole_shape == HOLE_SHAPES[1]:
                 fn = PL.slot_fn(float(o.hole_L), float(o.hole_D), float(o.hole_rot), ff.A)
             elif o.hole_shape == HOLE_SHAPES[2]:
@@ -558,7 +599,7 @@ def add_checks(prj, nd, R, rec, mdl):
             if rec is not None:
                 rec.section(f"OPERACION {i + 1}: {o.kind.upper()}")
                 rec.text(f"{o.rows * o.cols} pernos Ø{o.bolt_size} {o.bolt_grade} desde la cara «{o.face}» de «{o.parent}» a través de {', '.join(n for n, _t in ent['layers'])}.")
-            _bolt_checks(R.checks, grp, key, o, o.rows * o.cols, layers, min(edge_a, edge_b), True, V, T, None)
+            _bolt_checks(R.checks, grp, key, o, o.rows * o.cols, layers, ent.get("edge") if ent.get("edge") is not None else min(edge_a, edge_b), True, V, T, None)
         elif o.kind == OP_FILLET:
             for tg in ent.get("plates", []):
                 e = mdl.elems.get(tg, {})

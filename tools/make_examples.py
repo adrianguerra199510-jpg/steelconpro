@@ -143,10 +143,36 @@ def base_con_diagonal() -> Project:
     return p
 
 
+def base_con_diagonal_cartela_cortada() -> Project:
+    """Placa base con una diagonal W unida por pernos a una cartela CORTADA (polígono libre) que se suelda a la cara de la columna y a la placa base: todo con operaciones generales."""
+    import numpy as np
+    from steelconpro.conn.specs import OP_PLATE, OP_FILLET, OP_BOLTS, PLATE_SHAPES, PLATE_ORIENTS, FACES_I
+    from steelconpro.conn import assembly as AS
+    p = base_con_diagonal()
+    p.element = "CN-08"; p.name = "Ejemplo: placa base con diagonal y cartela cortada soldada a la columna y a la placa base"
+    p.plate.B = 36.0                                   # la placa se amplía hacia el lado de la cartela
+    p.conc.B2, p.conc.N2 = 48.0, 40.0
+    nd = p.node
+    nd.members = [Member(name="D1", shape="W8X31", steel="ASTM A992", az=0.0, el=45.0, roll=90.0, pos=12.0, gap=5.0, L=72.0)]
+    nd.operations = [o for o in nd.operations if o.kind == OP_BASE]
+    nd.loads = [Load("Caso 1", "D1", N=-20.0), Load("Caso 1", nd.main_name, N=-60.0, side=1)]
+    # cartela: plano del eje de la columna y la normal de su ala; contorno (u a lo largo de la columna, v hacia afuera) con las esquinas cortadas
+    g = _gen(nd, OP_PLATE, parent=nd.main_name, face=FACES_I[0], orient=PLATE_ORIENTS[2], role="Cartela", shape=PLATE_SHAPES[6],
+             pts=[[0, 0], [0, 11], [17, 11], [26, 16], [36, 9], [36, 0]], plate_t=0.5, pl_s=0.0, pl_u=4.25, weld_size=0.3125, force_V=14.1)
+    _gen(nd, OP_FILLET, targets=[g.name], parent="Placa base", face="Cara superior", weld_all=False, weld_edges=[0], weld_size=0.3125, force_V=14.1)
+    b = _gen(nd, OP_BOLTS, parent=g.name, face="Cara −", targets=["D1"], rows=3, cols=2, bolt_s=3.0, bolt_g=3.5, bolt_size="3/4", bolt_grade="A325-N", pl_rot=-45.0, force_V=20.0)
+    # el grupo se centra en el punto del eje de la diagonal (a 7.5 in de la cara de la columna)
+    ff = AS.build_model(p).elems[g.name]["faces"]["Cara −"]
+    c = np.array([14.5, -4.25, 26.5])
+    b.pl_s, b.pl_u = float(np.dot(c - ff.O, ff.A)), float(np.dot(c - ff.O, ff.U))
+    return p
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     for fn, mk in (("CN-01_columna_con_vigas.scp", nodo_columna), ("CN-02_viga_con_secundarias.scp", viga_a_viga), ("CN-03_cordon_con_diagonales.scp", cruceta), ("CN-04_columna_con_placa_base.scp", columna_con_placa_base),
                    ("CN-05_viga_con_placas_trapezoidales.scp", refuerzo_con_placas), ("CN-06_diagonal_con_recorte_y_angulo.scp", diagonal_en_inglete),
-                   ("CN-07_placa_base_con_diagonal.scp", base_con_diagonal)):
+                   ("CN-07_placa_base_con_diagonal.scp", base_con_diagonal),
+                   ("CN-08_placa_base_cartela_cortada.scp", base_con_diagonal_cartela_cortada)):
         save_book(str(OUT / fn), [mk()])
         print("->", OUT / fn)

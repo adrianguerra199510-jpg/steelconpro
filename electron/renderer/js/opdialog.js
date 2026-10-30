@@ -273,7 +273,8 @@ function boltsBody(body, E, op, ctx, info, el, nd, us, addForm) {
     { path: 'bolt_size', label: 'Diámetro', type: 'combo', items: C.bolt_sizes }, { path: 'bolt_grade', label: 'Calidad', type: 'combo', items: C.bolt_grades },
     { path: 'rows', label: 'Filas (a lo largo)', type: 'int', lo: 1, hi: 20 }, { path: 'cols', label: 'Columnas (a lo ancho)', type: 'int', lo: 1, hi: 10 },
     numField2('Separación a lo largo', 'bolt_s', 1, 40), numField2('Separación a lo ancho', 'bolt_g', 1, 40),
-    numField2('Posición del centro a lo largo', 'pl_s', -600, 6000), numField2('Desplazamiento transversal', 'pl_u', -600, 600)]);
+    numField2('Posición del centro a lo largo', 'pl_s', -600, 6000), numField2('Desplazamiento transversal', 'pl_u', -600, 600),
+    { path: 'pl_rot', label: 'Giro del grupo (°)', type: 'num', uk: '-', lo: -180, hi: 180, step: 5, dec: 1 }]);
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Grupo de pernos' }), grid));
   root.refresh = () => grid.refresh();
   body.append(root);
@@ -398,7 +399,7 @@ function holeBody(body, E, op, ctx, info, el, nd, addForm) {
     else if (op.hole_shape === C.hole_shapes[1]) f.push(numField('Largo total de la ranura', 'hole_L', 'L', 0.2, 60), numField('Ancho de la ranura', 'hole_D', 'L', 0.1, 30), numField('Giro', 'hole_rot', '-', -180, 180, 5, 1));
     else f.push(numField('Largo', 'hole_L', 'L', 0.2, 60), numField('Ancho', 'hole_W', 'L', 0.1, 60), numField('Giro', 'hole_rot', '-', -180, 180, 5, 1));
     f.push({ path: 'rows', label: 'Filas (a lo largo)', type: 'int', lo: 1, hi: 30 }, { path: 'cols', label: 'Columnas (a lo ancho)', type: 'int', lo: 1, hi: 30 },
-      numField('Separación a lo largo', 'bolt_s', 'L', 0.5, 120), numField('Separación a lo ancho', 'bolt_g', 'L', 0.5, 120), numField('Posición del centro a lo largo', 'pl_s', 'L', -600, 6000), numField('Desplazamiento transversal', 'pl_u', 'L', -600, 600));
+      numField('Separación a lo largo', 'bolt_s', 'L', 0.5, 120), numField('Separación a lo ancho', 'bolt_g', 'L', 0.5, 120), numField('Posición del centro a lo largo', 'pl_s', 'L', -600, 6000), numField('Desplazamiento transversal', 'pl_u', 'L', -600, 600), numField('Giro del grupo (°)', 'pl_rot', '-', -180, 180, 5, 1));
     geo.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Huecos' }), addForm(f)));
   };
   rebuild();

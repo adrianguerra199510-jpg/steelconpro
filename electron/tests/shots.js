@@ -8,7 +8,7 @@ const os = require('os');
   const shots = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'scp-shots-'));
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'scp-ws-'));
   const ex = path.join(__dirname, '..', '..', 'ejemplos');
-  for (const f of ['CN-01_columna_con_vigas.scp', 'CN-04_columna_con_placa_base.scp', 'CN-05_viga_con_placas_trapezoidales.scp', 'CN-06_diagonal_con_recorte_y_angulo.scp', 'CN-07_placa_base_con_diagonal.scp']) fs.copyFileSync(path.join(ex, f), path.join(ws, f));
+  for (const f of ['CN-01_columna_con_vigas.scp', 'CN-04_columna_con_placa_base.scp', 'CN-05_viga_con_placas_trapezoidales.scp', 'CN-06_diagonal_con_recorte_y_angulo.scp', 'CN-07_placa_base_con_diagonal.scp', 'CN-08_placa_base_cartela_cortada.scp']) fs.copyFileSync(path.join(ex, f), path.join(ws, f));
   const app = await electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, '..'), '--no-sandbox', '--disable-gpu-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader'], env: { ...process.env, SCP_WORKSPACE: ws } });
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1500, height: 900 });
@@ -27,6 +27,7 @@ const os = require('os');
   await step('CN-05', async () => { await open('CN-05'); await page.screenshot({ path: path.join(shots, 'ejemplo_CN-05_placas.png') }); await home(); });
   await step('CN-06', async () => { await open('CN-06'); await page.screenshot({ path: path.join(shots, 'ejemplo_CN-06_recorte_angulo.png') }); await home(); });
   await step('CN-07', async () => { await open('CN-07'); await page.screenshot({ path: path.join(shots, 'ejemplo_CN-07_base_diagonal.png') }); await home(); });
+  await step('CN-08', async () => { await open('CN-08'); await page.screenshot({ path: path.join(shots, 'ejemplo_CN-08_cartela_cortada.png') }); await home(); });
   await step('convertir', async () => {
     await open('CN-01');
     await page.dblclick('.tree-item:has-text("Placa extrema")');
