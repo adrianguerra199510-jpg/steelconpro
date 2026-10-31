@@ -77,7 +77,7 @@ PLATE_SHAPES = ["Rectangular", "Triangular", "Con esquina recortada", "Circular"
 OPENINGS = ["Ninguna", "Circular", "Rectangular", "Rodea al miembro"]
 HOLE_SHAPES = ["Circular", "Ranura", "Rectangular"]
 WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcial)"]
-TAB_MODES = ["Sobre la cara del soporte", "Hasta el interior de las alas del principal", "Dos placas (arriba y abajo) hasta las alas del principal"]
+TAB_MODES = ["Sobre la cara del soporte", "Hasta el interior de las alas del principal"]
 BEAM_CONNS = ["Atornillada", "Soldada"]
 TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro"]
 WELD_MODES = ["Bordes de la placa", "Contorno del miembro"]
@@ -181,6 +181,7 @@ class Operation:
     ref_face: str = ""           # alinear cara: cara del elemento de referencia (el plano de trabajo no tiene caras que elegir)
     al_offset: float = 0.0       # alinear cara: distancia a la que queda la cara del plano de referencia, in (+ en el sentido de la normal de la referencia)
     tab_clip: float = -1.0        # placa simple: lado del recorte de las esquinas junto al soporte, in (<0 o 0 = sin recorte; con «hasta las alas» la placa ya es escalonada)
+    tab_split: bool = False      # placa simple «hasta las alas» sobre un principal vertical: dos placas, arriba y abajo, en lugar de una placa llena
     tp_sep: float = 0.0          # dos placas arriba y abajo: distancia libre entre ellas, in (0 = el alto de la placa de pernos)
     tp_t: float = 0.0            # dos placas arriba y abajo: espesor, in (0 = el de la placa)
     tab_y: float = 0.0           # placa simple: desplazamiento del centro de la placa a lo largo del peralte de la viga, in

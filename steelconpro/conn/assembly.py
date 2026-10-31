@@ -283,12 +283,17 @@ def tab_extra(nd, m, op) -> float:
     """Placa simple «hasta el interior de las alas»: cuánto se saca la viga del principal (del alma al borde de las alas) para que no choque con ellas.
     0 si no aplica (el principal no es un perfil I o la viga no llega por el alma)."""
     from .specs import TAB_MODES
-    if op is None or op.kind != OP_TAB or op.tab_mode not in (TAB_MODES[1], TAB_MODES[2]):
+    if op is None or op.kind != OP_TAB or op.tab_mode == TAB_MODES[0] and not op.tab_mode.startswith("Dos placas"):
         return 0.0
     ms = shape_of(nd.main_shape)
     if ms.kind != W_SHAPE or attach_info(nd, m).get("face") != "alma":
         return 0.0
     return max(float(ms.bf) / 2.0 - float(ms.tw) / 2.0, 0.0)
+
+
+def _tab_split(op, ctx=None) -> bool:
+    """Dos placas arriba y abajo: solo con «hasta el interior de las alas» y el principal vertical (los archivos con la opción antigua también la conservan)."""
+    return bool(op.tab_split or str(op.tab_mode).startswith("Dos placas"))
 
 
 def tab_dims(op, m, shp, db, extra=0.0):
@@ -332,7 +337,7 @@ def _tab_geometry(ctx, tag):
     if extra > 0:                                                       # placa escalonada: llena el espacio entre las alas y, fuera de ellas, se reduce a la placa de los pernos
         e = min(extra, Lp - 0.5)
         Ht = min(H, Hf) if ctx.op.tab_H <= 0 else H
-        two = ctx.op.tab_mode == TAB_MODES[2]
+        two = _tab_split(ctx.op, ctx)
         if two:                                                         # placa de pernos sola; las placas de arriba y abajo se agregan aparte
             poly = [(0.0, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (0.0, ty + Ht / 2)]
         else:
@@ -347,7 +352,7 @@ def _tab_geometry(ctx, tag):
     pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
-    two_plates = extra > 0 and ctx.op.tab_mode == TAB_MODES[2]
+    two_plates = extra > 0 and _tab_split(ctx.op, ctx)
     if two_plates:                                                      # dos placas, arriba y abajo de la placa de pernos, de la cara del alma a las alas del principal
         tp = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
         sep = float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else H

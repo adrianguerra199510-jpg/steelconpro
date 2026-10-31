@@ -219,7 +219,7 @@ def run():
         print(f"{'placa simple hasta las alas':34} la viga queda fuera de las alas y la placa llena el espacio entre ellas, con 4 filetes a las alas: OK")
 
         # ---- placa simple en dos placas (arriba y abajo): separacion y espesor controlables, soldadas al principal
-        pr1.node.operations[pr1.node.operations.index(op1)].tab_mode = SP.TAB_MODES[2]
+        op1.tab_split = True
         op1.tp_sep = 6.0; op1.tp_t = 0.75
         mm1b = AS1.build_model(pr1)
         ps = [mm1b.part("Placa S2-S"), mm1b.part("Placa S2-I")]
