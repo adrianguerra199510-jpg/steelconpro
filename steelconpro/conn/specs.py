@@ -231,6 +231,7 @@ class Operation:
     leg_side: int = 1            # angulo: pierna saliente hacia +1 o −1 (a lo ancho de la cara)
     trim_gap: float = 0.0        # recorte contra elemento: holgura, in
     trim_mode: str = TRIM_MODES[0]
+    trim_weld: bool = False      # recorte contra otro elemento: soldar el contorno del miembro recortado contra la cara (usa weld_size y weld_type)
     trim_end: str = "Inicio"     # extremo del miembro que se recorta
     force_V: float = 0.0         # fuerza cortante de diseño de la operacion (kip), opcional
     force_T: float = 0.0         # fuerza de traccion de diseño de la operacion (kip), opcional

@@ -1170,7 +1170,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     reg[nd.main_name]["frame"] = (np.zeros(3), A, msx, msy, mshape)
     reg[nd.main_name]["frame_full"] = (A * (-lneg), A * lpos, A, msx, msy, mshape)
     mdl.generic = OPS.build_generic(mdl, nd, reg, hw)
-    _apply_trims(mdl, nd, reg)
+    _apply_trims(mdl, nd, reg, hw)
     mdl.elems = reg
     if fem is not None:
         _fem_setup(mdl, nd, fem, fem_ends, lneg, lpos, mshape)
@@ -1178,7 +1178,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     return mdl
 
 
-def _apply_trims(mdl, nd, reg):
+def _apply_trims(mdl, nd, reg, hw=True):
     """Recortes de un miembro contra otro elemento: plano de la cara del elemento (con holgura) o plano de inglete entre dos miembros."""
     from .specs import OP_TRIM, TRIM_MODES
     for i, o in enumerate(nd.operations):
@@ -1233,6 +1233,22 @@ def _apply_trims(mdl, nd, reg):
                 else:
                     pr.w1 += need
             pr.cut_planes = list(pr.cut_planes) + [(tuple(pt), tuple(keep))]
+        if o.trim_weld and mem.get("frame_full") is not None:           # soldadura del contorno del miembro contra la cara del recorte
+            from types import SimpleNamespace
+            other = reg.get(o.parent) or {}
+            ffp = SimpleNamespace(N=tuple(-keep_n), O=tuple(pt))
+            lines = OPS.member_contour_lines(mem["frame_full"], ffp, None)
+            tot = 0.0
+            for k, ln in enumerate(lines):
+                tot += float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0])))
+                if hw:
+                    mdl.welds.append(OPS._mkweld(Weld, f"{tgt}-R{i + 1}.{k + 1}", mem["part"], other.get("part", mem["part"]), ln, o.weld_size, f"R{i + 1}", o.weld_type))
+            if not lines:
+                mdl.notes.append(f"Operación {i + 1}: no se pudo generar la soldadura del recorte.")
+            else:
+                ffo = (other.get("faces") or {}).get(o.face) if o.trim_mode != TRIM_MODES[1] else None
+                mdl.trim_welds = getattr(mdl, "trim_welds", {})
+                mdl.trim_welds[i] = {"L": tot, "t_main": OPS._t_element(mem), "t_to": OPS._t_element(other, ffo) if other else OPS._t_element(mem), "to": o.parent}
 
 
 def _fem_setup(mdl, nd, fem, ends, lneg, lpos, mshape):

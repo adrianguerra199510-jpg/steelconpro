@@ -229,6 +229,19 @@ def run():
             fail(f"dos placas: separacion {lo_ - hi_:.2f}, t {ps[0].t}")
         print(f"{'placa simple en dos placas':34} placas arriba y abajo con separacion y espesor propios, soldadas al principal: OK")
 
+        # ---- soldadura: espesores reales de las partes unidas, orden de calculo y soldadura en el recorte
+        from steelconpro.conn import ops as OPS_
+        pw = _lb("ejemplos/CN-06_diagonal_con_recorte_y_angulo.scp")[0]
+        otr = next(o for o in pw.node.operations if o.kind == SP.OP_TRIM); otr.trim_weld = True; otr.weld_size = 0.1875
+        OPS_.add_operation(pw.node, SP.OP_FILLET, weld_main="A1", weld_to=[[pw.node.main_name, ""]], weld_size=0.1875)
+        pw.node.operations.insert(0, pw.node.operations.pop())        # depende de una pieza creada despues
+        mw = AS1.build_model(pw)
+        vw = api.verify({"connection": api._dump(pw)})
+        tt = [c["title"] for c in vw["checks"] if "ateto mínimo" in c["title"]]
+        if sum(1 for w_ in mw.welds if "-R" in w_.name) != 4 or not any("(D1" in t_ and "0.233" in t_ for t_ in tt) or not any("(A1" in t_ for t_ in tt) or any("0.375" in t_ for t_ in tt if "(A1" in t_ and False):
+            fail(f"soldadura: {tt}")
+        print(f"{'soldadura: espesores y recorte':34} el espesor sale de las partes unidas; el recorte puede llevar soldadura de contorno; orden de calculo por dependencias: OK")
+
         # ---- recorte contra una cara: el miembro llega al plano aunque este desplazado hacia atras, y queda a la holgura pedida
         import numpy as _np2
         from steelconpro.conn import assembly as AS2

@@ -314,18 +314,28 @@ function weldBody(body, E, op, ctx, info, nd, us, addForm, index) {
     op.weld_to.forEach((t, k) => {
       const e = info.find((x) => x.name === t[0]);
       rows.append(h('div', { class: 'row', style: { alignItems: 'flex-end', gap: '8px' } },
-        h('div', { class: 'grow' }, field(`Elemento ${k + 1}`, selectInput({ value: t[0], options: info.filter((x) => x.name !== op.weld_main).map((x) => ({ value: x.name, label: label(x) })),
+        h('div', { class: 'grow' }, field(`Elemento ${k + 1}`, selectInput({ value: t[0], options: info.filter((x) => x.name !== op.weld_main && (x.name === t[0] || !op.weld_to.some((q) => q[0] === x.name))).map((x) => ({ value: x.name, label: label(x) })),
           onChange: (v) => { t[0] = v; t[1] = ''; rebuild(); ctx.onChange(); } }))),
         h('div', { class: 'grow' }, field('Cara', selectInput({ value: t[1] || '', options: [{ value: '', label: 'La que toca (automática)' }, ...(e ? e.faces : []).map((f) => ({ value: f, label: f }))],
           onChange: (v) => { t[1] = v; ctx.onChange(); } }))),
         iconBtn('trash', 'Quitar', () => { op.weld_to.splice(k, 1); rebuild(); ctx.onChange(); })));
+      if (e && !e.faces.includes(t[1] || '') && t[1]) t[1] = '';
     });
-    const others = info.filter((x) => x.name !== op.weld_main);
+    const others = info.filter((x) => x.name !== op.weld_main && !op.weld_to.some((q) => q[0] === x.name));
     toBox.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Se suelda a' }), op.weld_to.length ? rows : h('p', { class: 'muted', text: op.weld_main && info.find((x) => x.name === op.weld_main)?.type === 'placa' ? 'Sin elementos: se suelda a la cara del elemento al que está unida la placa.' : 'Agregue los elementos a los que se suelda.' }),
       h('div', { style: { height: '8px' } }), btn('Agregar elemento', { icon: 'plus', disabled: !others.length, onClick: () => { op.weld_to.push([others[0].name, '']); rebuild(); ctx.onChange(); } })));
     cord.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Cordón' }), addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types },
       { path: 'weld_all', label: 'Todos los bordes', type: 'check', wide: true }, numField('Inicio del cordón en cada borde', 'weld_a', 'L', 0, 600), numField('Largo del cordón (0 = todo el borde)', 'weld_len', 'L', 0, 600)])));
-    const mt = info.find((x) => x.name === op.weld_main)?.type;
+    const tmain = info.find((x) => x.name === op.weld_main);
+    const tIn = [tmain, ...op.weld_to.map((t) => info.find((x) => x.name === t[0]))].filter((x) => x && x.t > 0);
+    if (tIn.length >= 2 || (tIn.length === 1 && !op.weld_to.length)) {
+      const tmin = Math.min(...tIn.map((x) => x.t));
+      const wmin = tmin <= 0.25 ? 0.125 : tmin <= 0.5 ? 0.1875 : tmin <= 0.75 ? 0.25 : 0.3125;      // AISC Tabla J2.4
+      cord.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Espesores en la unión' }),
+        h('p', { class: 'hint-text', text: tIn.map((x) => `${x.name}: ${us.q('L', x.t, 3)}`).join('  ·  ') + `  —  parte más delgada ${us.q('L', tmin, 3)}; cateto mínimo AISC J2.4: ${us.q('L', wmin, 4)}` + (op.weld_to.length ? '' : ' (la placa se suelda al elemento al que está unida)') + '.' }),
+        btn('Usar el cateto mínimo', { icon: 'check', onClick: () => { op.weld_size = wmin; rebuild(); ctx.onChange(); } })));
+    }
+    const mt = tmain?.type;
     if (!op.weld_all && mt === 'placa') edges.append(edgePicker(E, op, ctx, index, op.weld_main));
   };
   root.append(mainBox, toBox, cord, edges);
@@ -443,7 +453,10 @@ function trimBody(body, E, op, ctx, info, el, nd, addForm) {
       field(miter ? 'Otro miembro del inglete' : 'Elemento contra el que se recorta', selectInput({ value: op.parent, options: [{ value: '', label: '—' }, ...(miter ? members : info).map((x) => ({ value: x.name, label: `${x.name} — ${x.type}` }))], onChange: (v) => { op.parent = v; const x = el(v); if (x && !x.faces.includes(op.face)) op.face = x.faces[0]; build(); ctx.onChange(); } })),
       miter ? h('div') : field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } }))),
     miter ? null : h('div', { style: { height: '10px' } }), miter ? null : addForm([numField('Holgura respecto de la cara', 'trim_gap', 'L', -6, 12)])));
+    box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Soldadura' }), addForm([{ path: 'trim_weld', label: 'Soldar el contorno del miembro recortado', type: 'check', wide: true }]),
+      op.trim_weld ? addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types }]) : h('p', { class: 'hint-text', text: 'Agrega un cordón alrededor de la sección del miembro, en el plano del recorte (con holgura 0).' })));
   };
+  root.onField = (p) => { if (p === 'trim_weld') build(); };
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Tipo de recorte' }), segmented(C.trim_modes.map((m) => ({ value: m, label: m })), op.trim_mode, (v) => { op.trim_mode = v; build(); ctx.onChange(); })), box);
   build();
   body.append(root);

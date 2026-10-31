@@ -102,24 +102,30 @@ def face_names_of(shape) -> list:
     return FACES_I if face_kind(shape) == "I" else FACES_BOX
 
 
+def _shape_t(shp) -> float:
+    """Espesor menor de un perfil (ala o alma; pared en HSS)."""
+    ts = [float(x) for x in (getattr(shp, "tf", 0.0), getattr(shp, "tw", 0.0)) if x and x > 1e-6]
+    return min(ts) if ts else 0.375
+
+
 def elements(prj) -> dict:
     """Elementos a los que se puede hacer referencia, con sus caras: miembros (el principal primero), placas creadas por operaciones y la placa base."""
     from . import assembly as AS
     nd = prj.node
     out = [{"name": nd.main_name, "type": "miembro", "main": True, "label": f"{nd.main_name} ({nd.main_shape})",
-            "faces": face_names_of(AS.shape_of(nd.main_shape))}]
+            "faces": face_names_of(AS.shape_of(nd.main_shape)), "t": _shape_t(AS.shape_of(nd.main_shape))}]
     for m in nd.members:
-        out.append({"name": m.name, "type": "miembro", "main": False, "label": f"{m.name} ({m.shape})", "faces": face_names_of(AS.shape_of(m.shape))})
+        out.append({"name": m.name, "type": "miembro", "main": False, "label": f"{m.name} ({m.shape})", "faces": face_names_of(AS.shape_of(m.shape)), "t": _shape_t(AS.shape_of(m.shape))})
     for i, o in enumerate(nd.operations):
         if o.makes_element:
             if o.kind == OP_WORKPLANE:
                 out.append({"name": o.name, "type": "plano", "main": False, "op": i, "label": f"{o.name} (plano de trabajo)", "faces": ["Plano"]})
             elif o.kind == OP_ANGLE:
-                out.append({"name": o.name, "type": "ángulo", "main": False, "op": i, "label": f"{o.name} (ángulo L{o.leg_a:g}×{o.leg_b:g}×{o.plate_t:g})", "faces": list(FACES_ANGLE)})
+                out.append({"name": o.name, "type": "ángulo", "main": False, "op": i, "label": f"{o.name} (ángulo L{o.leg_a:g}×{o.leg_b:g}×{o.plate_t:g})", "faces": list(FACES_ANGLE), "t": o.plate_t})
             else:
-                out.append({"name": o.name, "type": "placa", "main": False, "op": i, "label": f"{o.name} (placa {o.plate_t:g} in)", "faces": list(FACES_PLATE)})
+                out.append({"name": o.name, "type": "placa", "main": False, "op": i, "label": f"{o.name} (placa {o.plate_t:g} in)", "faces": list(FACES_PLATE), "t": o.plate_t})
     if nd.base_op() is not None:
-        out.append({"name": "Placa base", "type": "placa base", "main": False, "label": "Placa base", "faces": ["Cara superior", "Cara inferior"]})
+        out.append({"name": "Placa base", "type": "placa base", "main": False, "label": "Placa base", "faces": ["Cara superior", "Cara inferior"], "t": None})
     return {"elements": out}
 
 
@@ -143,7 +149,7 @@ def ordered(nd) -> list:
         for item in list(pending):
             i, o = item
             need = {o.parent} - {""} | set(o.targets or [])
-            if o.kind == OP_ALIGN:
+            if o.kind == OP_ALIGN or (o.kind == OP_FILLET and o.weld_main):
                 need = {o.parent} - {""} | ({o.weld_main} - {""}) | {t[0] for t in (o.weld_to or [])}
             if o.kind == OP_CUT:
                 need = set()                                       # el corte solo mira a los miembros
@@ -335,14 +341,29 @@ def _weld_pair(main, tgt, face_name, o, PL):
     ff = tgt["faces"].get(face_name) if face_name else None
     if ff is None:
         ff = _auto_face(main, tgt)
+    if ff is None and main.get("parent_face") in tgt["faces"] and main.get("parent_part") == tgt.get("part"):
+        ff = tgt["faces"][main["parent_face"]]                       # la pieza está unida a ese elemento: se suelda por la cara donde se apoya
     if ff is None:
-        return []
+        return [], None
     edges = None if o.weld_all else set(o.weld_edges)
     if main.get("geo") is not None:
-        return PL.weld_lines(main["geo"], ff, edges, o.weld_a, o.weld_len)
+        return PL.weld_lines(main["geo"], ff, edges, o.weld_a, o.weld_len), ff
     if main.get("frame_full") is not None:
-        return member_contour_lines(main["frame_full"], ff, edges)
-    return list(main.get("lines") or [])
+        return member_contour_lines(main["frame_full"], ff, edges), ff
+    return list(main.get("lines") or []), ff
+
+
+def _t_element(e, ff=None) -> float:
+    """Espesor de un elemento en la unión: el de la cara si se conoce (ala o alma), o el de la placa; en un miembro sin cara, el menor de ala y alma."""
+    if ff is not None and getattr(ff, "wall", 0.0) and ff.wall > 1e-6:
+        return float(ff.wall)
+    fr = e.get("frame_full")
+    if fr is not None:
+        shp = fr[5]
+        ts = [float(x) for x in (getattr(shp, "tf", 0.0), getattr(shp, "tw", 0.0)) if x and x > 1e-6]
+        if ts:
+            return min(ts)
+    return float(e.get("t", 0.375) or 0.375)
 
 
 def build_generic(mdl, nd, reg: dict, hw: bool = True):
@@ -356,7 +377,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
     entries = []
     order, orphans = ordered(nd)
     for i, o in orphans:
-        mdl.notes.append(f"Operación {i + 1} «{o.kind}»: depende de un elemento que no existe ({o.parent or ', '.join(o.targets)}).")
+        mdl.notes.append(f"Operación {i + 1} «{o.kind}»: depende de un elemento que no existe ({o.parent or ', '.join(o.targets) or ', '.join([o.weld_main] + [t[0] for t in (o.weld_to or [])] if o.weld_main else [])}).")
     for i, o in order:
         ent = {"op": o, "index": i, "ok": False}
         entries.append(ent)
@@ -499,15 +520,18 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             ent.update(ok=True, holes=n_ok)
         elif o.kind == OP_FILLET and o.weld_main:
             main = reg.get(o.weld_main)
-            lines_all, ents = [], []
+            lines_all, ents, pairs = [], [], []
             tos = o.weld_to or ([[main["parent"], main.get("parent_face", "")]] if main and main.get("parent") else [])
             if main is None:
                 mdl.notes.append(f"Operación {i + 1}: elija el elemento que se suelda.")
-            for tn, tf in tos:
+            for tn, tf in (tos if main is not None else []):
                 tgt = reg.get(tn)
                 if tgt is None or tn == o.weld_main:
                     continue
-                lines = _weld_pair(main, tgt, tf, o, PL)
+                lines, ffp = _weld_pair(main, tgt, tf, o, PL)
+                if lines:
+                    pairs.append({"to": tn, "L": sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines),
+                                  "t_main": _t_element(main), "t_to": _t_element(tgt, ffp), "face": getattr(ffp, "name", "")})
                 for k, ln in enumerate(lines):
                     if hw:
                         mdl.welds.append(_mkweld(Weld, f"{o.weld_main}-S{i + 1}.{len(lines_all) + k + 1}", main["part"], tgt["part"], ln, o.weld_size, f"S{i + 1}", wtype))
@@ -515,7 +539,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 lines_all += lines
                 if not lines:
                     mdl.notes.append(f"Operación {i + 1}: «{o.weld_main}» no toca a «{tn}»" + (f" por la cara «{tf}»." if tf else "."))
-            ent.update(ok=bool(ents), weld_len=sum(ents), plates=[o.weld_main] if ents else [], t_other=min([reg[t[0]].get("t", 0.375) for t in tos if t[0] in reg] or [0.375]))
+            ent.update(ok=bool(ents), weld_len=sum(ents), pairs=pairs, plates=[o.weld_main] if ents else [], t_other=min([reg[t[0]].get("t", 0.375) for t in tos if t[0] in reg] or [0.375]))
         elif o.kind == OP_FILLET:
             ents = []
             if o.weld_mode == WELD_MODES[1]:                                           # contorno de un miembro contra una cara
@@ -594,14 +618,15 @@ def _bolt_checks(ck, grp, key, o, n, layers, edge, spacing_ok_rows, V, T, steels
         _chk(ck, grp, f"{key}_br_{nm}", f"Aplastamiento y desgarramiento en «{nm}» (t = {t:g} in)", V, nb * PHI_BOLT * rn, "kip", "AISC J3.10")
 
 
-def _weld_checks(ck, grp, key, w, Lw, V, T, t_plate, t_base, FEXX=70.0):
+def _weld_checks(ck, grp, key, w, Lw, V, T, t_plate, t_base, FEXX=70.0, label=""):
     from .common import PHI_WELD
     if Lw <= 1e-9:
         return
-    _chk(ck, grp, f"{key}_wmin", "Cateto mínimo del filete", min_fillet(min(t_plate, t_base)), w, "in", "AISC Tabla J2.4")
-    _chk(ck, grp, f"{key}_wmax", "Cateto máximo del filete en el borde de la placa", w, max(max_fillet(t_plate), 1e-6), "in", "AISC J2.2b")
+    pre = f" ({label})" if label else ""
+    _chk(ck, grp, f"{key}_wmin", f"Cateto mínimo del filete{pre} (parte más delgada {min(t_plate, t_base):.3g} in)", min_fillet(min(t_plate, t_base)), w, "in", "AISC Tabla J2.4")
+    _chk(ck, grp, f"{key}_wmax", f"Cateto máximo del filete{pre} en el borde (t = {t_plate:.3g} in)", w, max(max_fillet(t_plate), 1e-6), "in", "AISC J2.2b")
     cap = PHI_WELD * 0.60 * FEXX * 0.707 * w * Lw
-    _chk(ck, grp, f"{key}_w", f"Soldadura — resistencia ({Lw:g} in de filete {w:g} in)", math.hypot(V, T), cap, "kip", "AISC J2.4", "φ = 0.75; Fnw = 0.60·FEXX; sin el aumento por dirección de la carga")
+    _chk(ck, grp, f"{key}_w", f"Soldadura{pre} — resistencia ({Lw:g} in de filete {w:g} in)", math.hypot(V, T), cap, "kip", "AISC J2.4", "φ = 0.75; Fnw = 0.60·FEXX; sin el aumento por dirección de la carga")
 
 
 def add_checks(prj, nd, R, rec, mdl):
@@ -617,6 +642,10 @@ def add_checks(prj, nd, R, rec, mdl):
             for tg in ([o.member] if not o.targets else o.targets):
                 _chk(R.checks, grp, f"{key}_cut_{tg}", f"Recorte de «{tg}»: pandeo local del alma y flexión del miembro recortado — NO EVALUADO", 0.0, 1.0, "-",
                      "AISC Manual Parte 9", "El corte debe revisarse aparte (los herrajes ya consideran la geometría recortada).", skip=True)
+            continue
+        if o.kind == OP_TRIM and o.trim_weld and i in getattr(mdl, "trim_welds", {}):
+            tw_ = mdl.trim_welds[i]
+            _weld_checks(R.checks, grp, f"{key}_tw", float(o.weld_size), tw_["L"], float(o.force_V), float(o.force_T), tw_["t_main"], tw_["t_to"], label=f"{(o.targets or [''])[0]} — {tw_['to']}")
             continue
         if o.kind in (OP_TRIM, OP_HOLE, OP_WORKPLANE, OP_ALIGN) and ent.get("ok"):
             continue                                                   # solo geometría: no hay nada que verificar
@@ -681,7 +710,11 @@ def add_checks(prj, nd, R, rec, mdl):
                 rec.text(f"{o.rows * o.cols} pernos Ø{o.bolt_size} {o.bolt_grade} desde la cara «{o.face}» de «{o.parent}» a través de {', '.join(n for n, _t in ent['layers'])}.")
             _bolt_checks(R.checks, grp, key, o, o.rows * o.cols, layers, ent.get("edge") if ent.get("edge") is not None else min(edge_a, edge_b), True, V, T, None)
         elif o.kind == OP_FILLET:
-            for tg in ent.get("plates", []):
+            if ent.get("pairs"):
+                for k_, pr_ in enumerate(ent["pairs"]):
+                    _weld_checks(R.checks, grp, f"{key}_{k_}", float(o.weld_size), pr_["L"], V, T, pr_["t_main"], pr_["t_to"], label=f"{o.weld_main} — {pr_['to']}")
+            else:
+              for tg in ent.get("plates", []):
                 e = mdl.elems.get(tg, {})
                 _weld_checks(R.checks, grp, f"{key}_{tg}", float(o.weld_size), ent.get("weld_len", 0.0), V, T, e.get("t", 0.375), 0.375)
             if not ent.get("plates"):
