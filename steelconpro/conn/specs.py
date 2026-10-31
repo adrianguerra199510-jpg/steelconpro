@@ -167,6 +167,7 @@ class Operation:
     tab_W: float = 0.0           # ancho de la placa simple (a lo largo de la viga), in (0 = automatico)
     n_cols: int = 1              # columnas de pernos de la placa simple (separacion: bolt_g)
     tab_mode: str = TAB_MODES[0]  # placa simple: «Hasta el interior de las alas» saca la viga del principal y extiende la placa para soldarla al alma y a la cara interna de las alas
+    tab_clip: float = -1.0        # placa simple: lado del recorte de las esquinas junto al soporte, in (<0 = automático: 1 in «hasta las alas», sin recorte en el otro modo; 0 = sin recorte)
     tab_y: float = 0.0           # placa simple: desplazamiento del centro de la placa a lo largo del peralte de la viga, in
     ep_w: float = 0.0            # placa extrema: ancho, in (0 = automático)
     ep_h: float = 0.0            # placa extrema: alto total, in (0 = automático según la extensión)

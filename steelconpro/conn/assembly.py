@@ -326,7 +326,13 @@ def _tab_geometry(ctx, tag):
         qperp = ctx.Q - (Aax * float(np.dot(ctx.Q, Aax)) if Aax is not None else 0.0)
         tyc = -float(np.dot(qperp, ctx.sy))
     ty_p = ty + tyc
-    poly = [(0.0, ty_p - H / 2), (Lp, ty_p - H / 2), (Lp, ty_p + H / 2), (0.0, ty_p + H / 2)]            # la placa nace en la cara del soporte (x = 0)
+    clip = float(ctx.op.tab_clip)
+    clip = (1.0 if extra > 0 else 0.0) if clip < 0 else clip           # recorte de las esquinas junto al soporte (libra el acuerdo entre el alma y las alas)
+    clip = min(clip, H / 2.0 - 0.1, Lp - 0.1)
+    if clip > 1e-6:
+        poly = [(0.0, ty_p - H / 2 + clip), (clip, ty_p - H / 2), (Lp, ty_p - H / 2), (Lp, ty_p + H / 2), (clip, ty_p + H / 2), (0.0, ty_p + H / 2 - clip)]
+    else:
+        poly = [(0.0, ty_p - H / 2), (Lp, ty_p - H / 2), (Lp, ty_p + H / 2), (0.0, ty_p + H / 2)]            # la placa nace en la cara del soporte (x = 0)
     pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
@@ -351,15 +357,15 @@ def _tab_geometry(ctx, tag):
     if ctx.main_name:
         w = float(ctx.op.weld_size)
         for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p - H / 2.0)
-            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p + H / 2.0)
+            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p - H / 2.0 + clip)
+            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p + H / 2.0 - clip)
             ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                   tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.dir)), w, 70.0, tag))
         if extra > 0:                                              # filetes de los bordes superior e inferior de la placa contra la cara interna de las alas del principal
             for k_, (vs, nfl) in enumerate(((ty_p + H / 2.0, -1.0), (ty_p - H / 2.0, 1.0))):
                 for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-                    p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * vs
-                    p1_ = p0_ + ctx.dir * min(extra, Lp)
+                    p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * vs + ctx.dir * clip
+                    p1_ = p0_ + ctx.dir * max(min(extra, Lp) - clip, 0.1)
                     ctx.welds.append(Weld(f"{name}-F{k_ + 1}{'a' if sg > 0 else 'b'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                           tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * nfl)), w, 70.0, tag))
     return Lp
