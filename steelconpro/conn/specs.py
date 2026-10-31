@@ -80,6 +80,7 @@ WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcia
 TAB_MODES = ["Sobre la cara del soporte", "Hasta el interior de las alas del principal"]
 BEAM_CONNS = ["Atornillada", "Soldada"]
 TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro"]
+WELD_SIDES = ["Ambos lados", "Solo lado 1", "Solo lado 2"]     # filete: 1 = cara + de la pieza (normal local +), 2 = cara −; en las alas de una viga, 1 = exterior y 2 = interior
 WELD_MODES = ["Bordes de la placa", "Contorno del miembro"]
 ATTACHES = ["Soldada", "Atornillada"]
 FACES_END = ["Extremo inicio", "Extremo fin"]
@@ -218,6 +219,7 @@ class Operation:
     op_clear: float = 0.25       # holgura de la abertura alrededor del miembro, in
     weld_edges: list = field(default_factory=list)   # bordes de la placa que se sueldan (indices); con weld_all = True se sueldan todos
     weld_type: str = WELD_TYPES[0]
+    weld_side: str = WELD_SIDES[0]   # filete: en cuál cara de la pieza va el cordón (ambos lados, solo el 1 o solo el 2)
     weld_mode: str = WELD_MODES[0]
     weld_main: str = ""          # soldadura: elemento que se suelda (miembro, placa o ángulo); con él se usa `weld_to` en vez de parent/face/targets
     weld_to: list = field(default_factory=list)      # soldadura: [[elemento, cara]] a los que se suelda (cara "" = la que toca); puede haber varios

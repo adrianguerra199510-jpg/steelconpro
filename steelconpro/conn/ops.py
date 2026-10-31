@@ -19,7 +19,7 @@ import math
 import numpy as np
 
 from .specs import (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
-                    FACES_PLATE, FACES_ANGLE, FACES_END, HOLE_SHAPES, WELD_MODES, Operation)
+                    FACES_PLATE, FACES_ANGLE, FACES_END, HOLE_SHAPES, WELD_MODES, WELD_TYPES, Operation)
 
 # ================================================================================================== valores por omision
 _DEFAULTS = {
@@ -209,7 +209,27 @@ def _bolt_layers(reg, names, first_wall):
     return out
 
 
-def _mkweld(Weld, name, A, B, ln, size, group, kind):
+def side_ok(op, nA, ref) -> bool:
+    """Filete de un solo lado: conserva el cordón si su normal cae del lado elegido respecto de `ref` (las normales perpendiculares a `ref` no se descartan)."""
+    from .specs import WELD_SIDES
+    side = getattr(op, "weld_side", WELD_SIDES[0])
+    if side == WELD_SIDES[0] or ref is None:
+        return True
+    d = float(np.dot(np.asarray(nA, float), np.asarray(ref, float)))
+    if abs(d) < 0.5:
+        return True
+    return (d > 0) == (side == WELD_SIDES[1])
+
+
+def _addw(mdl, w):
+    if w is not None:
+        mdl.welds.append(w)
+
+
+def _mkweld(Weld, name, A, B, ln, size, group, kind, op=None, ref=None):
+    from .specs import WELD_TYPES
+    if op is not None and kind == WELD_TYPES[0] and not side_ok(op, ln[2], ref):
+        return None
     p0, p1, nA, nB = ln[0], ln[1], ln[2], ln[3]
     w = Weld(name, A, B, tuple(map(float, p0)), tuple(map(float, p1)), tuple(map(float, nA)), tuple(map(float, nB)), float(size), 70.0, group)
     w.kind = kind
@@ -419,10 +439,10 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             edges = None if o.weld_all else set(o.weld_edges)
             lines = PL.weld_lines(geo, ff, edges, o.weld_a, o.weld_len)
             reg[nm]["lines"] = lines
-            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines)
+            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], geo["e3"]))
             if (o.attach == ATTACHES[0] or spec["perp"]) and hw:
                 for k, ln in enumerate(lines):
-                    mdl.welds.append(_mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype))
+                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, geo["e3"]))
             if o.attach == ATTACHES[1] and not spec["perp"] and hw:
                 pts = bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g)
                 t = spec["t"]
@@ -473,10 +493,10 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             lines = [(P(s0, -a_ / 2, 0), P(s0 + L, -a_ / 2, 0), -ff.U, ff.N), (P(s0, a_ / 2, 0), P(s0 + L, a_ / 2, 0), ff.U, ff.N),
                      (P(s0, -a_ / 2, 0), P(s0, a_ / 2, 0), -ff.A, ff.N), (P(s0 + L, -a_ / 2, 0), P(s0 + L, a_ / 2, 0), ff.A, ff.N)]
             reg[nm]["lines"] = [(l[0], l[1], l[2], l[3], k) for k, l in enumerate(lines)]
-            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines)
+            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], ff.U))
             if o.attach == ATTACHES[0] and hw:
                 for k, ln in enumerate(lines):
-                    mdl.welds.append(_mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype))
+                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, ff.U))
             elif hw:
                 pts = bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g)
                 wall = parent["faces"][o.face].wall
@@ -532,12 +552,13 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                     continue
                 lines, ffp = _weld_pair(main, tgt, tf, o, PL)
                 if lines:
-                    pairs.append({"to": tn, "L": sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines),
+                    pairs.append({"to": tn, "L": sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], main["geo"]["e3"] if main.get("geo") is not None else None)),
                                   "t_main": _t_element(main), "t_to": _t_element(tgt, ffp), "face": getattr(ffp, "name", "")})
                 for k, ln in enumerate(lines):
                     if hw:
-                        mdl.welds.append(_mkweld(Weld, f"{o.weld_main}-S{i + 1}.{len(lines_all) + k + 1}", main["part"], tgt["part"], ln, o.weld_size, f"S{i + 1}", wtype))
-                    ents.append(float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0]))))
+                        _addw(mdl, _mkweld(Weld, f"{o.weld_main}-S{i + 1}.{len(lines_all) + k + 1}", main["part"], tgt["part"], ln, o.weld_size, f"S{i + 1}", wtype, o, (main["geo"]["e3"] if main.get("geo") is not None else None)))
+                    if o.weld_type != WELD_TYPES[0] or side_ok(o, ln[2], main["geo"]["e3"] if main.get("geo") is not None else None):
+                        ents.append(float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0]))))
                 lines_all += lines
                 if not lines:
                     mdl.notes.append(f"Operación {i + 1}: «{o.weld_main}» no toca a «{tn}»" + (f" por la cara «{tf}»." if tf else "."))
@@ -555,7 +576,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                     lines = member_contour_lines(fr, par["faces"][o.face], None if o.weld_all else set(o.weld_edges))
                     for k, ln in enumerate(lines):
                         if hw:
-                            mdl.welds.append(_mkweld(Weld, f"{tg}-S{i + 1}.{k + 1}", e["part"], par["part"], ln, o.weld_size, f"S{i + 1}", wtype))
+                            _addw(mdl, _mkweld(Weld, f"{tg}-S{i + 1}.{k + 1}", e["part"], par["part"], ln, o.weld_size, f"S{i + 1}", wtype))
                         ents.append(float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0]))))
                     ent.update(ok=bool(ents), weld_len=sum(ents), plates=[tg], t_other=par.get("t", 0.375))
             else:
@@ -576,7 +597,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                         partB = e["parent_part"]
                     for k, ln in enumerate(lines):
                         if hw:
-                            mdl.welds.append(_mkweld(Weld, f"{tg}-S{i + 1}.{k + 1}", tg, partB, ln, o.weld_size, f"S{i + 1}", wtype))
+                            _addw(mdl, _mkweld(Weld, f"{tg}-S{i + 1}.{k + 1}", tg, partB, ln, o.weld_size, f"S{i + 1}", wtype, o, (e["geo"]["e3"] if e.get("geo") is not None else None)))
                         ents.append(float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0]))))
                 ent.update(ok=bool(ents), weld_len=sum(ents), plates=[t for t in (o.targets or []) if t in reg])
     if hw:
@@ -620,11 +641,15 @@ def _bolt_checks(ck, grp, key, o, n, layers, edge, spacing_ok_rows, V, T, steels
         _chk(ck, grp, f"{key}_br_{nm}", f"Aplastamiento y desgarramiento en «{nm}» (t = {t:g} in)", V, nb * PHI_BOLT * rn, "kip", "AISC J3.10")
 
 
-def _weld_checks(ck, grp, key, w, Lw, V, T, t_plate, t_base, FEXX=70.0, label=""):
+def _weld_checks(ck, grp, key, w, Lw, V, T, t_plate, t_base, FEXX=70.0, label="", wtype=None):
     from .common import PHI_WELD
     if Lw <= 1e-9:
         return
     pre = f" ({label})" if label else ""
+    if wtype is not None and wtype != WELD_TYPES[0]:                   # CJP / PJP: la resistencia la gobierna el metal base (no hay cateto que verificar)
+        _chk(ck, grp, f"{key}_cjp", f"Soldadura{pre} {wtype.split(' ')[0]} — resistencia gobernada por el metal base ({Lw:g} in)", 0.0, 1.0, "-", "AISC J2.6",
+             "Verifique las partes unidas (fluencia y rotura del elemento más delgado).", skip=True)
+        return
     _chk(ck, grp, f"{key}_wmin", f"Cateto mínimo del filete{pre} (parte más delgada {min(t_plate, t_base):.3g} in)", min_fillet(min(t_plate, t_base)), w, "in", "AISC Tabla J2.4")
     _chk(ck, grp, f"{key}_wmax", f"Cateto máximo del filete{pre} en el borde (t = {t_plate:.3g} in)", w, max(max_fillet(t_plate), 1e-6), "in", "AISC J2.2b")
     cap = PHI_WELD * 0.60 * FEXX * 0.707 * w * Lw
@@ -647,7 +672,7 @@ def add_checks(prj, nd, R, rec, mdl):
             continue
         if o.kind == OP_TRIM and o.trim_weld and i in getattr(mdl, "trim_welds", {}):
             tw_ = mdl.trim_welds[i]
-            _weld_checks(R.checks, grp, f"{key}_tw", float(o.weld_size), tw_["L"], float(o.force_V), float(o.force_T), tw_["t_main"], tw_["t_to"], label=f"{(o.targets or [''])[0]} — {tw_['to']}")
+            _weld_checks(R.checks, grp, f"{key}_tw", float(o.weld_size), tw_["L"], float(o.force_V), float(o.force_T), tw_["t_main"], tw_["t_to"], label=f"{(o.targets or [''])[0]} — {tw_['to']}", wtype=o.weld_type)
             continue
         if o.kind in (OP_TRIM, OP_HOLE, OP_WORKPLANE, OP_ALIGN) and ent.get("ok"):
             continue                                                   # solo geometría: no hay nada que verificar
@@ -675,7 +700,7 @@ def add_checks(prj, nd, R, rec, mdl):
                 _chk(R.checks, grp, f"{key}_slend", "Rigidizador — esbeltez del borde libre  h/t ≤ 0.56·√(E/Fy)", spec["L2"] / t, lim, "-", "AISC Tabla B4.1a, caso 1")
             ent_weld = o.attach == ATTACHES[0] or spec["perp"]
             if ent_weld:
-                _weld_checks(R.checks, grp, key, float(o.weld_size), ent.get("weld_len", 0.0), V, T, t, parent["faces"][o.face].wall if o.face in parent["faces"] else t)
+                _weld_checks(R.checks, grp, key, float(o.weld_size), ent.get("weld_len", 0.0), V, T, t, parent["faces"][o.face].wall if o.face in parent["faces"] else t, wtype=o.weld_type)
             else:
                 ff = ent["ff"]
                 edge_a = spec["L1"] / 2.0 - (o.rows - 1) * o.bolt_s / 2.0
@@ -697,7 +722,7 @@ def add_checks(prj, nd, R, rec, mdl):
             _chk(R.checks, grp, f"{key}_tr", "Ángulo — rotura en tracción (sección neta)", T, 0.75 * Fu * Ae, "kip", "AISC J4.1(b)", "φ = 0.75")
             _chk(R.checks, grp, f"{key}_vy", "Ángulo — fluencia por cortante", V, 1.00 * 0.60 * Fy * o.pl_L * t, "kip", "AISC J4.2(a)", "φ = 1.00")
             if o.attach == ATTACHES[0]:
-                _weld_checks(R.checks, grp, key, float(o.weld_size), ent.get("weld_len", 0.0), V, T, t, parent["faces"][o.face].wall if o.face in parent["faces"] else t)
+                _weld_checks(R.checks, grp, key, float(o.weld_size), ent.get("weld_len", 0.0), V, T, t, parent["faces"][o.face].wall if o.face in parent["faces"] else t, wtype=o.weld_type)
             else:
                 ff = ent["ff"]
                 edge = min(o.pl_L / 2.0 - (o.rows - 1) * o.bolt_s / 2.0, o.leg_a / 2.0 - (o.cols - 1) * o.bolt_g / 2.0)
@@ -714,11 +739,11 @@ def add_checks(prj, nd, R, rec, mdl):
         elif o.kind == OP_FILLET:
             if ent.get("pairs"):
                 for k_, pr_ in enumerate(ent["pairs"]):
-                    _weld_checks(R.checks, grp, f"{key}_{k_}", float(o.weld_size), pr_["L"], V, T, pr_["t_main"], pr_["t_to"], label=f"{o.weld_main} — {pr_['to']}")
+                    _weld_checks(R.checks, grp, f"{key}_{k_}", float(o.weld_size), pr_["L"], V, T, pr_["t_main"], pr_["t_to"], label=f"{o.weld_main} — {pr_['to']}", wtype=o.weld_type)
             else:
               for tg in ent.get("plates", []):
                 e = mdl.elems.get(tg, {})
-                _weld_checks(R.checks, grp, f"{key}_{tg}", float(o.weld_size), ent.get("weld_len", 0.0), V, T, e.get("t", 0.375), 0.375)
+                _weld_checks(R.checks, grp, f"{key}_{tg}", float(o.weld_size), ent.get("weld_len", 0.0), V, T, e.get("t", 0.375), 0.375, wtype=o.weld_type)
             if not ent.get("plates"):
                 _chk(R.checks, grp, f"{key}_na", "Elija las placas que se sueldan — NO EVALUADO", 0.0, 1.0, "-", "", skip=True)
 

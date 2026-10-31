@@ -150,6 +150,8 @@ def _tab_weld(nd, op, m, vals, rec):
         return ck
     n, s_, cols, g_, H, Wd, a = tab_dims(op, m, beam, bolt_db(op.bolt_size), tab_extra(nd, m, op))
     ov = max(Wd - gap_eff(m) - tab_extra(nd, m, op), 0.1)
+    from ..specs import WELD_TYPES, WELD_SIDES
+    one = getattr(op, "weld_side", WELD_SIDES[0]) != WELD_SIDES[0]                 # filete de un solo lado: la mitad de cordón en la cara del soporte
     L = 2.0 * ov + H
     w = float(op.weld_size)
     V = abs(Vz)
@@ -159,10 +161,15 @@ def _tab_weld(nd, op, m, vals, rec):
     if rec:
         rec.section(f"{op.kind.upper()} — {m.name}: soldadura de la placa al alma")
         rec.text(f"Placa {H:g} × {Wd:g} × {op.plate_t:g} in traslapada {ov:g} in sobre el alma; filete {w:g} in en el borde superior, el inferior y el del extremo (L = {L:g} in).")
+    if getattr(op, "weld_type", WELD_TYPES[0]) != WELD_TYPES[0]:
+        not_evaluated(ck, "tw_cjp", "Soldadura de penetración (CJP / PJP) de la placa", "AISC 360-22 J2.6", "La resistencia la gobierna el metal base: verifique la placa y el alma (fluencia y rotura).")
+        add_check(ck, rec, "tw_plate_y", "Placa: fluencia por cortante", V, 1.00 * 0.60 * pl.Fy * H * op.plate_t, "kip", "AISC 360-22 J4.2(a)", "φ = 1.00")
+        add_check(ck, rec, "tw_web", "Alma de la viga: rotura por cortante en el cordón", V, 0.75 * 0.60 * bm.Fu * beam.tw * H, "kip", "AISC 360-22 J4.2(b)", "Se toma la altura de la placa sobre el alma (φ = 0.75).")
+        return ck
     add_check(ck, rec, "tw_weld", f"Soldadura de la placa al alma: V ≤ φ·0.6·FEXX·0.707·w·L  (L = {L:g} in)", V, 0.75 * 0.60 * fexx * 0.707 * w * L, "kip", "AISC 360-22 J2.4",
               "Cortante repartido por igual en la longitud del cordón; no incluye la excentricidad del cortante respecto del grupo de soldadura (verifíquela aparte).")
-    add_check(ck, rec, "tw_sup", f"Soldadura de la placa al soporte: V ≤ φ·0.6·FEXX·0.707·w·2H  (2H = {2 * H:g} in)", V, 0.75 * 0.60 * fexx * 0.707 * w * 2.0 * H, "kip", "AISC 360-22 J2.4",
-              "Dos filetes del mismo cateto en la cara del soporte; sin excentricidad.")
+    add_check(ck, rec, "tw_sup", f"Soldadura de la placa al soporte: V ≤ φ·0.6·FEXX·0.707·w·{'H' if one else '2H'}  ({'H' if one else '2H'} = {(1 if one else 2) * H:g} in)", V, 0.75 * 0.60 * fexx * 0.707 * w * (1.0 if one else 2.0) * H, "kip", "AISC 360-22 J2.4",
+              "Un filete en la cara del soporte; sin excentricidad." if one else "Dos filetes del mismo cateto en la cara del soporte; sin excentricidad.")
     add_check(ck, rec, "tw_plate_y", "Placa: fluencia por cortante", V, 1.00 * 0.60 * pl.Fy * H * op.plate_t, "kip", "AISC 360-22 J4.2(a)", "φ = 1.00")
     add_check(ck, rec, "tw_web", "Alma de la viga: rotura por cortante en el cordón", V, 0.75 * 0.60 * bm.Fu * beam.tw * H, "kip",
               "AISC 360-22 J4.2(b)", "Se toma la altura de la placa sobre el alma (φ = 0.75).")

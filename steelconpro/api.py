@@ -84,7 +84,7 @@ def constants(_=None) -> dict:
         "plate_steels": [{"name": m.name, "Fy": m.Fy, "Fu": m.Fu} for m in M.PLATE_STEELS],
         "electrodes": [{"name": m.name, "FEXX": m.FEXX} for m in M.ELECTRODES],
         "schema_baseplate": sch,
-        "roles": SP.PLATE_ROLES, "openings": SP.OPENINGS, "weld_types": SP.WELD_TYPES, "weld_modes": SP.WELD_MODES, "hole_shapes": SP.HOLE_SHAPES,
+        "roles": SP.PLATE_ROLES, "openings": SP.OPENINGS, "weld_types": SP.WELD_TYPES, "weld_sides": SP.WELD_SIDES, "weld_modes": SP.WELD_MODES, "hole_shapes": SP.HOLE_SHAPES,
         "trim_modes": SP.TRIM_MODES, "tab_modes": SP.TAB_MODES, "beam_conns": SP.BEAM_CONNS, "faces_angle": SP.FACES_ANGLE,
         "fea": {"mesh_modes": MODEL.MESH3D_MODES, "weld_models": MODEL.WELD_MODELS, "weld_criteria": MODEL.WELD_CRITERIA},
     }

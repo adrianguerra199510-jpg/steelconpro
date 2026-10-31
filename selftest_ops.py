@@ -251,6 +251,22 @@ def run():
             fail(f"soldadura del recorte inclinado fuera del plano: {max(dd_ or [0]):.3f} in")
         print(f"{'soldadura en recorte inclinado':34} el contorno del miembro a 45° queda sobre la cara (desviación {max(dd_):.3f} in): OK")
 
+        # ---- soldaduras: sin cordon en el canto del ala, lado del filete y CJP en la placa simple
+        pq = _lb("ejemplos/CN-01_columna_con_vigas.scp")[0]
+        oep = next(o for o in pq.node.operations if o.kind == SP.OP_EP_EXT)
+        n_both = len([w_ for w_ in AS1.build_model(pq).welds if w_.group == "V1" or w_.name.startswith("V1-W")])
+        oep.wf_top = oep.wf_bot = SP.WELD_TYPES[0]; oep.weld_side = SP.WELD_SIDES[1]
+        n_one = len([w_ for w_ in AS1.build_model(pq).welds if w_.group == "V1" or w_.name.startswith("V1-W")])
+        otb = next(o for o in pq.node.operations if o.kind == SP.OP_TAB)
+        n_t0 = len([w_ for w_ in AS1.build_model(pq).welds if w_.group == otb.member])
+        otb.weld_side = SP.WELD_SIDES[1]
+        n_t1 = len([w_ for w_ in AS1.build_model(pq).welds if w_.group == otb.member])
+        otb.weld_side = SP.WELD_SIDES[0]; otb.weld_type = SP.WELD_TYPES[1]
+        mq = AS1.build_model(pq)
+        if not (n_one < n_both) or not (n_t1 < n_t0) or any(w_.kind != SP.WELD_TYPES[1] for w_ in mq.welds if w_.group == otb.member):
+            fail(f"soldaduras: ep {n_both}->{n_one}, tab {n_t0}->{n_t1}")
+        print(f"{'lado del filete y CJP':34} un solo lado reduce los cordones (placa extrema {n_both}->{n_one}, placa simple {n_t0}->{n_t1}); CJP cambia el tipo: OK")
+
         # ---- recorte contra una cara: el miembro llega al plano aunque este desplazado hacia atras, y queda a la holgura pedida
         import numpy as _np2
         from steelconpro.conn import assembly as AS2

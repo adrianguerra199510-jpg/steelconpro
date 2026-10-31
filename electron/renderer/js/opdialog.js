@@ -97,12 +97,13 @@ export async function openOperation(E, index, { isNew = false } = {}) {
       numField('Ancho de la placa (0 = automático)', 'tab_W', 'L', 0, 40, null, null, 'A lo largo de la viga, desde la cara del soporte. 0 = hasta la última columna + 1.5 in.'));
     items.push(numField(kind.startsWith('Cartela') ? 'Espesor de la cartela' : 'Espesor de placa / ángulo', 'plate_t', 'L', 0.0625, 4, 0.0625),
       { path: 'plate_steel', label: 'Acero de la placa', type: 'combo', items: C.plate_steels.map((s) => s.name) });
-    if (vis.weld_size) items.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625));
+    if (vis.weld_size) items.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo de soldadura', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides, help: 'Solo para filete. Lado 1 = cara + de la pieza (en las alas de la viga: exterior); lado 2 = cara − (interior). «Ambos lados» pone el cordón por las dos caras.' });
     if (vis.ep_ext) items.push(numField('Extensión de la placa extrema', 'ep_ext', 'L', 0.5, 24));
     if (kind === K.EP_FLUSH || kind === K.EP_EXT) items.push(numField('Ancho de la placa (0 = automático)', 'ep_w', 'L', 0, 60), numField('Alto total de la placa (0 = automático)', 'ep_h', 'L', 0, 120),
       numField('Gramil de los pernos (0 = automático)', 'ep_g', 'L', 0, 40), { type: 'custom', render: () => epRows(op, ctx, us) });
     if (kind === K.EP_FLUSH || kind === K.EP_EXT || kind === K.WELD) items.push({ path: 'wf_top', label: 'Soldadura del ala superior', type: 'combo', items: C.weld_types }, { path: 'wf_bot', label: 'Soldadura del ala inferior', type: 'combo', items: C.weld_types },
       ...(kind === K.WELD ? [] : [{ path: 'wf_web', label: 'Soldadura del alma', type: 'combo', items: C.weld_types }]));
+    if (kind === K.EP_FLUSH || kind === K.EP_EXT || kind === K.WELD) items.push({ path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides, help: 'Solo para filete. Lado 1 = cara + de la pieza (en las alas de la viga: exterior); lado 2 = cara − (interior). «Ambos lados» pone el cordón por las dos caras.' });
     if (isTab) items.push({ path: 'beam_conn', label: 'Unión de la placa a la viga conectada', type: 'combo', wide: true, items: C.beam_conns, help: 'Atornillada: filas y columnas de pernos en el alma. Soldada: filetes en el borde superior, el inferior y el del extremo de la placa, que se traslapa 5 in (o el ancho que indique) sobre el alma.' });
     if (isTab) items.push({ path: 'tab_mode', label: 'Posición de la placa', type: 'combo', wide: true, items: C.tab_modes,
       help: 'Con «hasta el interior de las alas», si el principal es un perfil I y la viga llega por su alma, la viga se saca hasta el borde de las alas (sin cortarla) y la placa se extiende para soldarse al alma y a la cara interna de las alas.' });
@@ -325,7 +326,7 @@ function weldBody(body, E, op, ctx, info, nd, us, addForm, index) {
     const others = info.filter((x) => x.name !== op.weld_main && !op.weld_to.some((q) => q[0] === x.name));
     toBox.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Se suelda a' }), op.weld_to.length ? rows : h('p', { class: 'muted', text: op.weld_main && info.find((x) => x.name === op.weld_main)?.type === 'placa' ? 'Sin elementos: se suelda a la cara del elemento al que está unida la placa.' : 'Agregue los elementos a los que se suelda.' }),
       h('div', { style: { height: '8px' } }), btn('Agregar elemento', { icon: 'plus', disabled: !others.length, onClick: () => { op.weld_to.push([others[0].name, '']); rebuild(); ctx.onChange(); } })));
-    cord.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Cordón' }), addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types },
+    cord.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Cordón' }), addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides, help: 'Solo para filete. Lado 1 = cara + de la pieza (en las alas de la viga: exterior); lado 2 = cara − (interior). «Ambos lados» pone el cordón por las dos caras.' },
       { path: 'weld_all', label: 'Todos los bordes', type: 'check', wide: true }, numField('Inicio del cordón en cada borde', 'weld_a', 'L', 0, 600), numField('Largo del cordón (0 = todo el borde)', 'weld_len', 'L', 0, 600)])));
     const tmain = info.find((x) => x.name === op.weld_main);
     const tIn = [tmain, ...op.weld_to.map((t) => info.find((x) => x.name === t[0]))].filter((x) => x && x.t > 0);
@@ -393,7 +394,7 @@ function angleBody(body, E, op, ctx, info, el, nd, addForm) {
   const rebuild = () => {
     clear(un);
     const f = [];
-    if (op.attach === C.attaches[0]) f.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo de soldadura', type: 'combo', items: C.weld_types });
+    if (op.attach === C.attaches[0]) f.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo de soldadura', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides });
     else f.push({ path: 'bolt_size', label: 'Diámetro de los pernos', type: 'combo', items: C.bolt_sizes }, { path: 'bolt_grade', label: 'Calidad', type: 'combo', items: C.bolt_grades },
       { path: 'rows', label: 'Filas (a lo largo)', type: 'int', lo: 1, hi: 20 }, { path: 'cols', label: 'Columnas (a lo ancho)', type: 'int', lo: 1, hi: 10 }, numField('Separación a lo largo', 'bolt_s', 'L', 1, 40), numField('Separación a lo ancho', 'bolt_g', 'L', 1, 40));
     un.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Unión a la cara' }), h('div', { class: 'form-grid' }, field('Unión', segmented(C.attaches.map((a) => ({ value: a, label: a })), op.attach, (v) => { op.attach = v; rebuild(); ctx.onChange(); }))), h('div', { style: { height: '10px' } }), addForm(f)));
@@ -455,7 +456,7 @@ function trimBody(body, E, op, ctx, info, el, nd, addForm) {
       miter ? h('div') : field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } }))),
     miter ? null : h('div', { style: { height: '10px' } }), miter ? null : addForm([numField('Holgura respecto de la cara', 'trim_gap', 'L', -6, 12)])));
     box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Soldadura' }), addForm([{ path: 'trim_weld', label: 'Soldar el contorno del miembro recortado', type: 'check', wide: true }]),
-      op.trim_weld ? addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types }]) : h('p', { class: 'hint-text', text: 'Agrega un cordón alrededor de la sección del miembro, en el plano del recorte (con holgura 0).' })));
+      op.trim_weld ? addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides }]) : h('p', { class: 'hint-text', text: 'Agrega un cordón alrededor de la sección del miembro, en el plano del recorte (con holgura 0).' })));
   };
   root.onField = (p) => { if (p === 'trim_weld') build(); };
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Tipo de recorte' }), segmented(C.trim_modes.map((m) => ({ value: m, label: m })), op.trim_mode, (v) => { op.trim_mode = v; build(); ctx.onChange(); })), box);

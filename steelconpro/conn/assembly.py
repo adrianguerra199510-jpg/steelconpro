@@ -310,10 +310,30 @@ def tab_dims(op, m, shp, db, extra=0.0):
     return n, s, cols, g, H, Wd, a
 
 
+def _finish_welds(ctx, n0, t_plate):
+    """Tipo y lado de los cordones de una conexión de placa simple: CJP / PJP (el cordón toma el espesor de la placa) o filete de un solo lado."""
+    from .specs import WELD_TYPES, WELD_SIDES
+    op = ctx.op
+    wt = getattr(op, "weld_type", WELD_TYPES[0])
+    keep = []
+    for w in ctx.welds[n0:]:
+        w.kind = wt
+        if wt == WELD_TYPES[0]:
+            nA = np.asarray(w.nA, float)
+            ax = ctx.sx if abs(float(np.dot(nA, ctx.sx))) >= abs(float(np.dot(nA, ctx.sy))) else ctx.sy
+            if getattr(op, "weld_side", WELD_SIDES[0]) != WELD_SIDES[0] and not OPS.side_ok(op, nA, ax):
+                continue
+        else:
+            w.w = float(t_plate) if wt == WELD_TYPES[1] else 0.5 * float(t_plate)
+        keep.append(w)
+    ctx.welds[n0:] = keep
+
+
 def _tab_geometry(ctx, tag):
     """Placa simple sobre la cara del soporte (soldada con filete a ambos lados) y atornillada al alma de la viga: filas × columnas de pernos."""
     m, shp = ctx.m, ctx.shape
     t = ctx.t
+    n_w0 = len(ctx.welds)
     extra = float(getattr(ctx, 'extra', 0.0))
     n, s, cols, g, H, Wd, a = tab_dims(ctx.op, m, shp, ctx.db, extra)
     Hf = (float(ctx.mshape.d) - 2.0 * float(ctx.mshape.tf)) if extra > 0 else H      # altura de la placa entre las alas del principal (llena el espacio hasta las alas)
@@ -440,6 +460,7 @@ def _tab_geometry(ctx, tag):
                     p1_ = p0_ + ctx.dir * max(min(extra, Lp - 0.5), 0.1)
                     ctx.welds.append(Weld(f"{name}-F{k_ + 1}{'a' if sg > 0 else 'b'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                           tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * nfl)), w, 70.0, tag))
+    _finish_welds(ctx, n_w0, t)
     return Lp
 
 
@@ -515,7 +536,7 @@ def beam_end_welds(ctx, tag, B_name, s_face, faces=("top", "bot", "web")):
     """Cordones del contorno de la sección del miembro contra la placa (o el soporte) en `s_face` (distancia desde Q a lo largo de ctx.dir), uno por segmento
     del contorno, con el tipo elegido por cara del miembro: ala superior, ala inferior y alma.  Devuelve los Weld."""
     from .fem.model3d import i_section, rect_tube
-    from .specs import WELD_TYPES
+    from .specs import WELD_TYPES, WELD_SIDES
     shp, op = ctx.shape, ctx.op
     d, bf = float(shp.d), float(shp.bf if shp.bf > 0 else shp.d)
     if shp.kind == W_SHAPE:
@@ -538,15 +559,19 @@ def beam_end_welds(ctx, tag, B_name, s_face, faces=("top", "bot", "web")):
         f = face_of(ym)
         if f not in faces:
             continue
-        if f == "web" and abs(a[1] - b[1]) < 1e-9:
-            pass
+        ty = types[f]
+        if f != "web" and abs(a[1] - b[1]) > 1e-6 and abs(a[0] - b[0]) < 1e-6:
+            continue                                                # el cordón va sobre las caras del ala (exterior e interior), no sobre su canto
         P0 = ctx.at(s_face, a[0], a[1])
         P1 = ctx.at(s_face, b[0], b[1])
         if float(np.linalg.norm(P1 - P0)) < 0.05:
             continue
         nA = ctx.sx * (b[1] - a[1]) - ctx.sy * (b[0] - a[0])
         nA = nA / max(float(np.linalg.norm(nA)), 1e-12)
-        ty = types[f]
+        if ty == WELD_TYPES[0] and getattr(op, "weld_side", WELD_SIDES[0]) != WELD_SIDES[0]:
+            ref = (ctx.sy * (1.0 if ym > 0 else -1.0)) if f != "web" else ctx.sx        # ala: lado 1 = exterior; alma: lado 1 = +sx
+            if not OPS.side_ok(op, nA, ref):
+                continue
         size = float(op.weld_size) if ty == WELD_TYPES[0] else (tmap[f] if ty == WELD_TYPES[1] else 0.5 * tmap[f])
         w = Weld(f"{tag}-W{k + 1}", ctx.partname, B_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, nA)), tuple(map(float, nB)), float(size), 70.0, tag)
         w.kind = ty
