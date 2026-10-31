@@ -218,6 +218,21 @@ def run():
             fail(f"placa simple hasta las alas: placa {pp[:, 2].min():.2f}..{pp[:, 2].max():.2f}, viga hasta y={sb[:, 1].max():.2f}")
         print(f"{'placa simple hasta las alas':34} la viga queda fuera de las alas y la placa llena el espacio entre ellas, con 4 filetes a las alas: OK")
 
+        # ---- recorte contra una cara: el miembro llega al plano aunque este desplazado hacia atras, y queda a la holgura pedida
+        import numpy as _np2
+        from steelconpro.conn import assembly as AS2
+        from steelconpro.model import load_book as _lb2
+        for gap_, hol_ in ((0.0, 0.0), (6.0, 0.0), (6.0, 1.0)):
+            pr2 = _lb2("ejemplos/CN-06_diagonal_con_recorte_y_angulo.scp")[0]
+            pr2.node.members[0].gap = gap_
+            next(o for o in pr2.node.operations if o.kind == SP.OP_TRIM).trim_gap = hol_
+            m2_ = AS2.build_model(pr2); f2_ = m2_.elems["Columna"]["faces"]["Ala superior"]
+            P2_ = _np2.array([tuple(q) for pr_ in m2_.part("D1").prisms for fc_ in pr_.faces() for q in fc_])
+            dmin_ = float(((P2_ - f2_.O) @ f2_.N).min())
+            if abs(dmin_ - hol_) > 0.02:
+                fail(f"recorte: con desplazamiento {gap_} y holgura {hol_} el miembro queda a {dmin_:.3f} de la cara")
+        print(f"{'recorte contra una cara':34} el miembro llega a la cara (o a su holgura) aunque se desplace sobre su eje: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")

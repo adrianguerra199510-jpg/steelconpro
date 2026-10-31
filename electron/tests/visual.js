@@ -8,7 +8,7 @@ const os = require('os');
   const shots = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'scp-vis-'));
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'scp-ws-'));
   const ex = path.join(__dirname, '..', '..', 'ejemplos');
-  for (const f of ['CN-01_columna_con_vigas.scp', 'CN-02_viga_con_secundarias.scp']) fs.copyFileSync(path.join(ex, f), path.join(ws, f));
+  for (const f of ['CN-01_columna_con_vigas.scp', 'CN-02_viga_con_secundarias.scp', 'CN-06_diagonal_con_recorte_y_angulo.scp']) fs.copyFileSync(path.join(ex, f), path.join(ws, f));
   const app = await electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, '..'), '--no-sandbox', '--disable-gpu-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader'], env: { ...process.env, SCP_WORKSPACE: ws } });
   const page = await app.firstWindow();
   await page.setViewportSize({ width: 1500, height: 900 });
@@ -102,6 +102,15 @@ const os = require('os');
     await page.mouse.click(900, 200, { button: 'right' }); await wait(600);
     await page.screenshot({ path: path.join(shots, 'raton_menu_vacio.png') });
     await page.keyboard.press('Escape');
+    await home();
+  });
+  await step('recorte', async () => {
+    await open('CN-06');
+    await zoomTo(8, 0, 16, 3.2); await wait(900);
+    await page.screenshot({ path: path.join(shots, 'recorte_1.png') });
+    await page.evaluate(() => { const E = window.__E; const n = E.conn().node; n.members[0].gap = 4; E.changed({ geometry: true }); });
+    await wait(2500); await zoomTo(8, 0, 16, 3.2); await wait(900);
+    await page.screenshot({ path: path.join(shots, 'recorte_2_desplazada.png') });
     await home();
   });
   await step('corte', async () => {

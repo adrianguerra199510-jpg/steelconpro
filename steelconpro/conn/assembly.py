@@ -1106,7 +1106,25 @@ def _apply_trims(mdl, nd, reg):
             ff = par["faces"][o.face]
             nn = np.asarray(ff.N, float)
             pt, keep = np.asarray(ff.O, float) + nn * float(o.trim_gap), -nn      # el miembro queda del lado exterior de la cara
+        keep_n = np.asarray(keep, float)
         for pr in part.prisms:
+            # el miembro se alarga por el extremo recortado hasta pasar el plano; luego el plano lo corta y cierra la sección con una tapa
+            W = np.asarray(pr.W, float)
+            if pr.circle is None and abs(float(W @ d_)) > 0.99:
+                end_sign = -1.0 if o.trim_end == "Inicio" else 1.0                 # el extremo recortado está en w0 (inicio) o en w1 (fin)
+                w_end = pr.w0 if end_sign < 0 else pr.w1
+                rows = [np.asarray(pr.to_global(u, v, w_end), float) for (u, v) in pr.poly]
+                den = float(W @ -keep_n) * end_sign                                 # avance del extremo respecto de la normal exterior nn = −keep al alargar
+                need = 0.0
+                for c_ in rows:
+                    sdist = float((c_ - np.asarray(pt, float)) @ -keep_n)               # > 0: la esquina está del lado que se conserva (fuera de la cara)
+                    if den < -1e-6 and sdist > 0:
+                        need = max(need, sdist / -den)
+                need += 0.5 if need > 0 else 0.0
+                if end_sign < 0:
+                    pr.w0 -= need
+                else:
+                    pr.w1 += need
             pr.cut_planes = list(pr.cut_planes) + [(tuple(pt), tuple(keep))]
 
 
