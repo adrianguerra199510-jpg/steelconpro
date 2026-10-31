@@ -242,6 +242,13 @@ def run():
             fail(f"soldadura: {tt}")
         print(f"{'soldadura: espesores y recorte':34} el espesor sale de las partes unidas; el recorte puede llevar soldadura de contorno; orden de calculo por dependencias: OK")
 
+        # ---- soldadura del recorte de un miembro inclinado: todo el cordon cae sobre el plano de la cara
+        ffw = mw.elems[otr.parent]["faces"][otr.face]
+        dd_ = [abs(float((_np.array(q_) - ffw.O) @ ffw.N)) for w_ in mw.welds if "-R" in w_.name for q_ in (w_.p0, w_.p1)]
+        if not dd_ or max(dd_) > 0.01:
+            fail(f"soldadura del recorte inclinado fuera del plano: {max(dd_ or [0]):.3f} in")
+        print(f"{'soldadura en recorte inclinado':34} el contorno del miembro a 45° queda sobre la cara (desviación {max(dd_):.3f} in): OK")
+
         # ---- recorte contra una cara: el miembro llega al plano aunque este desplazado hacia atras, y queda a la holgura pedida
         import numpy as _np2
         from steelconpro.conn import assembly as AS2

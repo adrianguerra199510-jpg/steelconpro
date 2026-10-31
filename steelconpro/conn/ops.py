@@ -251,6 +251,8 @@ def member_contour_lines(frame, ff, edges=None):
         for k in g:
             a, b = poly[k % n], poly[(k + 1) % n]
             P0, P1 = Q + sx * a[0] + sy * a[1], Q + sx * b[0] + sy * b[1]
+            P0 = P0 + d * (float(np.dot(p2 - P0, n2)) / den)             # miembro inclinado: el contorno se lleva sobre el plano de la cara, siguiendo el eje
+            P1 = P1 + d * (float(np.dot(p2 - P1, n2)) / den)
             t = P1 - P0
             ln = float(np.linalg.norm(t))
             if ln < 1e-9:
