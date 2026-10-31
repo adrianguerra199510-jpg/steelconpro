@@ -21,7 +21,7 @@ from .fem.model3d import Model3D, Part, Bolt, Prism, Weld, unit
 from . import ops as OPS
 from .ops import member_faces, FaceFrame
 from .specs import (GENERIC_OPS, OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
-                    OP_COPE, OP_CONT, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
+                    OP_COPE, OP_CONT, TAB_MODES, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
 
 EMBED = 0.35            # las placas entran un poco en el miembro principal para que no quede una rendija en las uniones esviadas
 DIAG_MIN = 10.0         # elevacion (grados) desde la cual un miembro se considera diagonal (color y cartela por omision)
@@ -283,7 +283,7 @@ def tab_extra(nd, m, op) -> float:
     """Placa simple «hasta el interior de las alas»: cuánto se saca la viga del principal (del alma al borde de las alas) para que no choque con ellas.
     0 si no aplica (el principal no es un perfil I o la viga no llega por el alma)."""
     from .specs import TAB_MODES
-    if op is None or op.kind != OP_TAB or op.tab_mode != TAB_MODES[1]:
+    if op is None or op.kind != OP_TAB or op.tab_mode not in (TAB_MODES[1], TAB_MODES[2]):
         return 0.0
     ms = shape_of(nd.main_shape)
     if ms.kind != W_SHAPE or attach_info(nd, m).get("face") != "alma":
@@ -332,7 +332,11 @@ def _tab_geometry(ctx, tag):
     if extra > 0:                                                       # placa escalonada: llena el espacio entre las alas y, fuera de ellas, se reduce a la placa de los pernos
         e = min(extra, Lp - 0.5)
         Ht = min(H, Hf) if ctx.op.tab_H <= 0 else H
-        poly = [(0.0, ty_p - Hf / 2), (e, ty_p - Hf / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty_p + Hf / 2), (0.0, ty_p + Hf / 2)]
+        two = ctx.op.tab_mode == TAB_MODES[2]
+        if two:                                                         # placa de pernos sola; las placas de arriba y abajo se agregan aparte
+            poly = [(0.0, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (0.0, ty + Ht / 2)]
+        else:
+            poly = [(0.0, ty_p - Hf / 2), (e, ty_p - Hf / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty_p + Hf / 2), (0.0, ty_p + Hf / 2)]
         H = Ht
     else:
         clip = min(clip, H / 2.0 - 0.1, Lp - 0.1)
@@ -343,6 +347,31 @@ def _tab_geometry(ctx, tag):
     pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
+    two_plates = extra > 0 and ctx.op.tab_mode == TAB_MODES[2]
+    if two_plates:                                                      # dos placas, arriba y abajo de la placa de pernos, de la cara del alma a las alas del principal
+        tp = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
+        sep = float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else H
+        sep = min(max(sep, 0.0), Hf - 0.5)
+        e2 = min(extra, Lp - 0.5)
+        hp = (Hf - sep) / 2.0
+        for k_, sgn in enumerate((1.0, -1.0)):
+            y0, y1 = sorted((ty_p + sgn * sep / 2.0, ty_p + sgn * Hf / 2.0))
+            pp = _plate_prism([(0.0, y0), (e2, y0), (e2, y1), (0.0, y1)], ctx.Q + (lat + tp / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, tp)
+            nm = f"Placa {tag}-{'S' if sgn > 0 else 'I'}"
+            ctx.parts.append(Part(nm, "plate", f"Placa PL {tp:g} × {hp:g} × {e2:g}", Fy, Fu, [pp], t=tp))
+            if ctx.main_name:
+                w2 = float(ctx.op.weld_size)
+                for sg, lf in ((1.0, lat + tp / 2.0), (-1.0, lat - tp / 2.0)):
+                    for q_, (a_, b_, nn, dd) in enumerate(((y0, y1, ctx.sx * sg, ctx.dir), (None, None, None, None))):
+                        if a_ is None:
+                            continue
+                        P0 = ctx.Q + lf * ctx.sx + ctx.sy * a_
+                        P1 = ctx.Q + lf * ctx.sx + ctx.sy * b_
+                        ctx.welds.append(Weld(f"{nm}-W{'1' if sg > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, nn)), tuple(map(float, dd)), w2, 70.0, tag))
+                    yfl = ty_p + sgn * Hf / 2.0                           # borde exterior contra la cara interna del ala
+                    P0 = ctx.Q + lf * ctx.sx + ctx.sy * yfl
+                    P1 = P0 + ctx.dir * e2
+                    ctx.welds.append(Weld(f"{nm}-F{'a' if sg > 0 else 'b'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * -sgn)), w2, 70.0, tag))
     ctx.parts.append(Part(name, "plate", f"Placa simple PL {t:g} × {max(H, Hf):g} × {Wd:g}", Fy, Fu, [pr], t=t))
     if ctx.op.tab_H <= 0 or True:
         pass
@@ -384,7 +413,7 @@ def _tab_geometry(ctx, tag):
             p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p + hw_ - (0.0 if extra > 0 else clip))
             ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                   tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.dir)), w, 70.0, tag))
-        if extra > 0:                                              # filetes de los bordes superior e inferior de la placa contra la cara interna de las alas del principal
+        if extra > 0 and not two_plates:                           # filetes de los bordes superior e inferior de la placa contra la cara interna de las alas del principal
             for k_, (vs, nfl) in enumerate(((ty_p + Hf / 2.0, -1.0), (ty_p - Hf / 2.0, 1.0))):
                 for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
                     p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * vs

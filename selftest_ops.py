@@ -218,6 +218,17 @@ def run():
             fail(f"placa simple hasta las alas: placa {pp[:, 2].min():.2f}..{pp[:, 2].max():.2f}, viga hasta y={sb[:, 1].max():.2f}")
         print(f"{'placa simple hasta las alas':34} la viga queda fuera de las alas y la placa llena el espacio entre ellas, con 4 filetes a las alas: OK")
 
+        # ---- placa simple en dos placas (arriba y abajo): separacion y espesor controlables, soldadas al principal
+        pr1.node.operations[pr1.node.operations.index(op1)].tab_mode = SP.TAB_MODES[2]
+        op1.tp_sep = 6.0; op1.tp_t = 0.75
+        mm1b = AS1.build_model(pr1)
+        ps = [mm1b.part("Placa S2-S"), mm1b.part("Placa S2-I")]
+        zs_ = [_np.vstack([q.corners() for q in p_.prisms])[:, 2] for p_ in ps]
+        lo_ = max(z.min() for z in zs_); hi_ = min(z.max() for z in zs_)
+        if abs((lo_ - hi_) - 6.0) > 0.05 or abs(ps[0].t - 0.75) > 1e-9 or sum(1 for w_ in mm1b.welds if w_.name.startswith("Placa S2-S") or w_.name.startswith("Placa S2-I")) < 6:
+            fail(f"dos placas: separacion {lo_ - hi_:.2f}, t {ps[0].t}")
+        print(f"{'placa simple en dos placas':34} placas arriba y abajo con separacion y espesor propios, soldadas al principal: OK")
+
         # ---- recorte contra una cara: el miembro llega al plano aunque este desplazado hacia atras, y queda a la holgura pedida
         import numpy as _np2
         from steelconpro.conn import assembly as AS2
