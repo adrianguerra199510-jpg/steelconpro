@@ -197,9 +197,11 @@ function build(app) {
       iconBtn('download', 'Guardar imagen', async () => { const f = await native.saveFile('conexion.png', [{ name: 'Imagen PNG', extensions: ['png'] }]); if (f) { try { await call('save_png', { path: f, data: E.viewer.screenshot() }); toast('Imagen guardada', 'ok'); } catch (e) { errorBox(e); } } })));
   ui.tagBtn.classList.add('on');
   ui.loadSel = h('select', { title: 'Caso de carga que se dibuja', onchange: () => { E.loadCase = parseInt(ui.loadSel.value, 10) || 0; applyLoads(); } });
-  ui.loadBtn = iconBtn('zap', 'Mostrar las cargas', () => { E.showLoadsOn = !E.showLoadsOn; ui.loadBtn.classList.toggle('on', E.showLoadsOn); E.viewer.setLoadsVisible(E.showLoadsOn); ui.loadSel.style.display = E.showLoadsOn ? '' : 'none'; });
-  ui.loadBtn.classList.add('on'); E.showLoadsOn = true;
-  vtool.append(h('div', { class: 'group' }, ui.loadBtn, ui.loadSel));
+  const syncLoads = () => { ui.loadBtn.classList.toggle('on', E.showLoadsOn); ui.reacBtn.classList.toggle('on', E.showReactionsOn); E.viewer.setLoadsVisible(E.showLoadsOn || E.showReactionsOn); applyLoads(); };
+  ui.loadBtn = iconBtn('zap', 'Mostrar las cargas de los miembros (no principales)', () => { E.showLoadsOn = !E.showLoadsOn; syncLoads(); });
+  ui.reacBtn = iconBtn('arrow-left', 'Mostrar las reacciones en el nudo (resultantes)', () => { E.showReactionsOn = !E.showReactionsOn; syncLoads(); });
+  ui.loadBtn.classList.add('on'); ui.reacBtn.classList.add('on'); E.showLoadsOn = true; E.showReactionsOn = true;
+  vtool.append(h('div', { class: 'group' }, ui.loadBtn, ui.reacBtn, ui.loadSel));
   ui.fembar = h('div', { class: 'vhud' });
   const center = h('div', { class: 'viewer-wrap' }, ui.vhost, vtool, ui.note, ui.fembar);
 
@@ -690,12 +692,12 @@ function applyLoads() {
     const n = a ? a.cases.length : 0;
     if (sel.options.length !== n) { sel.replaceChildren(...(a ? a.cases : []).map((c, i) => h('option', { value: String(i), text: c.case }))); }
     E.loadCase = Math.min(E.loadCase || 0, Math.max(n - 1, 0)); sel.value = String(E.loadCase);
-    sel.style.display = n && E.showLoadsOn ? '' : 'none';
+    sel.style.display = n && (E.showLoadsOn || E.showReactionsOn) ? '' : 'none';
   }
   if (!a || !a.cases.length || E.femView) { v.setLoads([]); return; }
   const c = a.cases[Math.min(E.loadCase || 0, a.cases.length - 1)];
   const nrm = (x) => Math.hypot(x[0], x[1], x[2]);
-  v.setLoads(c.draw.map((d) => ({ pos: d.pos, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
+  v.setLoads(c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ pos: d.pos, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
     textF: nrm(d.F) > 1e-9 ? `${d.name}: ${us.q('F', nrm(d.F), 2)}` : '', textM: nrm(d.M) > 1e-9 ? `${d.name}: ${us.q('M', nrm(d.M), 1)}` : '' })));
 }
 
