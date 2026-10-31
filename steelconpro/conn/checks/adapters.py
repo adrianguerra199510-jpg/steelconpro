@@ -90,7 +90,7 @@ def build_items(nd: Nodo):
             continue
         beam = CATALOG.get(m.shape)
         sup_kind = support_kind(nd, info)
-        cope = _cope_of(nd, m.name)
+        cope = None if tab_extra(nd, m, op) > 0 else _cope_of(nd, m.name)             # con la placa hasta las alas la viga no se corta
         cp = dict(cope_top=cope.cope_top, cope_bot=cope.cope_bot, cope_len=cope.cope_len) if cope else {}
         if not cope:
             from ..assembly import auto_cope_for

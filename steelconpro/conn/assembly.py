@@ -993,6 +993,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 Lm += extra
         Fy_m, Fu_m = _steel(m.steel)
         cope = next((o for o in nd.operations if o.kind in (OP_COPE, OP_CUT) and (o.member == m.name or m.name in (o.targets or []))), None)
+        if cope is not None and any(c_.extra > 0 for c_ in ctxs_m) and not (cope.kind == OP_CUT and cope.cut_at == "Fin"):
+            mdl.notes.append(f"{m.name}: con la placa simple «hasta el interior de las alas» la viga no se corta; se ignora el corte del extremo.")
+            cope = None
         if cope is not None and shp.kind == W_SHAPE and (cope.cope_top > 0 or cope.cope_bot > 0):
             if 0 < cope.cope_top < shp.tf or 0 < cope.cope_bot < shp.tf:
                 mdl.notes.append(f"{m.name}: el corte es menos profundo que el espesor del ala ({shp.tf:g} in): el ala no queda eliminada.")
