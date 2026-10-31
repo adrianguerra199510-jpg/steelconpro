@@ -221,7 +221,7 @@ function build(app) {
   const bar = h('div', { class: 'statusbar' }, ui.status, ui.units);
   root.append(top, body, bar);
 
-  E.viewer = new Viewer(ui.vhost, { onPick: (name, part) => pickPart(name, part) });
+  E.viewer = new Viewer(ui.vhost, { onPick: (name, part) => pickPart(name, part), onContext: (name, part, e) => contextMenu(name, part, e) });
   buildRight();
 }
 
@@ -418,14 +418,64 @@ async function addMember() {
   } catch (e) { errorBox(e); }
 }
 
-function addMenu(anchor) {
+// clic derecho en el visor: menú del miembro, de la operación o del espacio vacío
+function opIndexOf(name, part) {
+  const nd = E.conn().node, K = S.C.op;
+  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE));
+  if (oi >= 0) return oi;
+  const owner = part ? part.owner : '';
+  if (owner === 'op:base') return nd.operations.findIndex((o) => o.kind === K.BASE);
+  if (owner && owner.startsWith('op:')) return parseInt(owner.slice(3), 10);
+  if (owner) return nd.operations.findIndex((o) => o.member === owner && S.C.ops.connection.includes(o.kind));
+  if (part && part.kind === 'gusset') return nd.operations.findIndex((o) => o.kind === K.GUSSET || o.kind === K.GUSSET_W);
+  return -1;
+}
+E.contextMenu = (name, part, ev) => contextMenu(name, part, ev);
+function contextMenu(name, part, ev) {
+  const nd = E.conn().node;
+  const at = { x: ev.clientX, y: ev.clientY };
+  const items = [];
+  const isMember = name && (name === nd.main_name || nd.members.some((m) => m.name === name));
+  const oi = !isMember && name ? opIndexOf(name, part) : -1;
+  if (isMember) {
+    E.sel = `m:${name}`; renderTree(); highlight();
+    items.push({ header: name === nd.main_name ? `Miembro principal «${name}»` : `Miembro «${name}»` },
+      { label: 'Editar miembro', icon: 'pencil', onClick: () => openMember(E, name) },
+      { label: 'Agregar operación a este miembro…', icon: 'plus', onClick: () => addMenu(null, at) });
+    if (name !== nd.main_name) {
+      items.push({ label: 'Designar como miembro principal', icon: 'star', onClick: async () => {
+        try { const r = await call('designate_main', { connection: E.conn(), name }); E.snap(); E.replaceConn(r.connection); E.changed({ structure: true }); if (r.notes && r.notes.length) toast(r.notes.join(' '), 'info', 7000); } catch (e) { errorBox(e); }
+      } }, '-', { label: 'Eliminar miembro', icon: 'trash', danger: true, onClick: async () => {
+        const deps = nd.operations.filter((o) => o.member === name || o.parent === name || (o.targets || []).includes(name));
+        if (!(await confirmBox(`¿Eliminar el miembro «${name}»?`, { danger: true, ok: 'Eliminar', detail: deps.length ? `También se quitarán ${deps.length} operación(es) que lo usan.` : '' }))) return;
+        E.snap(); nd.members.splice(nd.members.findIndex((x) => x.name === name), 1);
+        for (const o of deps) { const i = nd.operations.indexOf(o); if (i >= 0) await E.removeOperation(i, { silent: true }); }
+        nd.loads = nd.loads.filter((l) => l.member !== name); E.sel = null; E.changed({ structure: true });
+      } });
+    }
+  } else if (oi >= 0) {
+    E.sel = `o:${oi}`; renderTree(); highlight();
+    items.push({ header: `Operación ${oi + 1}: ${opTitle(nd.operations[oi])}` },
+      { label: 'Editar operación', icon: 'pencil', onClick: () => editOperation(oi) },
+      { label: 'Subir (se aplica antes)', icon: 'chevron-up', disabled: oi === 0, onClick: () => moveOperation(oi, -1) },
+      { label: 'Bajar (se aplica después)', icon: 'chevron-down', disabled: oi === nd.operations.length - 1, onClick: () => moveOperation(oi, 1) },
+      { label: 'Agregar operación…', icon: 'plus', onClick: () => addMenu(null, at) }, '-',
+      { label: 'Eliminar operación', icon: 'trash', danger: true, onClick: () => deleteOperation(oi) });
+  } else {
+    items.push({ header: 'Conexión' }, { label: 'Agregar operación…', icon: 'plus', onClick: () => addMenu(null, at) }, { label: 'Agregar miembro', icon: 'component', onClick: () => addMember() }, '-',
+      { label: 'Ajustar a la pantalla', icon: 'crosshair', onClick: () => E.viewer.fit() }, { label: 'Vista isométrica', icon: 'home', onClick: () => E.viewer.setView('iso') });
+  }
+  menu(null, items, at);
+}
+
+function addMenu(anchor, at) {
   const C = S.C;
   const items = [];
   for (const [title, kinds] of C.ops.groups) {
     items.push({ header: title });
     for (const k of kinds) items.push({ label: k, icon: OP_ICON[k] || 'box', onClick: () => createOperation(k) });
   }
-  const m = menu(anchor, items);
+  const m = menu(anchor, items, at || {});
   m.classList.add('wide');
 }
 

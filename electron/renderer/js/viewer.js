@@ -107,9 +107,9 @@ class ViewCube {
 }
 
 export class Viewer {
-  constructor(container, { onPick, onHover } = {}) {
+  constructor(container, { onPick, onHover, onContext } = {}) {
     this.el = container;
-    this.onPick = onPick; this.onHover = onHover;
+    this.onPick = onPick; this.onHover = onHover; this.onContext = onContext;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setClearColor(0x000000, 0);
@@ -123,6 +123,16 @@ export class Viewer {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
     this.controls.screenSpacePanning = true;
+    // ratón: izquierdo = mover (pan), rueda apretada = girar, rueda = zoom; el derecho abre el menú contextual
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: -1 };
+    this.controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+    this.controls.addEventListener('start', () => { this._q0 = this.camera.quaternion.clone(); });
+    this.controls.addEventListener('end', () => {                 // girar en una vista ortogonal la convierte en una vista libre
+      if (this._q0 && this.view !== 'iso' && this.view !== 'custom' && this._q0.angleTo(this.camera.quaternion) > 1e-3) {
+        this._customDir = this.camera.position.clone().sub(this.controls.target).normalize(); this.view = 'custom';
+        if (this.onView) this.onView('custom');
+      }
+    });
     this.controls.addEventListener('change', () => this.requestRender());
     this.parts = [];            // { name, kind, label, meshes: [..], lines, tint, visible }
     this.dims = []; this.labels = [];
@@ -138,7 +148,7 @@ export class Viewer {
     this._raf = 0;
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
-    this.renderer.domElement.addEventListener('pointerdown', (e) => { this._down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+    this.renderer.domElement.addEventListener('pointerdown', (e) => { this._down = e.button === 0 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null; });
     this.renderer.domElement.addEventListener('pointerup', (e) => {
       if (!this._down) return;
       const d = Math.hypot(e.clientX - this._down.x, e.clientY - this._down.y);
@@ -146,6 +156,7 @@ export class Viewer {
       this._down = null;
     });
     this.renderer.domElement.addEventListener('pointermove', (e) => { if (this.onHover && !e.buttons) this._hoverMove(e); });
+    this.renderer.domElement.addEventListener('contextmenu', (e) => { e.preventDefault(); const p = this._ray(e); if (this.onContext) this.onContext(p ? p.name : null, p, e); });
     this.cube = new ViewCube(this);
     this.resize();
   }
@@ -370,7 +381,7 @@ export class Viewer {
     const ortho = v !== 'iso' && v !== 'custom';
     this.camera = ortho ? this.ortho : this.persp;
     this.controls.object = this.camera;
-    this.controls.enableRotate = !ortho;
+    this.controls.enableRotate = true;
     this.fit();
     if (this.onView) this.onView(v);
   }
