@@ -113,6 +113,14 @@ const os = require('os');
     await page.screenshot({ path: path.join(shots, 'recorte_2_desplazada.png') });
     await home();
   });
+  await step('placa_soldada', async () => {
+    await open('CN-02');
+    await page.evaluate(() => { const E = window.__E; const n = E.conn().node; const o = n.operations.find((x) => x.member === 'S2' && x.kind.startsWith('Placa simple')); o.beam_conn = 'Soldada'; E.changed({ geometry: true }); });
+    await wait(3000);
+    await zoomTo(0, -3, 3, 3.2); await wait(900);
+    await page.screenshot({ path: path.join(shots, 'placa_soldada_viga.png') });
+    await home();
+  });
   await step('corte', async () => {
     await open('CN-02');
     await zoomTo(0, -3, 6, 3.2); await wait(1000);

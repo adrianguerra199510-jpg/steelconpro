@@ -75,6 +75,7 @@ OPENINGS = ["Ninguna", "Circular", "Rectangular", "Rodea al miembro"]
 HOLE_SHAPES = ["Circular", "Ranura", "Rectangular"]
 WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcial)"]
 TAB_MODES = ["Sobre la cara del soporte", "Hasta el interior de las alas del principal"]
+BEAM_CONNS = ["Atornillada", "Soldada"]
 TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro"]
 WELD_MODES = ["Bordes de la placa", "Contorno del miembro"]
 ATTACHES = ["Soldada", "Atornillada"]
@@ -166,6 +167,7 @@ class Operation:
     tab_H: float = 0.0           # alto de la placa simple (a lo largo del peralte de la viga), in (0 = automatico)
     tab_W: float = 0.0           # ancho de la placa simple (a lo largo de la viga), in (0 = automatico)
     n_cols: int = 1              # columnas de pernos de la placa simple (separacion: bolt_g)
+    beam_conn: str = BEAM_CONNS[0]  # placa simple: unión de la placa al alma de la viga conectada (pernos o filetes en el contorno de la placa)
     tab_mode: str = TAB_MODES[0]  # placa simple: «Hasta el interior de las alas» saca la viga del principal y extiende la placa para soldarla al alma y a la cara interna de las alas
     tab_clip: float = -1.0        # placa simple: lado del recorte de las esquinas junto al soporte, in (<0 o 0 = sin recorte; con «hasta las alas» la placa ya es escalonada)
     tab_y: float = 0.0           # placa simple: desplazamiento del centro de la placa a lo largo del peralte de la viga, in

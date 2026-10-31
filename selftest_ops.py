@@ -233,6 +233,16 @@ def run():
                 fail(f"recorte: con desplazamiento {gap_} y holgura {hol_} el miembro queda a {dmin_:.3f} de la cara")
         print(f"{'recorte contra una cara':34} el miembro llega a la cara (o a su holgura) aunque se desplace sobre su eje: OK")
 
+        # ---- placa simple soldada a la viga conectada: sin pernos, tres filetes sobre el alma y verificaciones de soldadura
+        pr3 = _lb2("ejemplos/CN-02_viga_con_secundarias.scp")[0]
+        next(o for o in pr3.node.operations if o.kind == SP.OP_TAB and o.member == "S2").beam_conn = SP.BEAM_CONNS[1]
+        m3_ = AS2.build_model(pr3)
+        v3_ = api.verify({"connection": api._dump(pr3)})
+        g1_ = [c for c in v3_["checks"] if c["group"].startswith("1.")]
+        if any(b_.tag.startswith("S2-B") for b_ in m3_.bolts) or sum(1 for w_ in m3_.welds if w_.name.startswith("Placa S2-V")) != 3 or len(g1_) < 4 or not v3_["ok"]:
+            fail(f"placa soldada a la viga: pernos {[b_.tag for b_ in m3_.bolts if b_.tag.startswith('S2-B')]}, {len(g1_)} verificaciones")
+        print(f"{'placa simple soldada a la viga':34} sin pernos, 3 filetes sobre el alma y {len(g1_)} verificaciones: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")

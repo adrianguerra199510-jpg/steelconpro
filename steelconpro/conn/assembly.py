@@ -300,6 +300,8 @@ def tab_dims(op, m, shp, db, extra=0.0):
     a = gap_eff(m) + extra + 2.5
     H = op.tab_H if op.tab_H > 0 else (n - 1) * s + 3.0
     Wd = op.tab_W if op.tab_W > 0 else a + (cols - 1) * g + 1.5
+    if getattr(op, 'beam_conn', 'Atornillada') == 'Soldada' and op.tab_W <= 0:
+        Wd = gap_eff(m) + extra + 5.0                                  # soldada: la placa se traslapa 5 in sobre el alma de la viga
     return n, s, cols, g, H, Wd, a
 
 
@@ -353,11 +355,26 @@ def _tab_geometry(ctx, tag):
         grip = [(ctx.partname, 0.0, shp.bf)]
         p0 = shp.bf / 2.0
         nut = shp.bf
+    welded_beam = ctx.op.beam_conn == "Soldada" and _is_open(shp)
     k = 0
     for j in range(cols):
         for i, z in enumerate(zs):
+            if welded_beam:
+                break
             k += 1
             ctx.bolts.append(_bolt(f"{tag}-B{k}", ctx.at(a + j * g, p0, z), -ctx.sx, ctx.db, 0.0, nut, grip, ctx.op.bolt_grade))
+    if welded_beam:                                                # filetes de la placa al alma de la viga: borde superior, borde inferior y borde del extremo
+        wv = float(ctx.op.weld_size)
+        s0_ = gap_eff(m) + extra
+        yt, yb = ty + H / 2.0, ty - H / 2.0
+        webf = _halfw(shp)                                          # cara del alma por la que se apoya la placa
+        for k_, (vv, nsy) in enumerate(((yt, 1.0), (yb, -1.0))):
+            P0 = ctx.Q + ctx.dir * s0_ + ctx.sx * webf + ctx.sy * vv
+            P1 = ctx.Q + ctx.dir * Wd + ctx.sx * webf + ctx.sy * vv
+            ctx.welds.append(Weld(f"{name}-V{k_ + 1}", name, ctx.partname, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, ctx.sy * nsy)), tuple(map(float, ctx.sx)), wv, 70.0, tag))
+        Pa = ctx.Q + ctx.dir * Wd + ctx.sx * webf + ctx.sy * yb
+        Pb = ctx.Q + ctx.dir * Wd + ctx.sx * webf + ctx.sy * yt
+        ctx.welds.append(Weld(f"{name}-V3", name, ctx.partname, tuple(map(float, Pa)), tuple(map(float, Pb)), tuple(map(float, ctx.dir)), tuple(map(float, ctx.sx)), wv, 70.0, tag))
     # soldaduras de filete en la cara del soporte, una a cada lado de la placa
     if ctx.main_name:
         w = float(ctx.op.weld_size)

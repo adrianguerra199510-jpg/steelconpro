@@ -106,7 +106,10 @@ def build_items(nd: Nodo):
                             bolt_size=op.bolt_size, bolt_grade=op.bolt_grade, n=n_, s=s_, a=a_, cols=cols_, gage=g_,
                             lev_p=max((H_ - (n_ - 1) * s_) / 2.0, 0.25), leh_p=max(W_ - a_ - (cols_ - 1) * g_, 0.25),
                             tp=op.plate_t, plate_steel=op.plate_steel, gap=gap_eff(m) + tab_extra(nd, m, op), weld_size=op.weld_size, **cp)
-            items.append(Item(op, m, "shear", spec, None, engine=shear_tab))
+            if op.kind == OP_TAB and op.beam_conn == "Soldada" and beam is not None and not beam.is_hollow:
+                items.append(Item(op, m, "tabweld", None, None, engine=generic))        # la placa va soldada al alma: no hay pernos en la viga
+            else:
+                items.append(Item(op, m, "shear", spec, None, engine=shear_tab))
             if op.kind == OP_WELD:                                  # alas soldadas: ademas de la placa del alma, la fuerza de las alas
                 items.append(Item(op, m, "flange", None, None, engine=generic))
         elif op.kind == OP_DANG:

@@ -34,6 +34,9 @@ def _member_axial_props(shape):
 
 
 def solve_one(prj, nd, op, m, vals, rec):
+    from ..specs import OP_TAB
+    if op.kind == OP_TAB:
+        return _tab_weld(nd, op, m, vals, rec)
     if op.kind == OP_WELD:
         return _flange_welds(nd, op, m, vals, rec)
     return _gusset(nd, op, m, vals, rec)
@@ -132,4 +135,36 @@ def _gusset(nd, op, m, vals, rec):
     add_check(ck, rec, "g_wp", "Soldadura de la cartela al miembro principal (dos lados)", P, PHI_WELD * 0.6 * fexx * 0.707 * wg * 2.0 * Lbase, "kip", "AISC 360-22 J2.4",
               f"Filete de {wg:g} in, {Lbase:.1f} in de base a cada lado; la fuerza se toma completa (resultante, sin descomponer).")
     not_evaluated(ck, "g_ufm", "Reparto de fuerzas de interfaz de la cartela (UFM)", "AISC Manual Parte 13", "Los esfuerzos locales del principal no se evalúan.")
+    return ck
+
+
+def _tab_weld(nd, op, m, vals, rec):
+    """Placa simple soldada al alma de la viga conectada: filetes en el borde superior, el inferior y el del extremo de la placa (traslape sobre el alma)."""
+    from ..assembly import tab_dims, tab_extra, gap_eff
+    from ..common import bolt_db
+    N, Vy, Vz, T, My, Mz = vals
+    ck = []
+    beam = CATALOG.get(m.shape)
+    if beam is None or beam.is_hollow:
+        not_evaluated(ck, "tw", "Soldadura de la placa a la viga", "AISC 360-22 J2.4", "Solo para vigas I.")
+        return ck
+    n, s_, cols, g_, H, Wd, a = tab_dims(op, m, beam, bolt_db(op.bolt_size), tab_extra(nd, m, op))
+    ov = max(Wd - gap_eff(m) - tab_extra(nd, m, op), 0.1)
+    L = 2.0 * ov + H
+    w = float(op.weld_size)
+    V = abs(Vz)
+    pl = M.find(M.PLATE_STEELS, op.plate_steel, 1)
+    bm = M.find(M.SHAPE_STEELS, m.steel)
+    fexx = 70.0
+    if rec:
+        rec.section(f"{op.kind.upper()} — {m.name}: soldadura de la placa al alma")
+        rec.text(f"Placa {H:g} × {Wd:g} × {op.plate_t:g} in traslapada {ov:g} in sobre el alma; filete {w:g} in en el borde superior, el inferior y el del extremo (L = {L:g} in).")
+    add_check(ck, rec, "tw_weld", f"Soldadura de la placa al alma: V ≤ φ·0.6·FEXX·0.707·w·L  (L = {L:g} in)", V, 0.75 * 0.60 * fexx * 0.707 * w * L, "kip", "AISC 360-22 J2.4",
+              "Cortante repartido por igual en la longitud del cordón; no incluye la excentricidad del cortante respecto del grupo de soldadura (verifíquela aparte).")
+    add_check(ck, rec, "tw_sup", f"Soldadura de la placa al soporte: V ≤ φ·0.6·FEXX·0.707·w·2H  (2H = {2 * H:g} in)", V, 0.75 * 0.60 * fexx * 0.707 * w * 2.0 * H, "kip", "AISC 360-22 J2.4",
+              "Dos filetes del mismo cateto en la cara del soporte; sin excentricidad.")
+    add_check(ck, rec, "tw_plate_y", "Placa: fluencia por cortante", V, 1.00 * 0.60 * pl.Fy * H * op.plate_t, "kip", "AISC 360-22 J4.2(a)", "φ = 1.00")
+    add_check(ck, rec, "tw_web", "Alma de la viga: rotura por cortante en el cordón", V, 0.75 * 0.60 * bm.Fu * beam.tw * H, "kip",
+              "AISC 360-22 J4.2(b)", "Se toma la altura de la placa sobre el alma (φ = 0.75).")
+    add_check(ck, rec, "tw_min", "Cateto mínimo del filete", M.min_fillet(min(op.plate_t, beam.tw)), w, "in", "AISC 360-22 Tabla J2.4", "Se compara con la parte más delgada.", skip=False)
     return ck
