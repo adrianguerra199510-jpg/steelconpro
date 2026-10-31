@@ -353,30 +353,33 @@ def _tab_geometry(ctx, tag):
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
     two_plates = extra > 0 and _tab_split(ctx.op, ctx)
-    if two_plates:                                                      # dos placas, arriba y abajo de la placa de pernos, de la cara del alma a las alas del principal
+    if two_plates:                                                      # dos placas horizontales (como placas de continuidad) a la altura de las alas de la viga: del alma a las alas del principal
         tp = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
-        sep = float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else H
-        sep = min(max(sep, 0.0), Hf - 0.5)
+        dflt = (float(shp.d) - 2.0 * float(shp.tf)) if getattr(shp, "tf", 0) else H
+        sep = max(float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else dflt, 0.5)           # distancia libre entre las dos placas (a lo largo del peralte de la viga)
         e2 = min(extra, Lp - 0.5)
-        hp = (Hf - sep) / 2.0
-        for k_, sgn in enumerate((1.0, -1.0)):
-            y0, y1 = sorted((ty_p + sgn * sep / 2.0, ty_p + sgn * Hf / 2.0))
-            pp = _plate_prism([(0.0, y0), (e2, y0), (e2, y1), (0.0, y1)], ctx.Q + (lat + tp / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, tp)
+        Aax2 = np.asarray(ctx.dmain_axis, float) if getattr(ctx, 'dmain_axis', None) is not None else None
+        qp = ctx.Q - (Aax2 * float(np.dot(ctx.Q, Aax2)) if Aax2 is not None else 0.0)
+        lc = -float(np.dot(qp, ctx.sx))                                  # centro del alma del principal respecto del eje de la viga, en sentido lateral
+        hw2 = Hf / 2.0                                                   # medio ancho libre entre las alas del principal
+        wsg = 1.0 if float(np.dot(np.cross(ctx.dir, ctx.sx), ctx.sy)) >= 0 else -1.0
+        for sgn in (1.0, -1.0):
+            yc = ty + sgn * (sep / 2.0 + tp / 2.0)                       # la cara interior de la placa queda a «sep / 2» del eje
+            ya, yb = sorted((yc - tp / 2.0, yc + tp / 2.0))
+            w0, w1 = sorted((wsg * ya, wsg * yb))
+            pp = _plate_prism([(0.0, lc - hw2), (e2, lc - hw2), (e2, lc + hw2), (0.0, lc + hw2)], ctx.Q, ctx.dir, ctx.sx, w0, w1)
             nm = f"Placa {tag}-{'S' if sgn > 0 else 'I'}"
-            ctx.parts.append(Part(nm, "plate", f"Placa PL {tp:g} × {hp:g} × {e2:g}", Fy, Fu, [pp], t=tp))
+            ctx.parts.append(Part(nm, "plate", f"Placa PL {tp:g} × {Hf:g} × {e2:g}", Fy, Fu, [pp], t=tp))
             if ctx.main_name:
                 w2 = float(ctx.op.weld_size)
-                for sg, lf in ((1.0, lat + tp / 2.0), (-1.0, lat - tp / 2.0)):
-                    for q_, (a_, b_, nn, dd) in enumerate(((y0, y1, ctx.sx * sg, ctx.dir), (None, None, None, None))):
-                        if a_ is None:
-                            continue
-                        P0 = ctx.Q + lf * ctx.sx + ctx.sy * a_
-                        P1 = ctx.Q + lf * ctx.sx + ctx.sy * b_
-                        ctx.welds.append(Weld(f"{nm}-W{'1' if sg > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, nn)), tuple(map(float, dd)), w2, 70.0, tag))
-                    yfl = ty_p + sgn * Hf / 2.0                           # borde exterior contra la cara interna del ala
-                    P0 = ctx.Q + lf * ctx.sx + ctx.sy * yfl
-                    P1 = P0 + ctx.dir * e2
-                    ctx.welds.append(Weld(f"{nm}-F{'a' if sg > 0 else 'b'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * -sgn)), w2, 70.0, tag))
+                for ysd, nsy in ((ya, -1.0), (yb, 1.0)):                 # cordones por las dos caras de la placa
+                    P0 = ctx.Q + ctx.sy * ysd + ctx.sx * (lc - hw2)       # contra el alma del principal (borde x = 0)
+                    P1 = ctx.Q + ctx.sy * ysd + ctx.sx * (lc + hw2)
+                    ctx.welds.append(Weld(f"{nm}-W{'1' if nsy > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, ctx.sy * nsy)), tuple(map(float, ctx.dir)), w2, 70.0, tag))
+                    for sl, lat_ in ((1.0, lc + hw2), (-1.0, lc - hw2)):   # contra la cara interna de cada ala
+                        P0 = ctx.Q + ctx.sy * ysd + ctx.sx * lat_
+                        ctx.welds.append(Weld(f"{nm}-F{'a' if sl > 0 else 'b'}{'1' if nsy > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P0 + ctx.dir * e2)),
+                                              tuple(map(float, ctx.sy * nsy)), tuple(map(float, -ctx.sx * sl)), w2, 70.0, tag))
     ctx.parts.append(Part(name, "plate", f"Placa simple PL {t:g} × {max(H, Hf):g} × {Wd:g}", Fy, Fu, [pr], t=t))
     if ctx.op.tab_H <= 0 or True:
         pass

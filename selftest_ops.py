@@ -223,10 +223,12 @@ def run():
         op1.tp_sep = 6.0; op1.tp_t = 0.75
         mm1b = AS1.build_model(pr1)
         ps = [mm1b.part("Placa S2-S"), mm1b.part("Placa S2-I")]
-        zs_ = [_np.vstack([q.corners() for q in p_.prisms])[:, 2] for p_ in ps]
-        lo_ = max(z.min() for z in zs_); hi_ = min(z.max() for z in zs_)
-        if abs((lo_ - hi_) - 6.0) > 0.05 or abs(ps[0].t - 0.75) > 1e-9 or sum(1 for w_ in mm1b.welds if w_.name.startswith("Placa S2-S") or w_.name.startswith("Placa S2-I")) < 6:
-            fail(f"dos placas: separacion {lo_ - hi_:.2f}, t {ps[0].t}")
+        zs_ = [_np.vstack([q.corners() for q in p_.prisms]) for p_ in ps]
+        wm_ = AS1.shape_of(pr1.node.main_shape)
+        ext = [(c_[:, 2].min(), c_[:, 2].max()) for c_ in zs_]
+        gap_ = abs(max(e_[0] for e_ in ext) - min(e_[1] for e_ in ext))
+        if abs(gap_ - 6.0) > 0.05 or abs(ps[0].t - 0.75) > 1e-9 or sum(1 for w_ in mm1b.welds if w_.name.startswith("Placa S2-S") or w_.name.startswith("Placa S2-I")) < 12:
+            fail(f"dos placas: separacion {gap_:.2f}, t {ps[0].t}")
         print(f"{'placa simple en dos placas':34} placas arriba y abajo con separacion y espesor propios, soldadas al principal: OK")
 
         # ---- soldadura: espesores reales de las partes unidas, orden de calculo y soldadura en el recorte
