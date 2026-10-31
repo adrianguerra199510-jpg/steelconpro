@@ -17,7 +17,7 @@ const path = require('path'), fs = require('fs'), os = require('os');
   await wait(3000);
   const zoom = (x, y, z, k, view) => page.evaluate(([x_, y_, z_, k_, v_]) => { const v = window.__E.viewer; if (v_) v.setView(v_); const t = v.controls.target.clone(); t.set(x_, y_, z_); const off = v.camera.position.clone().sub(v.controls.target); v.controls.target.copy(t); v.camera.position.copy(t).add(off); if (v.camera.isOrthographicCamera) { v.camera.zoom = k_; v.camera.updateProjectionMatrix(); } else v.camera.position.copy(t).add(off.multiplyScalar(1 / k_)); v.camera.lookAt(t); v.controls.update(); v.requestRender(); }, [x, y, z, k, view]);
   await page.evaluate(() => { const E = window.__E; E.showLoadsOn = false; E.showReactionsOn = false; E.viewer.setLoadsVisible(false); });
-  await zoom(0, -9, 0, 4, 'iso'); await wait(1500);
+  await zoom(0, -9, 0, 7, 'iso'); await wait(1500);
   await page.screenshot({ path: path.join(shots, 'dos_placas_0.png') });
   await zoom(0, -9, 0, 6, 'left'); await wait(1500);
   await page.screenshot({ path: path.join(shots, 'dos_placas_1.png') });

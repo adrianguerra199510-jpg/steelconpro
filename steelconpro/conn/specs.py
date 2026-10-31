@@ -183,6 +183,7 @@ class Operation:
     tab_clip: float = -1.0        # placa simple: lado del recorte de las esquinas junto al soporte, in (<0 o 0 = sin recorte; con «hasta las alas» la placa ya es escalonada)
     tab_split: bool = False      # placa simple «hasta las alas» sobre un principal vertical: dos placas, arriba y abajo, en lugar de una placa llena
     tp_sep: float = 0.0          # dos placas arriba y abajo: distancia libre entre ellas, in (0 = el alto de la placa de pernos)
+    tp_weld: float = 0.0         # dos placas arriba y abajo: cateto del filete de las placas a la columna, in (0 = el de la operación)
     tp_t: float = 0.0            # dos placas arriba y abajo: espesor, in (0 = el de la placa)
     tab_y: float = 0.0           # placa simple: desplazamiento del centro de la placa a lo largo del peralte de la viga, in
     ep_w: float = 0.0            # placa extrema: ancho, in (0 = automático)

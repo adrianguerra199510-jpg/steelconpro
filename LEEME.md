@@ -475,3 +475,4 @@ cierra con V.
 
 - **Soldadura revisada:** el espesor de las verificaciones (cateto mínimo y máximo) sale de las partes realmente unidas (cara de ala o alma, placa o ángulo) y se verifica cada elemento al que se suelda; el formulario muestra los espesores y el cateto mínimo AISC J2.4 con un botón para usarlo; no se repiten elementos en «Se suelda a»; un ángulo o placa se suelda por la cara donde se apoya; el orden de cálculo respeta las dependencias de la soldadura.
 - **Recorte con soldadura:** la operación «Recorte contra otro elemento» tiene la opción «Soldar el contorno del miembro recortado» (cateto y tipo propios).
+- **Placa de corte con dos placas (arriba y abajo):** la placa de corte se apoya entre las dos placas y se suelda a ellas; las placas quedan por defecto alineadas con el centro de las alas de la viga conectada (distancia ajustable) y se sueldan a la columna con su propio cateto.

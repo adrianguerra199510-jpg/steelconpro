@@ -338,8 +338,12 @@ def _tab_geometry(ctx, tag):
         e = min(extra, Lp - 0.5)
         Ht = min(H, Hf) if ctx.op.tab_H <= 0 else H
         two = _tab_split(ctx.op, ctx)
-        if two:                                                         # placa de pernos sola; las placas de arriba y abajo se agregan aparte
-            poly = [(0.0, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (0.0, ty + Ht / 2)]
+        if two:                                                         # la placa de corte se apoya entre las dos placas (soldada a ellas) y sale hacia la viga con su alto de pernos
+            tp_ = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
+            sep_ = float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else (float(shp.d) - float(shp.tf) - tp_ if getattr(shp, "tf", 0) else Ht)   # por defecto, las placas quedan alineadas con el centro de las alas de la viga
+            sep_ = max(sep_, 0.5)
+            Ht = H if ctx.op.tab_H > 0 else min(H, sep_)
+            poly = [(0.0, ty - sep_ / 2), (e, ty - sep_ / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty + sep_ / 2), (0.0, ty + sep_ / 2)]
         else:
             poly = [(0.0, ty_p - Hf / 2), (e, ty_p - Hf / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty_p + Hf / 2), (0.0, ty_p + Hf / 2)]
         H = Ht
@@ -356,7 +360,7 @@ def _tab_geometry(ctx, tag):
     if two_plates:                                                      # dos placas horizontales (como placas de continuidad) a la altura de las alas de la viga: del alma a las alas del principal
         tp = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
         dflt = (float(shp.d) - 2.0 * float(shp.tf)) if getattr(shp, "tf", 0) else H
-        sep = max(float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else dflt, 0.5)           # distancia libre entre las dos placas (a lo largo del peralte de la viga)
+        sep = sep_                                                                    # distancia libre entre las dos placas (a lo largo del peralte de la viga)
         e2 = min(extra, Lp - 0.5)
         Aax2 = np.asarray(ctx.dmain_axis, float) if getattr(ctx, 'dmain_axis', None) is not None else None
         qp = ctx.Q - (Aax2 * float(np.dot(ctx.Q, Aax2)) if Aax2 is not None else 0.0)
@@ -369,9 +373,9 @@ def _tab_geometry(ctx, tag):
             w0, w1 = sorted((wsg * ya, wsg * yb))
             pp = _plate_prism([(0.0, lc - hw2), (e2, lc - hw2), (e2, lc + hw2), (0.0, lc + hw2)], ctx.Q, ctx.dir, ctx.sx, w0, w1)
             nm = f"Placa {tag}-{'S' if sgn > 0 else 'I'}"
-            ctx.parts.append(Part(nm, "plate", f"Placa PL {tp:g} × {Hf:g} × {e2:g}", Fy, Fu, [pp], t=tp))
+            ctx.parts.append(Part(nm, "stiff", f"Placa PL {tp:g} × {Hf:g} × {e2:g}", Fy, Fu, [pp], t=tp))
             if ctx.main_name:
-                w2 = float(ctx.op.weld_size)
+                w2 = float(ctx.op.tp_weld) if ctx.op.tp_weld > 0 else float(ctx.op.weld_size)      # cateto de las placas contra la columna
                 for ysd, nsy in ((ya, -1.0), (yb, 1.0)):                 # cordones por las dos caras de la placa
                     P0 = ctx.Q + ctx.sy * ysd + ctx.sx * (lc - hw2)       # contra el alma del principal (borde x = 0)
                     P1 = ctx.Q + ctx.sy * ysd + ctx.sx * (lc + hw2)
@@ -416,11 +420,19 @@ def _tab_geometry(ctx, tag):
     if ctx.main_name:
         w = float(ctx.op.weld_size)
         for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-            hw_ = (Hf if extra > 0 else H) / 2.0
-            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p - hw_ + (0.0 if extra > 0 else clip))
-            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p + hw_ - (0.0 if extra > 0 else clip))
+            hw_ = (sep_ if two_plates else (Hf if extra > 0 else H)) / 2.0
+            cy_ = ty if two_plates else ty_p
+            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (cy_ - hw_ + (0.0 if extra > 0 else clip))
+            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (cy_ + hw_ - (0.0 if extra > 0 else clip))
             ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                   tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.dir)), w, 70.0, tag))
+        if two_plates:                                              # la placa de corte se suelda a la cara interior de cada placa, por sus dos caras
+            e2_ = min(extra, Lp - 0.5)
+            for vs, nfl in ((ty + sep_ / 2.0, -1.0), (ty - sep_ / 2.0, 1.0)):
+                for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
+                    p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * vs
+                    ctx.welds.append(Weld(f"{name}-P{'S' if nfl < 0 else 'I'}{'a' if sg > 0 else 'b'}", name, f"Placa {tag}-{'S' if nfl < 0 else 'I'}", tuple(map(float, p0_)), tuple(map(float, p0_ + ctx.dir * e2_)),
+                                          tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * nfl)), w, 70.0, tag))
         if extra > 0 and not two_plates:                           # filetes de los bordes superior e inferior de la placa contra la cara interna de las alas del principal
             for k_, (vs, nfl) in enumerate(((ty_p + Hf / 2.0, -1.0), (ty_p - Hf / 2.0, 1.0))):
                 for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
