@@ -74,6 +74,7 @@ PLATE_SHAPES = ["Rectangular", "Triangular", "Con esquina recortada", "Circular"
 OPENINGS = ["Ninguna", "Circular", "Rectangular", "Rodea al miembro"]
 HOLE_SHAPES = ["Circular", "Ranura", "Rectangular"]
 WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcial)"]
+TAB_MODES = ["Sobre la cara del soporte", "Hasta el interior de las alas del principal"]
 TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro"]
 WELD_MODES = ["Bordes de la placa", "Contorno del miembro"]
 ATTACHES = ["Soldada", "Atornillada"]
@@ -165,6 +166,7 @@ class Operation:
     tab_H: float = 0.0           # alto de la placa simple (a lo largo del peralte de la viga), in (0 = automatico)
     tab_W: float = 0.0           # ancho de la placa simple (a lo largo de la viga), in (0 = automatico)
     n_cols: int = 1              # columnas de pernos de la placa simple (separacion: bolt_g)
+    tab_mode: str = TAB_MODES[0]  # placa simple: «Hasta el interior de las alas» saca la viga del principal y extiende la placa para soldarla al alma y a la cara interna de las alas
     tab_y: float = 0.0           # placa simple: desplazamiento del centro de la placa a lo largo del peralte de la viga, in
     ep_w: float = 0.0            # placa extrema: ancho, in (0 = automático)
     ep_h: float = 0.0            # placa extrema: alto total, in (0 = automático según la extensión)

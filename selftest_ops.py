@@ -204,6 +204,20 @@ def run():
             fail("operaciones: una conexion nueva no debe borrar la anterior del mismo miembro")
         print(f"{'tipologias y orden':34} 3 tipologias de nudo se arman y calculan; dos conexiones en un miembro se conservan: OK")
 
+        # ---- placa simple hasta el interior de las alas del principal: la viga sale de las alas y la placa llena el espacio entre ellas
+        import numpy as _np
+        from steelconpro.conn import assembly as AS1
+        from steelconpro.model import load_book as _lb
+        pr1 = _lb("ejemplos/CN-02_viga_con_secundarias.scp")[0]
+        op1 = next(o for o in pr1.node.operations if o.kind == SP.OP_TAB and o.member == "S2")
+        op1.tab_mode = SP.TAB_MODES[1]
+        mm1 = AS1.build_model(pr1)
+        pm = _np.vstack([q.corners() for q in mm1.part("Viga principal").prisms]); pp = _np.vstack([q.corners() for q in mm1.part("Placa S2").prisms]); sb = _np.vstack([q.corners() for q in mm1.part("S2").prisms])
+        wm = AS1.shape_of(pr1.node.main_shape)
+        if abs((pp[:, 2].max() - pp[:, 2].min()) - (wm.d - 2 * wm.tf)) > 0.05 or sb[:, 1].max() > -(wm.bf / 2.0) + 0.01 or sum(1 for w_ in mm1.welds if "-F" in w_.name) != 4:
+            fail(f"placa simple hasta las alas: placa {pp[:, 2].min():.2f}..{pp[:, 2].max():.2f}, viga hasta y={sb[:, 1].max():.2f}")
+        print(f"{'placa simple hasta las alas':34} la viga queda fuera de las alas y la placa llena el espacio entre ellas, con 4 filetes a las alas: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")

@@ -66,6 +66,18 @@ const os = require('os');
     await page.screenshot({ path: path.join(shots, 'visual_3_corte.png') });
     await home();
   });
+  await step('placa_hasta_alas', async () => {
+    await open('CN-02');
+    await page.evaluate(() => { const E = window.__E; const n = E.conn().node; const o = n.operations.find((x) => x.member === 'S2' && x.kind.startsWith('Placa simple')); o.tab_mode = window.__E.C_TAB || 'Hasta el interior de las alas del principal'; E.changed({ geometry: true }); });
+    await wait(3000);
+    await zoomTo(0, -4, 3, 2.6); await wait(900);
+    await page.screenshot({ path: path.join(shots, 'visual_4_placa_hasta_alas.png') });
+    await page.click('button:has-text("Planta")'); await wait(900);
+    await zoomTo(0, -6, 0, 3); await wait(900);
+    await page.screenshot({ path: path.join(shots, 'visual_4b_placa_hasta_alas_planta.png') });
+    await page.click('button:has-text("Frontal")'); await wait(900);
+    await page.screenshot({ path: path.join(shots, 'visual_4c_placa_hasta_alas_frontal.png') });
+  });
   console.log(errors.length ? 'Errores: ' + errors.slice(0, 5).join(' | ') : 'sin errores de consola');
   await app.close();
 })();

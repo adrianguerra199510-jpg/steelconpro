@@ -215,6 +215,7 @@ class _Ctx:
         self.t = max(float(self.op.plate_t), 0.125)
         self.parts, self.bolts, self.notes = [], [], []
         self.welds = []
+        self.extra = 0.0                # placa simple hasta las alas del principal: retroceso de la viga
         self.main_name = ""
 
     def at(self, s, lat=0.0, v=0.0):
@@ -278,13 +279,25 @@ def aligned_frame(nd, m, op, dirv, sx, sy):
     return member_dir(o), osx, osy
 
 
-def tab_dims(op, m, shp, db):
+def tab_extra(nd, m, op) -> float:
+    """Placa simple «hasta el interior de las alas»: cuánto se saca la viga del principal (del alma al borde de las alas) para que no choque con ellas.
+    0 si no aplica (el principal no es un perfil I o la viga no llega por el alma)."""
+    from .specs import TAB_MODES
+    if op is None or op.kind != OP_TAB or op.tab_mode != TAB_MODES[1]:
+        return 0.0
+    ms = shape_of(nd.main_shape)
+    if ms.kind != W_SHAPE or attach_info(nd, m).get("face") != "alma":
+        return 0.0
+    return max(float(ms.bf) / 2.0 - float(ms.tw) / 2.0, 0.0)
+
+
+def tab_dims(op, m, shp, db, extra=0.0):
     """Medidas de la placa simple: (filas, separacion, columnas, separacion entre columnas, alto, ancho, a) en in; `a` = distancia de la soldadura a la primera columna."""
     s = max(op.bolt_s, 3 * db * 0.8)
     n = max(1, int(op.n_bolts))
     g = max(op.bolt_g, 3 * db * 0.8)
     cols = max(1, int(getattr(op, "n_cols", 1)))
-    a = gap_eff(m) + 2.5
+    a = gap_eff(m) + extra + 2.5
     H = op.tab_H if op.tab_H > 0 else (n - 1) * s + 3.0
     Wd = op.tab_W if op.tab_W > 0 else a + (cols - 1) * g + 1.5
     return n, s, cols, g, H, Wd, a
@@ -294,7 +307,10 @@ def _tab_geometry(ctx, tag):
     """Placa simple sobre la cara del soporte (soldada con filete a ambos lados) y atornillada al alma de la viga: filas × columnas de pernos."""
     m, shp = ctx.m, ctx.shape
     t = ctx.t
-    n, s, cols, g, H, Wd, a = tab_dims(ctx.op, m, shp, ctx.db)
+    extra = float(getattr(ctx, 'extra', 0.0))
+    n, s, cols, g, H, Wd, a = tab_dims(ctx.op, m, shp, ctx.db, extra)
+    if extra > 0 and ctx.op.tab_H <= 0:
+        H = max(float(ctx.mshape.d) - 2.0 * float(ctx.mshape.tf), H)               # la placa llena el espacio entre las alas del principal
     hmax = _clear_depth(shp)
     if n > 1 and (n - 1) * s + 2 * 1.0 > hmax + 1e-9:
         fit = max(1, int((hmax - 2.0) / s) + 1)
@@ -304,7 +320,13 @@ def _tab_geometry(ctx, tag):
     lat = (_halfw(shp) + t / 2.0) if _is_open(shp) else 0.0
     Lp = Wd
     ty = float(getattr(ctx.op, 'tab_y', 0.0))
-    poly = [(0.0, ty - H / 2), (Lp, ty - H / 2), (Lp, ty + H / 2), (0.0, ty + H / 2)]            # la placa nace en la cara del soporte (x = 0)
+    tyc = 0.0                                                      # centro de la placa respecto del eje de la viga (los pernos siguen al eje de la viga)
+    if extra > 0:                                                  # la placa se centra en el alma del principal, no en el eje de la viga
+        Aax = np.asarray(ctx.dmain_axis, float) if getattr(ctx, 'dmain_axis', None) is not None else None
+        qperp = ctx.Q - (Aax * float(np.dot(ctx.Q, Aax)) if Aax is not None else 0.0)
+        tyc = -float(np.dot(qperp, ctx.sy))
+    ty_p = ty + tyc
+    poly = [(0.0, ty_p - H / 2), (Lp, ty_p - H / 2), (Lp, ty_p + H / 2), (0.0, ty_p + H / 2)]            # la placa nace en la cara del soporte (x = 0)
     pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
@@ -329,10 +351,17 @@ def _tab_geometry(ctx, tag):
     if ctx.main_name:
         w = float(ctx.op.weld_size)
         for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty - H / 2.0)
-            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty + H / 2.0)
+            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p - H / 2.0)
+            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (ty_p + H / 2.0)
             ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                   tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.dir)), w, 70.0, tag))
+        if extra > 0:                                              # filetes de los bordes superior e inferior de la placa contra la cara interna de las alas del principal
+            for k_, (vs, nfl) in enumerate(((ty_p + H / 2.0, -1.0), (ty_p - H / 2.0, 1.0))):
+                for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
+                    p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * vs
+                    p1_ = p0_ + ctx.dir * min(extra, Lp)
+                    ctx.welds.append(Weld(f"{name}-F{k_ + 1}{'a' if sg > 0 else 'b'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
+                                          tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * nfl)), w, 70.0, tag))
     return Lp
 
 
@@ -572,7 +601,7 @@ def auto_cope(shp, base, dirv, sx, sy, solids, c=0.5, step=0.25):
 def auto_cope_for(nd, m, op=None):
     """Cope automatico de la viga `m` (viga I que llega al principal con placa simple o doble angulo): (ct, cb, cl) o None si no hace falta o no aplica."""
     op = op or next((o for o in nd.operations if o.is_connection and o.member == m.name), None)
-    if op is None or op.kind not in (OP_TAB, OP_DANG) or not getattr(op, "cope_auto", False):
+    if op is None or op.kind not in (OP_TAB, OP_DANG) or not getattr(op, "cope_auto", False) or tab_extra(nd, m, op) > 0:
         return None
     shp = shape_of(m.shape)
     if shp.kind != W_SHAPE or any(o.kind in (OP_COPE, OP_CUT) and (o.member == m.name or m.name in (o.targets or [])) for o in nd.operations):
@@ -911,7 +940,11 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                     align = (fr[0], k)
             ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
             if kind == OP_TAB:
+                c.extra = tab_extra(nd, m, cop)
+                c.dmain_axis = A
                 _tab_geometry(c, tag)
+                if c.extra > 0:
+                    ms_k = 0.5 + c.extra                          # la viga queda fuera de las alas del principal
             elif kind == OP_DANG:
                 _dang_geometry(c, tag)
             elif kind == OP_SEAT:
