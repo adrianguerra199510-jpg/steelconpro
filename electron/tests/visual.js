@@ -36,17 +36,17 @@ const os = require('os');
 
   await step('planta', async () => {
     await open('CN-01');
-    await page.click('button:has-text("Planta")');
+    await page.evaluate(() => window.__E.viewer.setView('top'));
     await wait(1500);
     await page.screenshot({ path: path.join(shots, 'visual_1_planta.png') });
-    await page.click('button:has-text("Frontal")'); await wait(1200);
+    await page.evaluate(() => window.__E.viewer.setView('front')); await wait(1200);
     await page.screenshot({ path: path.join(shots, 'visual_1b_frontal.png') });
-    await page.click('button:has-text("Lateral")'); await wait(1200);
+    await page.evaluate(() => window.__E.viewer.setView('side')); await wait(1200);
     await page.screenshot({ path: path.join(shots, 'visual_1c_lateral.png') });
-    await page.click('button:has-text("Iso")'); await wait(1200);
+    await page.evaluate(() => window.__E.viewer.setView('iso')); await wait(1200);
   });
   await step('alineacion', async () => {
-    await page.click('button:has-text("Planta")'); await wait(800);
+    await page.evaluate(() => window.__E.viewer.setView('top')); await wait(800);
     await page.evaluate(() => { const E = window.__E; const n = E.conn().node; n.members[0].az = 10; E.changed({ geometry: true }); });
     await wait(2500);
     await zoomTo(9, 0, 0, 5); await wait(800);
@@ -55,9 +55,26 @@ const os = require('os');
     await wait(2500);
     await zoomTo(9, 0, 0, 5); await wait(800);
     await page.screenshot({ path: path.join(shots, 'visual_2_alineada_columna.png') });
-    await page.click('button:has-text("Iso")'); await wait(800);
+    await page.evaluate(() => window.__E.viewer.setView('iso')); await wait(800);
     await zoomTo(10, 0, 0, 2.5); await wait(800);
     await page.screenshot({ path: path.join(shots, 'visual_2_alineada_iso.png') });
+    await home();
+  });
+  await step('cubo', async () => {
+    await open('CN-01');
+    await wait(500);
+    await page.screenshot({ path: path.join(shots, 'cubo_1_iso.png'), clip: { x: 1010, y: 40, width: 190, height: 150 } }).catch(() => {});
+    const box = await page.locator('.viewcube').boundingBox();
+    const clickAt = async (fx, fy) => { await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy); await wait(900); };
+    await clickAt(0.5, 0.18);                                   // cara superior
+    console.log('vista tras clic arriba:', await page.evaluate(() => window.__E.viewer.view));
+    await page.screenshot({ path: path.join(shots, 'cubo_2_superior.png') });
+    await page.evaluate(() => window.__E.viewer.setView('iso')); await wait(600);
+    await clickAt(0.35, 0.62);                                  // cara frontal (hacia -Y)
+    console.log('vista tras clic frontal:', await page.evaluate(() => window.__E.viewer.view));
+    await page.evaluate(() => window.__E.viewer.setViewDir([1, -1, 1])); await wait(800);
+    console.log('esquina:', await page.evaluate(() => window.__E.viewer.view));
+    await page.screenshot({ path: path.join(shots, 'cubo_3_esquina.png') });
     await home();
   });
   await step('corte', async () => {
@@ -70,17 +87,17 @@ const os = require('os');
     await open('CN-02');
     await page.evaluate(() => { const E = window.__E; const n = E.conn().node; const o = n.operations.find((x) => x.member === 'S2' && x.kind.startsWith('Placa simple')); o.tab_mode = window.__E.C_TAB || 'Hasta el interior de las alas del principal'; E.changed({ geometry: true }); });
     await wait(3000);
-    await page.click('button:has-text("Frontal")'); await wait(700);
+    await page.evaluate(() => window.__E.viewer.setView('front')); await wait(700);
     await page.evaluate(() => { const E = window.__E; E.viewer.setView('side'); });
     await wait(900); await zoomTo(0, -4, 3, 3.2); await wait(900);
     await page.screenshot({ path: path.join(shots, 'visual_4_lateral.png') });
-    await page.click('button:has-text("Iso")'); await wait(800);
+    await page.evaluate(() => window.__E.viewer.setView('iso')); await wait(800);
     await zoomTo(0, -4, 3, 2.6); await wait(900);
     await page.screenshot({ path: path.join(shots, 'visual_4_placa_hasta_alas.png') });
-    await page.click('button:has-text("Planta")'); await wait(900);
+    await page.evaluate(() => window.__E.viewer.setView('top')); await wait(900);
     await zoomTo(0, -6, 0, 3); await wait(900);
     await page.screenshot({ path: path.join(shots, 'visual_4b_placa_hasta_alas_planta.png') });
-    await page.click('button:has-text("Frontal")'); await wait(900);
+    await page.evaluate(() => window.__E.viewer.setView('front')); await wait(900);
     await page.screenshot({ path: path.join(shots, 'visual_4c_placa_hasta_alas_frontal.png') });
   });
   console.log(errors.length ? 'Errores: ' + errors.slice(0, 5).join(' | ') : 'sin errores de consola');

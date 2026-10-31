@@ -467,3 +467,4 @@ cierra con V.
 - El miembro conectado se mueve sobre su propio eje con *Desplazamiento sobre su eje* (reemplaza al retranqueo del extremo).
 - **Soldadura**: se elige un elemento principal (miembro, placa o ángulo) y cualquier número de elementos a los que se suelda, cada uno por la cara que toca o la que se elija. En las conexiones a momento se dibuja la soldadura de la viga y se elige su tipo por cara (ala superior, ala inferior y alma).
 - Placa extrema y asiento: *Alinear la placa a* la cara del principal, al miembro conectado o a otro miembro. Cartela: largo, ancho de la base, ancho de la punta y corte de esquinas.
+- **Cubo de vistas** (arriba a la derecha del visor, en lugar de los botones Iso / Planta / Frontal / Lateral): tocar una cara da esa vista (superior, inferior, frontal, posterior, izquierda, derecha); tocar una arista o una esquina da una vista oblicua con giro libre; el botón de la casa vuelve a la isométrica.

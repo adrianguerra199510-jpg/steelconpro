@@ -191,8 +191,7 @@ function build(app) {
   ui.vhost = h('div', { class: 'viewer' });
   ui.note = h('div', { class: 'vnote' });
   const vtool = h('div', { class: 'vtool' },
-    h('div', { class: 'group' }, ...[['iso', 'Isométrica'], ['top', 'Planta'], ['front', 'Frontal'], ['side', 'Lateral']].map(([v, t]) => h('button', { class: 'icon-btn txt', type: 'button', title: t, onclick: () => E.viewer.setView(v), text: t.slice(0, 3) === 'Iso' ? 'Iso' : t }))),
-    h('div', { class: 'group' }, iconBtn('crosshair', 'Ajustar a la pantalla', () => E.viewer.fit()), ui.dimBtn = iconBtn('ruler', 'Cotas', () => { const on = !E.viewer.showDims; E.viewer.setDims(on); ui.dimBtn.classList.toggle('on', on); }),
+    h('div', { class: 'group' }, iconBtn('home', 'Vista isométrica', () => E.viewer.setView('iso')), iconBtn('crosshair', 'Ajustar a la pantalla', () => E.viewer.fit()), ui.dimBtn = iconBtn('ruler', 'Cotas', () => { const on = !E.viewer.showDims; E.viewer.setDims(on); ui.dimBtn.classList.toggle('on', on); }),
       ui.tagBtn = iconBtn('tag', 'Etiquetas', () => { const on = !E.viewer.showLabels; E.viewer.setLabels(on); ui.tagBtn.classList.toggle('on', on); }),
       ui.hwBtn = iconBtn('bolt', 'Mostrar placas, pernos y soldaduras', () => { const nd = E.conn().node; nd.show_hw = !nd.show_hw; ui.hwBtn.classList.toggle('on', nd.show_hw); E.changed({}); }),
       iconBtn('download', 'Guardar imagen', async () => { const f = await native.saveFile('conexion.png', [{ name: 'Imagen PNG', extensions: ['png'] }]); if (f) { try { await call('save_png', { path: f, data: E.viewer.screenshot() }); toast('Imagen guardada', 'ok'); } catch (e) { errorBox(e); } } })));

@@ -36,6 +36,76 @@ function makeGeometry(arr) {
   return g;
 }
 
+
+// Cubo de vistas: cubo pequeño que sigue la orientación de la cámara; al tocar una cara se pasa a esa vista, y una arista o una esquina da una vista oblicua.
+const CUBE_FACES = [['Derecha', [1, 0, 0]], ['Izquierda', [-1, 0, 0]], ['Posterior', [0, 1, 0]], ['Frontal', [0, -1, 0]], ['Superior', [0, 0, 1]], ['Inferior', [0, 0, -1]]];
+const VIEW_OF = { '1,0,0': 'side', '-1,0,0': 'left', '0,1,0': 'back', '0,-1,0': 'front', '0,0,1': 'top', '0,0,-1': 'bottom' };
+
+class ViewCube {
+  constructor(viewer, size = 112) {
+    this.v = viewer; this.size = size;
+    this.canvas = document.createElement('canvas'); this.canvas.className = 'viewcube';
+    this.canvas.style.cssText = `position:absolute;top:10px;right:12px;width:${size}px;height:${size}px;cursor:pointer;z-index:4;touch-action:none`;
+    viewer.el.append(this.canvas);
+    this.r = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+    this.r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.r.setSize(size, size, false);
+    this.scene = new THREE.Scene();
+    this.cam = new THREE.PerspectiveCamera(28, 1, 0.1, 50);
+    const mk = (txt, hot) => {
+      const c = document.createElement('canvas'); c.width = c.height = 128;
+      const g = c.getContext('2d');
+      g.fillStyle = hot ? '#ffd9bf' : '#eef2f8'; g.fillRect(0, 0, 128, 128);
+      g.strokeStyle = '#8a97a8'; g.lineWidth = 6; g.strokeRect(3, 3, 122, 122);
+      g.fillStyle = '#26354a'; g.font = '600 24px Inter, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 64, 66);
+      const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+    };
+    // BoxGeometry con «arriba» = +Y; el grupo se gira 90° sobre X para que quede en el sistema del visor (Z hacia arriba)
+    // orden de caras de BoxGeometry: +x, −x, +y, −y, +z, −z  ->  mundo: Derecha, Izquierda, Superior, Inferior, Frontal, Posterior
+    const order = ['Derecha', 'Izquierda', 'Superior', 'Inferior', 'Frontal', 'Posterior'];
+    this.mats = order.map((n) => new THREE.MeshBasicMaterial({ map: mk(n, false) }));
+    this.hotMats = order.map((n) => new THREE.MeshBasicMaterial({ map: mk(n, true) }));
+    this.names = order;
+    this.group = new THREE.Group(); this.group.rotation.x = Math.PI / 2;
+    this.mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.mats);
+    this.group.add(this.mesh);
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(this.mesh.geometry), new THREE.LineBasicMaterial({ color: 0x5b6b80 }));
+    this.group.add(edges);
+    this.scene.add(this.group); this.group.updateMatrixWorld(true);
+    this.ray = new THREE.Raycaster();
+    this.hot = -1;
+    this.canvas.addEventListener('pointermove', (e) => { const h = this._hit(e); const k = h ? h.face.materialIndex : -1; if (k !== this.hot) { this.hot = k; this.mesh.material = this.mats.map((m, i) => (i === k ? this.hotMats[i] : m)); this.v.requestRender(); } });
+    this.canvas.addEventListener('pointerleave', () => { if (this.hot >= 0) { this.hot = -1; this.mesh.material = this.mats; this.v.requestRender(); } });
+    this.canvas.addEventListener('click', (e) => {
+      const h = this._hit(e); if (!h) return;
+      const p = this.group.worldToLocal(h.point.clone());            // punto en el cubo (en el sistema del grupo)
+      const w = h.point.clone();                                     // punto en el mundo del visor: eje a eje
+      const dir = [0, 0, 0];
+      for (let i = 0; i < 3; i++) if (Math.abs(w.getComponent(i)) > 0.32) dir[i] = w.getComponent(i) > 0 ? 1 : -1;
+      this.v.setViewDir(dir);
+    });
+  }
+
+  _hit(e) {
+    const r = this.canvas.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * 2 - 1, y = -(((e.clientY - r.top) / r.height) * 2 - 1);
+    this.ray.setFromCamera({ x, y }, this.cam);
+    const hit = this.ray.intersectObject(this.mesh, false)[0];
+    return hit || null;
+  }
+
+  render() {
+    const q = this.v.camera.quaternion;
+    const d = new THREE.Vector3(0, 0, 1).applyQuaternion(q);       // hacia la cámara
+    this.cam.position.copy(d).multiplyScalar(3.4);
+    this.cam.quaternion.copy(q);
+    this.cam.updateMatrixWorld(true);
+    this.r.render(this.scene, this.cam);
+  }
+
+  dispose() { this.r.dispose(); this.canvas.remove(); }
+}
+
 export class Viewer {
   constructor(container, { onPick, onHover } = {}) {
     this.el = container;
@@ -76,10 +146,11 @@ export class Viewer {
       this._down = null;
     });
     this.renderer.domElement.addEventListener('pointermove', (e) => { if (this.onHover && !e.buttons) this._hoverMove(e); });
+    this.cube = new ViewCube(this);
     this.resize();
   }
 
-  dispose() { this.ro.disconnect(); this.clear(); this.renderer.dispose(); this.renderer.domElement.remove(); this.overlay.remove(); cancelAnimationFrame(this._raf); }
+  dispose() { this.cube.dispose(); this.ro.disconnect(); this.clear(); this.renderer.dispose(); this.renderer.domElement.remove(); this.overlay.remove(); cancelAnimationFrame(this._raf); }
 
   clear() {
     for (const p of this.parts) for (const m of p.objs) { m.geometry.dispose(); m.material.dispose(); this.root.remove(m); }
@@ -261,7 +332,7 @@ export class Viewer {
     const r = Math.max(size.length() / 2, 1e-3);
     this._center = c; this._r = r;
     const dir = this._viewDir(this.view);
-    const upv = (this.view === 'top' || this.view === 'plan') ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);       // en planta la mirada es vertical: «arriba» de la cámara es +Y
+    const upv = (this.view === 'top' || this.view === 'plan' || this.view === 'bottom') ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);       // en planta la mirada es vertical: «arriba» de la cámara es +Y
     this.persp.up.copy(upv); this.ortho.up.copy(upv);
     const dist = r / Math.sin((this.persp.fov * Math.PI / 180) / 2) * 1.05;
     this.persp.position.copy(c).addScaledVector(dir, dist);
@@ -279,12 +350,24 @@ export class Viewer {
   }
 
   _viewDir(v) {
-    return { iso: new THREE.Vector3(0.62, -0.78, 0.55), plan: new THREE.Vector3(0, 0, 1), top: new THREE.Vector3(0, 0, 1), front: new THREE.Vector3(0, -1, 0), side: new THREE.Vector3(1, 0, 0) }[v] || new THREE.Vector3(0.62, -0.78, 0.55);
+    if (v === 'custom' && this._customDir) return this._customDir.clone();
+    return { iso: new THREE.Vector3(0.62, -0.78, 0.55), plan: new THREE.Vector3(0, 0, 1), top: new THREE.Vector3(0, 0, 1), bottom: new THREE.Vector3(0, 0, -1), front: new THREE.Vector3(0, -1, 0),
+      back: new THREE.Vector3(0, 1, 0), side: new THREE.Vector3(1, 0, 0), left: new THREE.Vector3(-1, 0, 0) }[v] || new THREE.Vector3(0.62, -0.78, 0.55);
+  }
+
+  // vista desde una dirección dada por el cubo: una cara = vista ortogonal; arista o esquina = vista oblicua (en perspectiva, con giro libre)
+  setViewDir(dir) {
+    const key = dir.join(',');
+    if (VIEW_OF[key]) return this.setView(VIEW_OF[key]);
+    const v = new THREE.Vector3(...dir).normalize();
+    if (v.lengthSq() < 0.5) return this.setView('iso');
+    this._customDir = v;
+    this.setView('custom');
   }
 
   setView(v, noRender) {
     this.view = v;
-    const ortho = v !== 'iso';
+    const ortho = v !== 'iso' && v !== 'custom';
     this.camera = ortho ? this.ortho : this.persp;
     this.controls.object = this.camera;
     this.controls.enableRotate = !ortho;
@@ -311,6 +394,7 @@ export class Viewer {
     const dir = new THREE.Vector3(); dir.copy(cam.position).sub(this.controls.target).normalize();
     this.uniforms.uCam.value.copy(dir);
     this.renderer.render(this.scene, cam);
+    if (this.cube) this.cube.render();
     this._placeLabels();
   }
 
@@ -332,7 +416,7 @@ export class Viewer {
     }
     for (const l of this.dimEls || []) {
       const q = this._proj(l.p);
-      const vis = this.showDims && q.z < 1 && (this.view === 'iso' || !l.views || l.views.includes(this.view));
+      const vis = this.showDims && q.z < 1 && (this.view === 'iso' || this.view === 'custom' || !l.views || l.views.includes({ bottom: 'top', back: 'front', left: 'side' }[this.view] || this.view));
       l.el.style.display = vis ? 'block' : 'none';
       l.el.style.left = `${q.x}px`; l.el.style.top = `${q.y}px`;
     }
