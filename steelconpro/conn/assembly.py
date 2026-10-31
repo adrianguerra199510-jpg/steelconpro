@@ -893,6 +893,65 @@ def set_main(nd, name) -> list:
     return notes
 
 
+def workplane_frame(o):
+    """Cara (FaceFrame) del plano de trabajo de la operación: pasa por (x, y, z) y su normal tiene azimut `wp_az` y elevación `wp_el`."""
+    from .ops import FaceFrame
+    az, el = math.radians(o.wp_az), math.radians(o.wp_el)
+    n = np.array([math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)])
+    ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    e1 = unit(np.cross(ref, n))
+    L = max(float(o.wp_size), 1.0)
+    return FaceFrame(np.array([o.wp_x, o.wp_y, o.wp_z], float) - e1 * L / 2.0, e1, n, L, L / 2.0, 0.0)
+
+
+def resolve_aligns(nd, prj=None, iters=6):
+    """Operaciones «Alinear cara»: mueve cada miembro conectado hasta que la cara elegida quede en el plano de la cara de referencia (o de un plano de trabajo),
+    a la distancia `al_offset`.  Devuelve una copia del nudo con `pos`, `off`, `off2` y `gap` de esos miembros ajustados (y `_resolved` = True)."""
+    import copy
+    from .specs import OP_ALIGN
+    aligns = [(i, o) for i, o in enumerate(nd.operations) if o.kind == OP_ALIGN]
+    if not aligns or getattr(nd, "_resolved", False):
+        return nd, []
+    nd2 = copy.deepcopy(nd)
+    work = copy.deepcopy(nd)
+    work.operations = [o for o in work.operations if o.kind != OP_ALIGN]
+    work._resolved = True
+    notes = []
+    A, msx, msy = main_frame(nd2)
+    for i, o in aligns:
+        mem = nd2.member_named(o.member)
+        if mem is None or o.member == nd2.main_name:
+            notes.append(f"Operación {i + 1} «Alinear cara»: elija un miembro conectado (el principal no se mueve).")
+            continue
+        wm = work.member_named(o.member)
+        for _ in range(iters):
+            mdl = build_nodo(work, prj=prj)
+            reg = mdl.elems
+            e, r = reg.get(o.member), reg.get(o.parent)
+            if e is None or r is None or o.face not in e["faces"] or not (o.ref_face in r["faces"] or "Plano" in r["faces"]):
+                notes.append(f"Operación {i + 1} «Alinear cara»: elija la cara del miembro y la referencia.")
+                break
+            ff = e["faces"][o.face]
+            fr = r["faces"].get(o.ref_face) or r["faces"].get("Plano")
+            n = unit(np.asarray(fr.N, float))
+            delta = float(np.dot(np.asarray(ff.O, float) - np.asarray(fr.O, float), n)) - float(o.al_offset)
+            if abs(delta) < 1e-4:
+                break
+            d = -delta * n
+            dirv = member_dir(wm)
+            dax = float(np.dot(d, dirv))
+            dper = d - dax * dirv
+            for mm in (mem, wm):
+                mm.gap += dax
+                mm.pos += float(np.dot(dper, A))
+                mm.off2 += float(np.dot(dper, msx))
+                mm.off += float(np.dot(dper, msy))
+        else:
+            notes.append(f"Operación {i + 1} «Alinear cara»: la cara no es paralela al plano de referencia; se alineó lo mejor posible.")
+    nd2._resolved = True
+    return nd2, notes
+
+
 def build_model(prj, vals=None) -> Model3D:
     """Modelo 3D de la conexion.  `vals` = {"case": i} arma el modelo del analisis FEM del caso de carga i (miembros recortados, apoyo y cargas)."""
     from .specs import ATTR_OF
@@ -907,7 +966,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     """Modelo 3D del nudo: el miembro principal, los miembros conectados y el resultado de aplicar las operaciones en el orden de la lista.
     Con `fem` ({"case": i}) los miembros se recortan a `FEM_LEN` y se agregan el apoyo del principal y las cargas del caso (analisis nodal)."""
     hw = True if fem is not None else (nd.show_hw if hardware is None else hardware)
+    nd, align_notes = resolve_aligns(nd, prj)
     mdl = Model3D(name)
+    mdl.notes += align_notes
     mshape = shape_of(nd.main_shape)
     A, msx, msy = main_frame(nd)
     lneg, lpos = nd.lengths()

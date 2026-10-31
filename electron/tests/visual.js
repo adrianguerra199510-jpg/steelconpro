@@ -121,6 +121,25 @@ const os = require('os');
     await page.screenshot({ path: path.join(shots, 'placa_soldada_viga.png') });
     await home();
   });
+  await step('alinear', async () => {
+    await open('CN-01');
+    await page.evaluate(() => { window.__E.createOperation('Plano de trabajo'); });
+    await page.waitForSelector('.pfoot >> text=Agregar', { timeout: 20000 });
+    await page.evaluate(() => { const o = window.__E.conn().node.operations.slice(-1)[0]; o.wp_x = 35; o.wp_el = 0; o.wp_az = 0; window.__E.changed({ geometry: true }); });
+    await wait(1500);
+    await page.screenshot({ path: path.join(shots, 'alinear_1_plano.png') });
+    await page.click('.pfoot >> text=Agregar'); await wait(800);
+    await page.evaluate(() => { window.__E.sel = 'm:V1'; });
+    await page.evaluate(() => { window.__E.createOperation('Alinear cara'); });
+    await page.waitForSelector('.pfoot >> text=Agregar', { timeout: 20000 });
+    await page.evaluate(() => { const o = window.__E.conn().node.operations.slice(-1)[0]; o.parent = 'PT1'; o.ref_face = 'Plano'; window.__E.changed({ geometry: true }); });
+    await wait(2500);
+    await page.screenshot({ path: path.join(shots, 'alinear_2_operacion.png') });
+    await page.click('.pfoot >> text=Agregar'); await wait(800);
+    await page.evaluate(() => window.__E.viewer.setView('top')); await wait(1200);
+    await page.screenshot({ path: path.join(shots, 'alinear_3_planta.png') });
+    await home();
+  });
   await step('corte', async () => {
     await open('CN-02');
     await zoomTo(0, -3, 6, 3.2); await wait(1000);

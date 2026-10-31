@@ -2,7 +2,7 @@
 // Los cambios se ven en vivo en el 3D; «Cancelar» los revierte.
 import { call } from './api.js';
 import { S } from './state.js';
-import { h, svg, btn, tabs, field, selectInput, checkInput, segmented, chip, errorBox, clear, numInput, toast } from './ui.js';
+import { h, svg, btn, tabs, field, selectInput, checkInput, segmented, chip, errorBox, clear, numInput, toast, iconBtn } from './ui.js';
 import { renderItems, getPath, setPath } from './forms.js';
 import { sectionPicker } from './sectionpicker.js';
 import { baseplateForm } from './bpform.js';
@@ -10,7 +10,7 @@ import { baseplateForm } from './bpform.js';
 const OPK = () => S.C.ops;
 export const OP_ICON = { 'Placa simple (corte)': 'square', 'Doble ángulo (corte)': 'square', 'Asiento (ángulo)': 'square', 'Placa extrema a ras (momento)': 'layers', 'Placa extrema extendida (momento)': 'layers',
   'Alas soldadas y alma atornillada (momento)': 'zap', 'Cartela atornillada (diagonal)': 'triangle', 'Cartela con miembro soldado (diagonal)': 'triangle', 'Corte del extremo (cope)': 'scissors',
-  'Placas de continuidad': 'layers', 'Placa base (apoyo sobre concreto)': 'box', 'Placa (refuerzo, cartela o rigidizador)': 'square', 'Pernos entre elementos': 'nut', 'Soldadura de filete entre elementos': 'zap', 'Corte de elementos': 'scissors', 'Ángulo (herraje)': 'square', 'Huecos y ranuras': 'nut', 'Recorte contra otro elemento': 'scissors' };
+  'Placas de continuidad': 'layers', 'Placa base (apoyo sobre concreto)': 'box', 'Placa (refuerzo, cartela o rigidizador)': 'square', 'Pernos entre elementos': 'nut', 'Soldadura de filete entre elementos': 'zap', 'Corte de elementos': 'scissors', 'Ángulo (herraje)': 'square', 'Huecos y ranuras': 'nut', 'Recorte contra otro elemento': 'scissors', 'Plano de trabajo': 'layers', 'Alinear cara': 'crosshair' };
 export const OP_COLOR = { 'Conexión de corte': '#4a90d9', 'Conexión de momento': '#e8731a', 'Conexión de diagonal': '#4fae6a', 'Placas, pernos y soldaduras': '#8b5cf6', 'Modificar elementos': '#8a94a0',
   'Rigidizar el miembro principal': '#9b6fc9', 'Apoyo del miembro': '#c9a227' };
 export function groupOf(kind) { return S.C.ops.groups.find(([, ks]) => ks.includes(kind))?.[0] || ''; }
@@ -34,6 +34,8 @@ const HELP = {
   'Corte de elementos': 'Recorte (cope) del extremo de los miembros que elija.',
   'Ángulo (herraje)': 'Un ángulo L como elemento propio, apoyado sobre una cara y unido por soldadura o por pernos. Otras operaciones pueden unirse a sus piernas.',
   'Huecos y ranuras': 'Huecos circulares, ranuras o huecos rectangulares en una grilla, sobre la cara de un elemento.',
+  'Plano de trabajo': 'Plano de referencia con su ubicación en el espacio; otras operaciones pueden alinear caras a él.',
+  'Alinear cara': 'Mueve un miembro hasta que una de sus caras quede en el plano de la cara de otro miembro, de una placa o de un plano de trabajo.',
   'Recorte contra otro elemento': 'Recorta el extremo de un miembro contra la cara de otro elemento (con holgura) o con un inglete entre dos miembros.',
 };
 
@@ -59,7 +61,7 @@ export async function openOperation(E, index, { isNew = false } = {}) {
   const el = (n) => info.find((e) => e.name === n);
   const kind = op.kind;
   const K = C.op;
-  const isGeneric = [K.PLATE, K.BOLTS, K.FILLET, K.CUT, K.ANGLE, K.HOLE, K.TRIM].includes(kind);
+  const isGeneric = [K.PLATE, K.BOLTS, K.FILLET, K.CUT, K.ANGLE, K.HOLE, K.TRIM, K.WORKPLANE, K.ALIGN].includes(kind);
   const members = nd.members.map((m) => m.name);
   let mdlRoot;
   const refresh = () => E.changed({ geometry: true });
@@ -156,6 +158,10 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     mdlRoot = holeBody(body, E, op, ctx, info, el, nd, addForm);
   } else if (kind === K.TRIM) {
     mdlRoot = trimBody(body, E, op, ctx, info, el, nd, addForm);
+  } else if (kind === K.WORKPLANE) {
+    mdlRoot = workplaneBody(body, E, op, ctx, info, nd, addForm);
+  } else if (kind === K.ALIGN) {
+    mdlRoot = alignBody(body, E, op, ctx, info, el, nd, addForm, index);
   }
 
   // la edicion ocurre en el panel derecho (el visor queda libre): «Cerrar» (X) conserva los cambios, «Cancelar» los revierte
@@ -452,4 +458,59 @@ function epRows(op, ctx, us) {
     ctx.onChange();
   });
   return field('Posición vertical de cada fila de pernos (vacío = automático)', inp);
+}
+
+// ---------------------------------------------------------------------------------------------------------- plano de trabajo
+function workplaneBody(body, E, op, ctx, info, nd, addForm) {
+  const root = h('div', { class: 'col gap-12' });
+  const nameInp = h('input', { class: 'input', type: 'text', value: op.name, onchange: (e) => { const v = e.target.value.trim(); if (v && v !== op.name && !info.some((x) => x.name === v)) { E.renameElement(op.name, v); op.name = v; } else e.target.value = op.name; ctx.onChange(); } });
+  const pres = h('div', { class: 'row', style: { gap: '6px', flexWrap: 'wrap' } });
+  const preset = (label, az, el) => btn(label, { onClick: () => { op.wp_az = az; op.wp_el = el; ctx.onChange(); mdlRoot.refresh(); } });
+  pres.append(preset('Horizontal (normal +Z)', 0, 90), preset('Vertical, normal +X', 0, 0), preset('Vertical, normal +Y', 90, 0));
+  const form = addForm([numField('X del punto del plano', 'wp_x', 'L', -1e5, 1e5), numField('Y del punto del plano', 'wp_y', 'L', -1e5, 1e5), numField('Z del punto del plano', 'wp_z', 'L', -1e5, 1e5),
+    numField('Lado del cuadrado dibujado', 'wp_size', 'L', 1, 1e4), numField('Azimut de la normal (°)', 'wp_az', '-', -360, 360, 5, 1), numField('Elevación de la normal (°, 90 = plano horizontal)', 'wp_el', '-', -90, 90, 5, 1)]);
+  root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Plano de trabajo' }), h('div', { class: 'form-grid' }, field('Nombre', nameInp)), h('div', { style: { height: '10px' } }), form),
+    h('div', { class: 'card-sec' }, h('h4', { text: 'Orientación rápida' }), pres, h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'La normal fija hacia dónde mira el plano: el azimut se mide en planta desde +X hacia +Y, y la elevación sobre la horizontal.' })));
+  const mdlRoot = root; root.refresh = () => form.refresh();
+  body.append(root);
+  return root;
+}
+
+// ---------------------------------------------------------------------------------------------------------- alinear cara
+function alignBody(body, E, op, ctx, info, el, nd, addForm, index) {
+  const root = h('div', { class: 'col gap-12' });
+  const members = info.filter((e) => e.type === 'miembro' && !e.main);
+  const build = () => {
+    clear(root);
+    const e = el(op.member);
+    const refs = info.filter((x) => x.name !== op.member);
+    const r = el(op.parent);
+    root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Cara que se alinea' }), h('div', { class: 'form-grid' },
+      field('Miembro que se mueve', selectInput({ value: op.member, options: members.map((x) => ({ value: x.name, label: x.name })), onChange: (v) => { op.member = v; const x = el(v); if (x && !x.faces.includes(op.face)) op.face = x.faces[0]; build(); ctx.onChange(); } })),
+      field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } })))));
+    root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Se alinea a' }), h('div', { class: 'form-grid' },
+      field('Elemento de referencia', selectInput({ value: op.parent, options: [{ value: '', label: '—' }, ...refs.map((x) => ({ value: x.name, label: `${x.name} — ${x.type}` }))], onChange: (v) => { op.parent = v; const x = el(v); op.ref_face = x ? x.faces[0] : ''; build(); ctx.onChange(); } })),
+      r && r.type !== 'plano' ? field('Cara de referencia', selectInput({ value: op.ref_face, options: r.faces, onChange: (v) => { op.ref_face = v; ctx.onChange(); } })) : h('div'),
+      ...[]), h('div', { style: { height: '8px' } }),
+      addForm([{ path: 'al_offset', label: 'Distancia de la cara al plano de referencia (+ en el sentido de su normal)', type: 'num', uk: 'L', lo: -1e4, hi: 1e4, wide: true }]),
+      h('div', { style: { height: '8px' } }),
+      btn('Crear un plano de trabajo nuevo', { icon: 'plus', onClick: async () => {
+        try {
+          const used = new Set(info.map((x) => x.name));
+          let k = 1; while (used.has(`PT${k}`)) k++;
+          const plane = { ...JSON.parse(JSON.stringify(op)), kind: S.C.op.WORKPLANE, name: `PT${k}`, member: '', parent: '', face: '', ref_face: '', wp_x: 0, wp_y: 0, wp_z: 0, wp_az: 0, wp_el: 90, wp_size: 60 };
+          const at = nd.operations.indexOf(op);
+          nd.operations.splice(Math.max(at, 0), 0, plane);                      // el plano va antes de la alineación
+          op.parent = plane.name; op.ref_face = 'Plano';
+          info = (await call('element_info', { connection: E.conn() })).elements;
+          build(); ctx.onChange(); E.changed({ structure: true });
+          toast(`Se creó el plano «${plane.name}» (horizontal en Z = 0): configure su ubicación en la lista de operaciones.`, 'info', 6000);
+        } catch (err) { errorBox(err); }
+      } })),
+      h('p', { class: 'hint-text', text: 'El miembro se desplaza (junto con su conexión) hasta que la cara quede en el plano de la referencia. Las caras deben ser paralelas al plano; si no, se alinea lo mejor posible.' }));
+  };
+  build();
+  body.append(root);
+  root.refresh = () => {};
+  return root;
 }

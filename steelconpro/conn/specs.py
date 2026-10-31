@@ -58,14 +58,17 @@ OP_CUT = "Corte de elementos"
 OP_HOLE = "Huecos y ranuras"
 OP_ANGLE = "Ángulo (herraje)"
 OP_TRIM = "Recorte contra otro elemento"
-OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_CUT, OP_TRIM]
-GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM)
+OP_WORKPLANE = "Plano de trabajo"
+OP_ALIGN = "Alinear cara"
+OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_CUT, OP_TRIM, OP_WORKPLANE, OP_ALIGN]
+GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN)
 # grupos del menu "Agregar operacion" (como la cinta de IDEA)
 OP_GROUPS = [("Conexión de corte", [OP_TAB, OP_DANG, OP_SEAT]),
              ("Conexión de momento", [OP_EP_FLUSH, OP_EP_EXT, OP_WELD]),
              ("Conexión de diagonal", [OP_GUSSET, OP_GUSSET_W]),
              ("Placas, pernos y soldaduras", [OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET]),
              ("Modificar elementos", [OP_COPE, OP_CUT, OP_TRIM, OP_HOLE]),
+             ("Referencias", [OP_WORKPLANE]),
              ("Rigidizar el miembro principal", [OP_CONT]),
              ("Apoyo del miembro", [OP_BASE])]
 PLATE_ROLES = ["Refuerzo", "Cartela", "Rigidizador"]
@@ -169,6 +172,14 @@ class Operation:
     n_cols: int = 1              # columnas de pernos de la placa simple (separacion: bolt_g)
     beam_conn: str = BEAM_CONNS[0]  # placa simple: unión de la placa al alma de la viga conectada (pernos o filetes en el contorno de la placa)
     tab_mode: str = TAB_MODES[0]  # placa simple: «Hasta el interior de las alas» saca la viga del principal y extiende la placa para soldarla al alma y a la cara interna de las alas
+    wp_x: float = 0.0            # plano de trabajo: punto del plano (coordenadas globales), in
+    wp_y: float = 0.0
+    wp_z: float = 0.0
+    wp_az: float = 0.0           # plano de trabajo: azimut de la normal en planta, grados (desde +X hacia +Y)
+    wp_el: float = 0.0           # plano de trabajo: inclinación de la normal sobre la horizontal, grados (90 = normal vertical, plano horizontal)
+    wp_size: float = 60.0        # plano de trabajo: lado del cuadrado que se dibuja, in
+    ref_face: str = ""           # alinear cara: cara del elemento de referencia (el plano de trabajo no tiene caras que elegir)
+    al_offset: float = 0.0       # alinear cara: distancia a la que queda la cara del plano de referencia, in (+ en el sentido de la normal de la referencia)
     tab_clip: float = -1.0        # placa simple: lado del recorte de las esquinas junto al soporte, in (<0 o 0 = sin recorte; con «hasta las alas» la placa ya es escalonada)
     tab_y: float = 0.0           # placa simple: desplazamiento del centro de la placa a lo largo del peralte de la viga, in
     ep_w: float = 0.0            # placa extrema: ancho, in (0 = automático)
@@ -228,7 +239,7 @@ class Operation:
 
     @property
     def makes_element(self) -> bool:
-        return self.kind in (OP_PLATE, OP_ANGLE)
+        return self.kind in (OP_PLATE, OP_ANGLE, OP_WORKPLANE)
 
 
 @dataclass

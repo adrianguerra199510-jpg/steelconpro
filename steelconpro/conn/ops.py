@@ -18,7 +18,7 @@ import math
 
 import numpy as np
 
-from .specs import (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
+from .specs import (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
                     FACES_PLATE, FACES_ANGLE, FACES_END, HOLE_SHAPES, WELD_MODES, Operation)
 
 # ================================================================================================== valores por omision
@@ -112,7 +112,9 @@ def elements(prj) -> dict:
         out.append({"name": m.name, "type": "miembro", "main": False, "label": f"{m.name} ({m.shape})", "faces": face_names_of(AS.shape_of(m.shape))})
     for i, o in enumerate(nd.operations):
         if o.makes_element:
-            if o.kind == OP_ANGLE:
+            if o.kind == OP_WORKPLANE:
+                out.append({"name": o.name, "type": "plano", "main": False, "op": i, "label": f"{o.name} (plano de trabajo)", "faces": ["Plano"]})
+            elif o.kind == OP_ANGLE:
                 out.append({"name": o.name, "type": "ángulo", "main": False, "op": i, "label": f"{o.name} (ángulo L{o.leg_a:g}×{o.leg_b:g}×{o.plate_t:g})", "faces": list(FACES_ANGLE)})
             else:
                 out.append({"name": o.name, "type": "placa", "main": False, "op": i, "label": f"{o.name} (placa {o.plate_t:g} in)", "faces": list(FACES_PLATE)})
@@ -132,7 +134,7 @@ def unique_plate_name(nd, base="P") -> str:
 # ================================================================================================== orden de calculo
 def ordered(nd) -> list:
     """Operaciones generales en un orden que respeta las dependencias (una placa despues de su padre).  -> [(indice, operacion)]"""
-    pending = [(i, o) for i, o in enumerate(nd.operations) if o.kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM)]
+    pending = [(i, o) for i, o in enumerate(nd.operations) if o.kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN)]
     known = set(nd.names()) | ({"Placa base"} if nd.base_op() is not None else set())
     done, out, guard = set(), [], 0
     while pending and guard < 200:
@@ -140,7 +142,9 @@ def ordered(nd) -> list:
         moved = False
         for item in list(pending):
             i, o = item
-            need = {o.parent} - {""} | set(o.targets or []) | ({o.weld_main} - {""}) | {t[0] for t in (o.weld_to or [])}
+            need = {o.parent} - {""} | set(o.targets or [])
+            if o.kind == OP_ALIGN:
+                need = {o.parent} - {""} | ({o.weld_main} - {""}) | {t[0] for t in (o.weld_to or [])}
             if o.kind == OP_CUT:
                 need = set()                                       # el corte solo mira a los miembros
             if need <= (known | done):
@@ -356,7 +360,17 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
     for i, o in order:
         ent = {"op": o, "index": i, "ok": False}
         entries.append(ent)
-        if o.kind in (OP_CUT, OP_TRIM):
+        if o.kind in (OP_CUT, OP_TRIM, OP_ALIGN):
+            ent["ok"] = True
+            continue
+        if o.kind == OP_WORKPLANE:
+            from .assembly import workplane_frame
+            ff = workplane_frame(o)
+            nm = o.name
+            reg[nm] = {"type": "plano", "faces": {"Plano": ff}, "part": nm, "t": 0.0, "Fy": 0.0, "Fu": 0.0}
+            cs = [ff.point(0.0, -ff.uh), ff.point(ff.L, -ff.uh), ff.point(ff.L, ff.uh), ff.point(0.0, ff.uh)]
+            mdl.extra.append((f"plane:{nm}", [[tuple(map(float, q)) for q in cs]], "#4aa3df", 0.22))
+            mdl.tags.append((tuple(map(float, ff.point(ff.L / 2.0, ff.uh))), nm))
             ent["ok"] = True
             continue
         parent = reg.get(o.parent)
@@ -604,7 +618,7 @@ def add_checks(prj, nd, R, rec, mdl):
                 _chk(R.checks, grp, f"{key}_cut_{tg}", f"Recorte de «{tg}»: pandeo local del alma y flexión del miembro recortado — NO EVALUADO", 0.0, 1.0, "-",
                      "AISC Manual Parte 9", "El corte debe revisarse aparte (los herrajes ya consideran la geometría recortada).", skip=True)
             continue
-        if o.kind in (OP_TRIM, OP_HOLE) and ent.get("ok"):
+        if o.kind in (OP_TRIM, OP_HOLE, OP_WORKPLANE, OP_ALIGN) and ent.get("ok"):
             continue                                                   # solo geometría: no hay nada que verificar
         if not ent.get("ok"):
             _chk(R.checks, grp, f"{key}_na", "La operación no se pudo armar (falta el elemento o la cara) — NO EVALUADO", 0.0, 1.0, "-", "", "Revise el elemento y la cara en la operación.", skip=True)
@@ -682,12 +696,12 @@ def add_operation(nd, kind: str, **kw) -> Operation:
     d = defaults(kind, kw.get("role", ""))
     d.update(kw)
     o = Operation(kind=kind, **d)
-    if kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_ANGLE, OP_TRIM) and "member" not in kw:
+    if kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE) and "member" not in kw:
         o.member = ""                                    # estas operaciones se refieren a elementos por `parent` y `targets`, no a un miembro
     if kind == OP_BASE and "member" not in kw:
         o.member = nd.main_name                          # la placa base va, por defecto, en el extremo del miembro principal
-    if kind in (OP_PLATE, OP_ANGLE) and not o.name:
-        o.name = unique_plate_name(nd, "P" if kind == OP_PLATE else "A")
+    if kind in (OP_PLATE, OP_ANGLE, OP_WORKPLANE) and not o.name:
+        o.name = unique_plate_name(nd, {OP_PLATE: "P", OP_ANGLE: "A"}.get(kind, "PT"))
     if kind in (OP_PLATE, OP_ANGLE, OP_HOLE) and not o.parent:
         o.parent = nd.main_name
     if kind in (OP_PLATE, OP_ANGLE, OP_HOLE) and not o.face:

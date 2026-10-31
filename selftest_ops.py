@@ -243,6 +243,21 @@ def run():
             fail(f"placa soldada a la viga: pernos {[b_.tag for b_ in m3_.bolts if b_.tag.startswith('S2-B')]}, {len(g1_)} verificaciones")
         print(f"{'placa simple soldada a la viga':34} sin pernos, 3 filetes sobre el alma y {len(g1_)} verificaciones: OK")
 
+        # ---- plano de trabajo y alinear cara: el miembro se mueve hasta que su cara cae en el plano (o en la cara de otro miembro)
+        from steelconpro.model import load_book as _lb4
+        pr4 = _lb4("ejemplos/CN-01_columna_con_vigas.scp")[0]
+        w4 = OPS.add_operation(pr4.node, SP.OP_WORKPLANE, wp_x=0.0, wp_y=0.0, wp_z=12.0, wp_az=0.0, wp_el=90.0)
+        OPS.add_operation(pr4.node, SP.OP_ALIGN, member="V1", face="Ala superior", parent=w4.name, ref_face="Plano")
+        OPS.add_operation(pr4.node, SP.OP_ALIGN, member="V2", face="Extremo fin", parent=w4.name, ref_face="Plano", al_offset=0.0)
+        m4_ = AS2.build_model(pr4)
+        z1 = float(m4_.elems["V1"]["faces"]["Ala superior"].O[2])
+        if abs(z1 - 12.0) > 1e-3 or not any(p_["kind"] == "plane" for p_ in api.mesh({"connection": api._dump(pr4)})["parts"]):
+            fail(f"alinear cara: el ala superior de V1 queda en z = {z1:.3f} (debe ser 12) o falta el plano en la escena")
+        d4 = OPS.dependents_of(pr4.node, w4.name) if hasattr(OPS, "dependents_of") else pr4.node.dependents(w4.name)
+        if len(d4) < 2:
+            fail("alinear cara: borrar el plano debe quitar las alineaciones que lo usan")
+        print(f"{'plano de trabajo y alinear cara':34} el ala de V1 queda en el plano z = 12 (z = {z1:.2f}); las alineaciones dependen del plano: OK")
+
         # ---- archivos
         tmp = tempfile.mkdtemp(prefix="scp_ops_")
         f = os.path.join(tmp, "p.scp")
