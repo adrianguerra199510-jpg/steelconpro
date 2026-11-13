@@ -448,14 +448,18 @@ function trimBody(body, E, op, ctx, info, el, nd, addForm) {
     clear(box);
     const miter = op.trim_mode === C.trim_modes[1];
     const members = info.filter((e) => e.type === 'miembro');
+    const tgtEl = info.find((x) => x.name === (op.targets || [])[0]);
+    const isPlate = !!tgtEl && tgtEl.type === 'placa';
+    const cuttable = info.filter((e) => e.type === 'miembro' || e.type === 'placa');
     const e = el(op.parent);
     box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Elementos' }), h('div', { class: 'form-grid' },
-      field('Miembro que se recorta', selectInput({ value: (op.targets || [])[0] || '', options: [{ value: '', label: '—' }, ...members.map((m) => ({ value: m.name, label: m.name }))], onChange: (v) => { op.targets = v ? [v] : []; ctx.onChange(); } })),
-      field('Extremo', selectInput({ value: op.trim_end, options: ['Inicio', 'Fin'], onChange: (v) => { op.trim_end = v; ctx.onChange(); } })),
+      field('Elemento que se recorta', selectInput({ value: (op.targets || [])[0] || '', options: [{ value: '', label: '—' }, ...cuttable.map((m) => ({ value: m.name, label: `${m.name} — ${m.type}` }))], onChange: (v) => { op.targets = v ? [v] : []; build(); ctx.onChange(); } })),
+      isPlate ? h('div') : field('Extremo', selectInput({ value: op.trim_end, options: ['Inicio', 'Fin'], onChange: (v) => { op.trim_end = v; ctx.onChange(); } })),
       field(miter ? 'Otro miembro del inglete' : 'Elemento contra el que se recorta', selectInput({ value: op.parent, options: [{ value: '', label: '—' }, ...(miter ? members : info).map((x) => ({ value: x.name, label: `${x.name} — ${x.type}` }))], onChange: (v) => { op.parent = v; const x = el(v); if (x && !x.faces.includes(op.face)) op.face = x.faces[0]; build(); ctx.onChange(); } })),
       miter ? h('div') : field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } }))),
     miter ? null : h('div', { style: { height: '10px' } }), miter ? null : addForm([numField('Holgura respecto de la cara', 'trim_gap', 'L', -6, 12)])));
-    box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Soldadura' }), addForm([{ path: 'trim_weld', label: 'Soldar el contorno del miembro recortado', type: 'check', wide: true }]),
+    if (isPlate) box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Corte de la placa' }), addForm([{ path: 'trim_flip', label: 'Conservar el otro lado del plano', type: 'check', wide: true }]), h('p', { class: 'hint-text', text: 'La placa se corta con el plano de la cara elegida (más la holgura); por defecto se conserva el lado donde está la placa. Los bordes, cordones y pernos de la placa usan el contorno ya recortado.' })));
+    if (!isPlate) box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Soldadura' }), addForm([{ path: 'trim_weld', label: 'Soldar el contorno del miembro recortado', type: 'check', wide: true }]),
       op.trim_weld ? addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides }]) : h('p', { class: 'hint-text', text: 'Agrega un cordón alrededor de la sección del miembro, en el plano del recorte (con holgura 0).' })));
   };
   root.onField = (p) => { if (p === 'trim_weld') build(); };

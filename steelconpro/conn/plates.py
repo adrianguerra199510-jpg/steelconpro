@@ -85,6 +85,8 @@ def edge_lengths(op) -> list:
     out = []
     n = len(poly)
     for gi, g in enumerate(groups):
+        if not g:
+            continue
         L = sum(math.dist(poly[k % n], poly[(k + 1) % n]) for k in g)
         out.append({"index": gi, "length": float(L)})
     return out
@@ -259,7 +261,7 @@ def weld_lines(geo, ff, edges, a=0.0, L=0.0, tol=0.03):
     nB = n2 * sgn
     out = []
     for gi, g in enumerate(groups):
-        if edges is not None and gi not in edges:
+        if (edges is not None and gi not in edges) or not g:
             continue
         # poligonal del borde (vertices consecutivos del grupo)
         idx = [g[0]] + [(k + 1) % n for k in g]
@@ -288,3 +290,77 @@ def weld_lines(geo, ff, edges, a=0.0, L=0.0, tol=0.03):
                     nA = -nA
                 out.append((P3[k], P3[k + 1], nA, nB, gi))
     return out
+
+
+# ------------------------------------------------------------------------------------------------ recorte de una placa contra un plano
+def clip_outline(poly, groups, nu, nv, d0, keep_sign):
+    """Recorta el contorno (u, v) conservando keep_sign·(nu·u + nv·v + d0) ≥ 0.  Los bordes que se conservan mantienen su número de grupo y el borde nuevo
+    (sobre el plano) recibe el siguiente.  -> (contorno, grupos)"""
+    n = len(poly)
+    seg_g = {}
+    for gi, g in enumerate(groups):
+        for k in g:
+            seg_g[k % n] = gi
+    cut_id = len(groups)
+    f = lambda p: keep_sign * (nu * p[0] + nv * p[1] + d0)                      # noqa: E731
+    out, gid = [], []
+    for k in range(n):
+        a, b = poly[k], poly[(k + 1) % n]
+        fa, fb = f(a), f(b)
+        g = seg_g.get(k, 0)
+        if fa >= 0 and fb >= 0:
+            out.append(a)
+            gid.append(g)
+        elif fa >= 0 > fb:                                                      # sale del semiplano
+            out.append(a)
+            if fa > 0:
+                gid.append(g)
+                t = fa / (fa - fb)
+                out.append((a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])))
+                gid.append(cut_id)
+            else:
+                gid.append(cut_id)
+        elif fa < 0 <= fb:                                                      # entra al semiplano
+            if fb > 0:
+                t = fa / (fa - fb)
+                out.append((a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])))
+                gid.append(g)
+    if len(out) < 3:
+        return [], []
+    new_groups = [[k for k, x in enumerate(gid) if x == gi] for gi in range(cut_id + 1)]
+    return out, [g for g in new_groups]
+
+
+def apply_trims(geo, trims, reg):
+    """Recorta la placa `geo` contra los planos de las caras de otros elementos.  `trims`: [(operación de recorte)].  Devuelve los avisos."""
+    notes = []
+    for o in trims:
+        par = reg.get(o.parent)
+        if par is None or o.face not in par["faces"]:
+            notes.append(f"Recorte de «{(o.targets or [''])[0]}»: elija el elemento y la cara contra la que se recorta.")
+            continue
+        ff = par["faces"][o.face]
+        N = np.asarray(ff.N, float)
+        P = np.asarray(ff.O, float) + N * float(o.trim_gap)
+        e1, e2, e3, org, t = geo["e1"], geo["e2"], geo["e3"], geo["o"], geo["t"]
+        nu, nv = float(N @ e1), float(N @ e2)
+        if math.hypot(nu, nv) < 1e-6:
+            notes.append(f"Recorte de «{(o.targets or [''])[0]}»: el plano es paralelo a la placa y no la corta.")
+            continue
+        d0 = float(N @ (org + e3 * (t / 2.0) - P))
+        base = geo["centre"]
+        bu, bv = float((base - org) @ e1), float((base - org) @ e2)
+        side = nu * bu + nv * bv + d0
+        keep = 1.0 if side >= 0 else -1.0
+        if o.trim_flip:
+            keep = -keep
+        poly, groups = clip_outline(geo["poly"], geo["groups"], nu, nv, d0, keep)
+        if len(poly) < 3:
+            notes.append(f"Recorte de «{(o.targets or [''])[0]}»: el plano se lleva toda la placa (pruebe «conservar el otro lado»).")
+            continue
+        if len(poly) == len(geo["poly"]) and all(math.dist(a, b) < 1e-9 for a, b in zip(poly, geo["poly"])):
+            notes.append(f"Recorte de «{(o.targets or [''])[0]}»: el plano no toca la placa.")
+            continue
+        geo["poly"], geo["groups"] = poly, groups
+        geo["prism"].poly = [(float(a), float(b)) for a, b in poly]
+    return notes

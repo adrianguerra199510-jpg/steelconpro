@@ -142,6 +142,11 @@ def ordered(nd) -> list:
     """Operaciones generales en un orden que respeta las dependencias (una placa despues de su padre).  -> [(indice, operacion)]"""
     pending = [(i, o) for i, o in enumerate(nd.operations) if o.kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN)]
     known = set(nd.names()) | ({"Placa base"} if nd.base_op() is not None else set())
+    plate_names = {o.name for o in nd.operations if o.kind == OP_PLATE and o.name}
+    trims_of = {}                                                  # recortes que cortan una placa: la placa los necesita antes de armarse
+    for o in nd.operations:
+        if o.kind == OP_TRIM and o.targets and o.targets[0] in plate_names:
+            trims_of.setdefault(o.targets[0], []).append(o)
     done, out, guard = set(), [], 0
     while pending and guard < 200:
         guard += 1
@@ -153,6 +158,10 @@ def ordered(nd) -> list:
                 need = {o.parent} - {""} | ({o.weld_main} - {""}) | {t[0] for t in (o.weld_to or [])}
             if o.kind == OP_CUT:
                 need = set()                                       # el corte solo mira a los miembros
+            if o.kind == OP_TRIM and o.targets and o.targets[0] in plate_names:
+                need = {o.parent} - {""}                           # recorta una placa: no necesita que la placa exista antes (ella lo espera a él)
+            if o.kind == OP_PLATE and o.name in trims_of:
+                need = need | {t_.parent for t_ in trims_of[o.name]} - {""}
             if need <= (known | done):
                 out.append(item)
                 pending.remove(item)
@@ -425,6 +434,9 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
         if o.kind == OP_PLATE:
             ff = parent["faces"][o.face]
             geo = PL.make_geo(o, ff)
+            for t_ in nd.operations:                              # recortes que cortan esta placa
+                if t_.kind == OP_TRIM and t_.targets and t_.targets[0] == o.name:
+                    mdl.notes += [f"Operación {i + 1}: {n_}" for n_ in PL.apply_trims(geo, [t_], reg)]
             PL.add_opening(geo, o, reg)
             pr, e1, e2, e3, centre = geo["prism"], geo["e1"], geo["e2"], geo["e3"], geo["centre"]
             spec = {"L1": o.pl_L, "L2": (o.pl_L if o.shape == PLATE_SHAPES[3] else o.pl_W), "t": geo["t"], "perp": geo["perp"]}

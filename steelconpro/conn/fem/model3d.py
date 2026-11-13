@@ -91,12 +91,32 @@ class Prism:
         return out
 
     def _cap(self, pt, nrm):
-        if self.circle is not None or not self.poly:
+        if self.circle is None and not self.poly:
             return None
         o, U, V, W = (np.asarray(x, float) for x in (self.o, self.U, self.V, self.W))
         den = float(np.dot(nrm, W))
         if abs(den) < 1e-9:
             return None
+        if self.circle is not None:                                   # cilindro o tubo redondo: tapa elíptica (o anillo unido por un puente)
+            ro, ri = self.circle
+            n = 36
+            ang = [2 * math.pi * k / n for k in range(n)]
+
+            def ring(r):
+                out, ws = [], []
+                for a in ang:
+                    u, v = r * math.cos(a), r * math.sin(a)
+                    w = float(np.dot(nrm, pt - o - u * U - v * V)) / den
+                    ws.append(w)
+                    out.append(min(max(w, self.w0), self.w1))
+                return [self.to_global(r * math.cos(a), r * math.sin(a), w) for a, w in zip(ang, out)], ws
+            outer, ws = ring(ro)
+            if max(ws) < self.w0 - 1e-6 or min(ws) > self.w1 + 1e-6:
+                return None
+            if ri <= 0:
+                return outer
+            inner, _ = ring(ri)
+            return outer + [outer[0], inner[0]] + list(reversed(inner[1:])) + [inner[0]]
         ws = [float(np.dot(nrm, pt - o - u * U - v * V)) / den for (u, v) in self.poly]
         if max(ws) < self.w0 - 1e-6 or min(ws) > self.w1 + 1e-6:
             return None

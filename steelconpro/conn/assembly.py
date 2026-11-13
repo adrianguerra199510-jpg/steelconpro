@@ -1521,6 +1521,8 @@ def _apply_trims(mdl, nd, reg, hw=True):
             continue
         tgt = o.targets[0] if o.targets else ""
         mem = reg.get(tgt)
+        if mem is not None and mem.get("type") == "plate":            # un recorte de placa ya se aplicó al armar la placa (plates.apply_trims)
+            continue
         part = next((p for p in mdl.parts if p.name == (mem or {}).get("part")), None)
         if mem is None or part is None or mem.get("type") != "miembro" or "ends" not in mem:
             mdl.notes.append(f"Operación {i + 1} «{o.kind}»: elija el miembro que se recorta.")

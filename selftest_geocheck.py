@@ -103,6 +103,37 @@ if n_bad > 6:
     fail(f"el barrido ortogonal da {n_bad} errores de geometría (línea base: 6, doble ángulo con tubo en columna estrecha): {dict((k, dict(v)) for k, v in bad.items())}")
 print(f"{'barrido ortogonal':34} 288 combinaciones (8 conexiones × 3 principales × 3 vigas × 4 acimuts): sin excepciones, {n_bad} errores (base 6): OK")
 
+# 6d) corte de una placa contra el plano de otra cara: el contorno se recorta y los cordones siguen el contorno nuevo
+from steelconpro.conn import specs as SP, ops as OPS                       # noqa: E402
+p5 = load_book(os.path.join(ROOT, "ejemplos", "CN-05_viga_con_placas_trapezoidales.scp"))[0]
+n0 = len(AS.build_model(p5).part("P1").prisms[0].poly)
+OPS.add_operation(p5.node, SP.OP_TRIM, targets=["P1"], parent=p5.node.main_name, face="Alma +", trim_gap=1.0)
+m5 = AS.build_model(p5)
+poly5 = m5.part("P1").prisms[0].poly
+ys5 = [q[1] for q in poly5]
+if max(ys5) > 1.25 or min(ys5) > -2.9 or not any(w.name.startswith("P1-W") and abs(w.p0[1] - 1.2) < 0.05 and abs(w.p1[1] - 1.2) < 0.05 for w in m5.welds):
+    fail(f"corte de placa: contorno {poly5}")
+p5.node.operations[-1].trim_flip = True
+poly5b = AS.build_model(p5).part("P1").prisms[0].poly
+if min(q[1] for q in poly5b) < 1.15:
+    fail("corte de placa: «conservar el otro lado» no invierte el lado")
+print(f"{'corte de placas':34} la placa se recorta contra el plano de otra cara (contorno, cordones y lado a conservar): OK")
+
+# 6e) tapa de un cilindro / tubo redondo recortado: superficie cerrada
+from steelconpro.conn.fem.model3d import cyl_prism                         # noqa: E402
+from collections import Counter                                            # noqa: E402
+for ri in (0.0, 1.5):
+    cp = cyl_prism((0, 0, 0), (0, 0, 1), 2.0, 10.0, ri)
+    cp.cut_planes = [((0, 0, 2.0), (0.5, 0, 0.8660254))]
+    cnt = Counter()
+    for fc in cp.faces():
+        for i in range(len(fc)):
+            a_, b_ = tuple(np.round(fc[i], 4)), tuple(np.round(fc[(i + 1) % len(fc)], 4))
+            cnt[tuple(sorted((a_, b_)))] += 1
+    if set(cnt.values()) != {2}:
+        fail(f"cilindro recortado (ri={ri}) no queda cerrado: {Counter(cnt.values())}")
+print(f"{'tapa de cilindros recortados':34} cilindro y tubo redondo con recorte oblicuo quedan cerrados: OK")
+
 # 7) API
 g = api.geometry_check({"connection": api._dump(prj)})
 v = api.verify({"connection": api._dump(prj)})
