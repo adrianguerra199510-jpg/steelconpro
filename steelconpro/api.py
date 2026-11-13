@@ -215,6 +215,22 @@ def nodal(args) -> dict:
     return NOD.analysis(p, p.node)
 
 
+def _geometry(p) -> dict:
+    from .conn import geocheck as GC
+    mdl = AS.build_model(p)
+    issues = GC.check(mdl)
+    owners = {part.name: getattr(part, "owner", "") for part in mdl.parts}
+    for e in issues:
+        e["owners"] = sorted({owners.get(n, "") for n in e["parts"]} - {""})
+    return {"issues": issues, "notes": list(mdl.notes), **GC.summary(issues)}
+
+
+def geometry_check(args) -> dict:
+    """Revisión automática de la geometría del modelo armado: piezas que se cruzan, cordones que no tocan a sus piezas, pernos fuera de pieza o con agarre
+    incompleto, piezas sueltas y prismas degenerados.  -> {issues: [{sev, code, text, parts, at, owners}], errors, warnings, ok, notes}"""
+    return _geometry(_prj(args["connection"]))
+
+
 def element_info(args) -> dict:
     """Elementos de la conexion a los que se puede hacer referencia (para elegir en los dialogos): miembros, placas de operaciones y caras."""
     from .conn import ops as OPS
@@ -409,6 +425,14 @@ def _fem_node_checks(p: Project):
     return out, warns
 
 
+def _geo_summary(p) -> dict:
+    try:
+        g = _geometry(p)
+        return {"errors": g["errors"], "warnings": g["warnings"], "ok": g["ok"]}
+    except Exception as e:                                             # la revisión no debe impedir el cálculo
+        return {"errors": 0, "warnings": 0, "ok": True, "failed": str(e)}
+
+
 def verify(args) -> dict:
     p = _prj(args["connection"])
     R = solve_conn(p, fem_map=_fem_map(p))
@@ -425,7 +449,7 @@ def verify(args) -> dict:
         "ok": bool(R.ok), "max_ratio": R.max_ratio, "governing": gov.title if gov else "",
         "checks": [_check_json(us, c) for c in R.checks], "warnings": list(R.warnings), "combos": list(R.combo_rows or []), "combo_gov": R.combo_gov,
         "memory": R.rec.to_html() if R.rec is not None else "", "operations": ops, "has_fem": bool(_fem_map(p)),
-        "node_fem": sorted(_node_fem(p)),
+        "node_fem": sorted(_node_fem(p)), "geometry": _geo_summary(p),
     }
 
 

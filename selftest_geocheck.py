@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+"""Prueba del revisor de geometría: un modelo limpio no da hallazgos y cada defecto sembrado se detecta.  Uso: python3 selftest_geocheck.py"""
+import copy
+import os
+import sys
+
+import numpy as np
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
+from steelconpro.model import load_book                                    # noqa: E402
+from steelconpro.conn import assembly as AS, geocheck as GC                # noqa: E402
+from steelconpro.conn.fem.model3d import Part, box_prism                   # noqa: E402
+from steelconpro import api                                                # noqa: E402
+
+fails = []
+
+
+def fail(t):
+    fails.append(t)
+    print("FALLA:", t)
+
+
+def codes(iss, sev="error"):
+    return sorted({e["code"] for e in iss if e["sev"] == sev})
+
+
+prj = load_book(os.path.join(ROOT, "ejemplos", "CN-06_diagonal_con_recorte_y_angulo.scp"))[0]
+base = AS.build_model(prj)
+iss = GC.check(base)
+if iss:
+    fail(f"el ejemplo limpio CN-06 da hallazgos: {[e['text'] for e in iss]}")
+print(f"{'modelo limpio':34} CN-06 sin hallazgos ({len(base.parts)} piezas, {len(base.bolts)} pernos, {len(base.welds)} cordones): OK")
+
+# 1) cordón separado de la pieza
+m = copy.deepcopy(base)
+w = m.welds[0]
+sh = np.asarray(w.nB, float) * 1.0
+w.p0, w.p1 = tuple(np.asarray(w.p0) + sh), tuple(np.asarray(w.p1) + sh)
+if "soldadura" not in codes(GC.check(m)):
+    fail("no se detecta un cordón separado 1 in de su pieza")
+# 2) perno fuera de la pieza
+m = copy.deepcopy(base)
+b = m.bolts[0]
+ax = np.asarray(b.axis, float)
+lat = np.cross(ax, [1.0, 0.0, 0.0]) if abs(ax[0]) < 0.9 else np.cross(ax, [0.0, 1.0, 0.0])
+b.p = tuple(np.asarray(b.p, float) + lat / np.linalg.norm(lat) * 40.0)
+if "perno" not in codes(GC.check(m)):
+    fail("no se detecta un perno cuyo eje cae fuera de su pieza")
+# 3) pieza que atraviesa a otra
+m = copy.deepcopy(base)
+col = next(p for p in m.parts if p.kind == "column")
+lo, hi = col.bbox()
+m.parts.append(Part("Intrusa", "plate", "placa atravesada", 36.0, 58.0, [box_prism((lo + hi) / 2.0, (30.0, 30.0, 0.5))], t=0.5))
+r = GC.check(m)
+if "choque" not in codes(r) or "suelta" not in codes(r):
+    fail(f"no se detecta una placa que atraviesa la columna y está suelta: {codes(r)}")
+# 4) sin uniones: el miembro queda sin camino al principal
+m = copy.deepcopy(base)
+m.welds, m.bolts = [], []
+r = GC.check(m)
+if not any(e["code"] == "suelta" for e in r):
+    fail("no se detectan piezas sin unión al quitar todos los cordones y pernos")
+# 5) pernos demasiado juntos y agujero que corta el borde
+m = copy.deepcopy(base)
+if len(m.bolts) >= 2:
+    m.bolts[1].p = tuple(np.asarray(m.bolts[0].p, float) + lat / np.linalg.norm(lat) * 0.4)
+    if not any(e["code"] == "perno" for e in GC.check(m)):
+        fail("no se detectan dos pernos superpuestos")
+# 6) recorte que se lleva toda la pieza
+m = copy.deepcopy(base)
+d1 = next(p for p in m.parts if p.kind == "brace")
+c = np.vstack([pr.corners() for pr in d1.prisms]).mean(axis=0)
+for pr in d1.prisms:
+    pr.cut_planes = list(pr.cut_planes) + [(tuple(c + np.array([0.0, 0.0, 1e4])), (0.0, 0.0, -1.0))]
+if "degenerada" not in codes(GC.check(m)):
+    fail("no se detecta un recorte que elimina toda la pieza")
+print(f"{'defectos sembrados':34} cordón separado, perno fuera, choque, pieza suelta, pernos superpuestos y recorte total se detectan: OK")
+
+# 7) API
+g = api.geometry_check({"connection": api._dump(prj)})
+v = api.verify({"connection": api._dump(prj)})
+if not g["ok"] or g["errors"] != 0 or "geometry" not in v or v["geometry"]["errors"] != 0:
+    fail(f"API geometry_check / verify.geometry: {g.get('errors')}, {v.get('geometry')}")
+print(f"{'API':34} geometry_check y el resumen dentro de verify: OK")
+
+if fails:
+    print(f"\nFALLAS ({len(fails)}):")
+    for f in fails:
+        print("  -", f)
+    sys.exit(1)
+print("\nTODAS LAS PRUEBAS DEL REVISOR DE GEOMETRÍA PASARON")

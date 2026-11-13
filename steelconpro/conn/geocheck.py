@@ -232,6 +232,13 @@ def _welds(mdl, parts, out):
 def _bolts(mdl, parts, boxes, out):
     lst = list(mdl.bolts)
     seen_edge = set()
+    grp = {}                                                           # hallazgos repetidos de un mismo grupo de pernos se informan una sola vez
+
+    def add(kind, sev, b, pn, at, val=None, parts_=()):
+        e = grp.setdefault((kind, b.tag.rsplit("-", 1)[0], pn), {"sev": sev, "tags": [], "at": at, "val": val, "parts": list(parts_) or [pn], "db": b.db})
+        e["tags"].append(b.tag)
+        if val is not None and (e["val"] is None or val < e["val"]):
+            e["val"], e["at"] = val, at
     for b in lst:
         ax = np.asarray(b.axis, float)
         n = float(np.linalg.norm(ax))
@@ -251,12 +258,11 @@ def _bolts(mdl, parts, boxes, out):
             if abs(s1 - s0) < 1e-6:
                 continue
             if not bool(part_mask(part, mid[None, :], holes_extra=False)[0]):
-                _issue(out, "error", "perno", f"El perno «{b.tag}» no atraviesa «{pn}»: su eje cae fuera de la pieza (revise la posición del grupo de pernos).", [pn], mid)
+                add("fuera", "error", b, pn, mid)
                 prev = (pn, s0, s1)
                 continue
             if prev is not None and min(s0, s1) - max(prev[1], prev[2]) > 0.07:
-                _issue(out, "aviso", "perno", f"Perno «{b.tag}»: hay {_fmt(min(s0, s1) - max(prev[1], prev[2]))} de separación entre «{prev[0]}» y «{pn}» dentro del agarre.",
-                       [prev[0], pn], mid)
+                add("hueco", "aviso", b, f"{prev[0]}» y «{pn}", mid, -(min(s0, s1) - max(prev[1], prev[2])), [prev[0], pn])
             prev = (pn, s0, s1)
             # distancia del eje al borde de la pieza
             for pr in part.prisms:
@@ -279,11 +285,10 @@ def _bolts(mdl, parts, boxes, out):
                     continue
                 if de < b.dh / 2.0 - 1e-6:
                     seen_edge.add(key)
-                    _issue(out, "error", "perno", f"El agujero del perno «{b.tag}» corta el borde de «{pn}» (el eje queda a {_fmt(max(de, 0.0))} del borde).", [pn], mid)
+                    add("borde_err", "error", b, pn, mid, max(de, 0.0))
                 elif de < edge_min(b.db) - 0.02:
                     seen_edge.add(key)
-                    _issue(out, "aviso", "perno", f"Perno «{b.tag}» en «{pn}»: distancia al borde {_fmt(de)}, menor que la mínima {_fmt(edge_min(b.db))} (AISC Tabla J3.4).",
-                           [pn], mid)
+                    add("borde_av", "aviso", b, pn, mid, de)
         # el vástago, la cabeza y la tuerca no deben meterse en piezas ajenas
         s_lo = min([b.head_s, b.nut_s] + [min(g[1], g[2]) for g in b.grip])
         s_hi = max([b.head_s, b.nut_s] + [max(g[1], g[2]) for g in b.grip])
@@ -302,11 +307,28 @@ def _bolts(mdl, parts, boxes, out):
             if (allp.max(axis=0) < lo - 0.1).any() or (allp.min(axis=0) > hi + 0.1).any():
                 continue
             if nm not in names and part_mask(part, shank).any():
-                _issue(out, "error", "perno", f"El perno «{b.tag}» atraviesa «{nm}», que no está en su agarre.", [nm] + names, p + ax * 0.5 * (s_lo + s_hi))
+                add("ajena", "error", b, nm, p + ax * 0.5 * (s_lo + s_hi), None, [nm] + names)
             elif part_mask(part, head).sum() >= 2 or part_mask(part, nut).sum() >= 2:
                 wh = "cabeza" if part_mask(part, head).sum() >= 2 else "tuerca"
-                _issue(out, "aviso", "perno", f"La {wh} del perno «{b.tag}» queda dentro de «{nm}»: no hay espacio para colocarlo o apretarlo.", [nm] + names,
-                       p + ax * (b.head_s if wh == "cabeza" else b.nut_s))
+                add(wh, "aviso", b, nm, p + ax * (b.head_s if wh == "cabeza" else b.nut_s), None, [nm] + names)
+    for (kind, g, pn), e in grp.items():
+        n = len(e["tags"])
+        short = [t.rsplit("-", 1)[-1] for t in e["tags"]]
+        who = f"El perno «{e['tags'][0]}»" if n == 1 else f"{n} pernos del grupo «{g}» ({', '.join(short[:6])}{'…' if n > 6 else ''})"
+        pl = n > 1
+        if kind == "fuera":
+            txt = f"{who} no atravies{'an' if pl else 'a'} «{pn}»: su eje cae fuera de la pieza (revise la posición del grupo de pernos)."
+        elif kind == "ajena":
+            txt = f"{who} atravies{'an' if pl else 'a'} «{pn}», que no está en su agarre."
+        elif kind == "borde_err":
+            txt = f"{who}: el agujero corta el borde de «{pn}» (el eje queda a {_fmt(e['val'])} del borde)."
+        elif kind == "borde_av":
+            txt = f"{who} en «{pn}»: distancia al borde {_fmt(e['val'])}, menor que la mínima {_fmt(edge_min(e['db']))} (AISC Tabla J3.4)."
+        elif kind == "hueco":
+            txt = f"{who}: hay {_fmt(-e['val'])} de separación entre «{pn}» dentro del agarre."
+        else:
+            txt = f"{who}: la {kind} queda dentro de «{pn}»; no hay espacio para colocarlo o apretarlo."
+        _issue(out, e["sev"], "perno", txt, e["parts"], e["at"])
     # separación entre pernos que comparten pieza
     close = {}
     for i in range(len(lst)):

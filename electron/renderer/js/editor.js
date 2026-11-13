@@ -121,6 +121,12 @@ const runNodal = debounce(async () => {
   try { E.nodal = await call('nodal', { connection: E.conn() }); } catch (e) { E.nodal = null; }
   renderNodal(); applyLoads();
 }, 300);
+// revisión automática de la geometría (choques, cordones que no tocan, pernos fuera de pieza, piezas sueltas): se mantiene al día con cada cambio
+const runGeo = debounce(async () => {
+  const conn = E.conn();
+  try { const g = await call('geometry_check', { connection: conn }); if (conn === E.conn()) E.geo = g; } catch (e) { E.geo = { issues: [], errors: 0, warnings: 0, ok: true, failed: e.message }; }
+  renderGeo();
+}, 700);
 const verify = latest(async () => call('verify', { connection: E.conn() }));
 const runVerify = debounce(async () => {
   setVerdict('calc'); E.calculating = true; renderResults();
@@ -149,7 +155,7 @@ E.changed = (opts = {}) => {
   markDirty();
   E.stale = true; E.res = null; E.calculating = false;                        // un cambio descarta los resultados: sin D/C hasta volver a calcular
   if (opts.structure) renderTree(); else renderTree();
-  if (opts.geometry !== false) runMesh();
+  if (opts.geometry !== false) { runMesh(); E.geo = null; renderGeo(); runGeo(); }
   runNodal();
   renderResults();
   setVerdict('stale');
@@ -246,7 +252,7 @@ async function refreshAll(rebuildRight = true) {
   renderConnTabs(); renderTree(); updateUndo();
   if (rebuildRight) buildRight();
   E.stale = true; E.res = null; setVerdict('stale');
-  runMesh.flush(); runNodal.flush(); renderResults();
+  runMesh.flush(); runNodal.flush(); renderResults(); E.geo = null; runGeo();
 }
 
 function renderConnTabs() {
@@ -586,6 +592,7 @@ function buildRight() {
   const items = [
     { id: 'res', label: 'Resultados', icon: 'check', render: () => { E.ui.resBox = h('div', { class: 'scroll', style: { padding: '0 0 12px' } }); renderResults(); return E.ui.resBox; } },
     { id: 'nod', label: 'Nudo', icon: 'zap', render: () => { E.ui.nodBox = h('div', { class: 'scroll', style: { padding: '0 12px 12px' } }); renderNodal(); return E.ui.nodBox; } },
+    { id: 'geo', label: 'Geometría', icon: 'shapes', render: () => { E.ui.geoBox = h('div', { class: 'scroll', style: { padding: '0 0 12px' } }); renderGeo(); return E.ui.geoBox; } },
     { id: 'mem', label: 'Memoria', icon: 'file-text', render: () => { E.ui.memBox = h('div', { class: 'scroll memory' }); renderMemory(); return E.ui.memBox; } },
   ];
   items.push({ id: 'fem', label: 'FEM', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
@@ -635,6 +642,45 @@ function scrollToGroup(i) {
   if (el) { el.classList.remove('closed'); el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.animate([{ background: 'var(--brand-50)' }, { background: 'transparent' }], { duration: 1200 }); }
 }
 
+const GEO_CODES = { choque: 'Choque', soldadura: 'Soldadura', perno: 'Perno', suelta: 'Pieza suelta', degenerada: 'Geometría inválida' };
+function renderGeo() {
+  const g = E.geo;
+  const tab = E.ui.rtabs && E.ui.rtabs.querySelector('.tab[data-id="geo"]');
+  if (tab) {                                                          // contador en la pestaña
+    let b = tab.querySelector('.geo-badge');
+    if (!b) { b = h('span', { class: 'geo-badge', style: { marginLeft: '6px', padding: '0 6px', borderRadius: '8px', fontSize: '11px', fontWeight: '600' } }); tab.append(b); }
+    const n = g ? g.errors + g.warnings : 0;
+    b.textContent = n ? String(n) : '';
+    b.style.display = n ? '' : 'none';
+    b.style.background = g && g.errors ? 'var(--bad-bg)' : 'var(--warn-bg)';
+    b.style.color = g && g.errors ? 'var(--bad)' : 'var(--warn)';
+  }
+  const box = E.ui.geoBox; if (!box) return;
+  clear(box);
+  box.append(h('p', { class: 'hint-text', style: { margin: '8px 14px' }, text: 'Revisión automática del modelo 3D: piezas que se cruzan, cordones que no tocan a sus dos piezas, pernos fuera de pieza o con agarre incompleto, distancias mínimas de pernos y piezas sin unión. No depende de las cargas.' }));
+  if (!g) { box.append(h('div', { style: { padding: '12px 16px' } }, spinner('Revisando la geometría…'))); return; }
+  if (g.failed) { box.append(h('div', { class: 'warns' }, h('div', { class: 'warn-row fatal' }, svg('circle-alert', 15), h('span', { text: `No se pudo revisar la geometría: ${g.failed}` })))); return; }
+  box.append(h('div', { class: 'kpis', style: { margin: '6px 0 12px' } },
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Errores' }), h('div', { class: 'v', style: { color: g.errors ? 'var(--bad)' : '' }, text: String(g.errors) })),
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Avisos' }), h('div', { class: 'v', style: { color: g.warnings ? 'var(--warn)' : '' }, text: String(g.warnings) })),
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Estado' }), h('div', { class: 'v', style: { fontSize: '12px' }, text: g.errors ? 'Corregir' : g.warnings ? 'Revisar avisos' : 'Sin problemas' }))));
+  if (!g.issues.length) { box.append(h('div', { class: 'muted', style: { padding: '6px 14px', fontSize: '13px' }, text: 'No se encontraron problemas de geometría.' })); }
+  const list = h('div', { class: 'warns' });
+  for (const e of g.issues) {
+    const row = h('div', { class: `warn-row ${e.sev === 'error' ? 'fatal' : ''}`, style: { cursor: 'pointer' }, title: 'Clic: resaltar las piezas en el modelo' },
+      svg(e.sev === 'error' ? 'circle-alert' : 'alert-triangle', 15),
+      h('span', null, h('b', { text: `${GEO_CODES[e.code] || e.code}: ` }), document.createTextNode(e.text)));
+    row.addEventListener('click', () => {
+      for (const r of list.children) r.style.outline = '';
+      row.style.outline = '2px solid currentColor';
+      if (E.viewer) { E.viewer.select(e.parts || []); if (e.at && E.viewer.focusOn) E.viewer.focusOn(e.at); }
+    });
+    list.append(row);
+  }
+  box.append(list);
+  if (g.notes && g.notes.length) box.append(h('p', { class: 'hint-text', style: { margin: '10px 14px 4px' }, text: 'Notas del armado del modelo:' }), h('div', { class: 'warns' }, g.notes.map((t) => h('div', { class: 'warn-row' }, svg('info', 15), h('span', { text: t })))));
+}
+
 function renderResults(err) { if (E.ui.resBox) fillResults(E.ui.resBox, err); renderMemory(); if (E.report) E.report.refresh(); }
 
 function fillResults(box, err, { forceOpen = false, pick = true } = {}) {
@@ -647,6 +693,11 @@ function fillResults(box, err, { forceOpen = false, pick = true } = {}) {
     h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'D/C máximo' }), h('div', { class: 'v', text: r.max_ratio.toFixed(3) })),
     h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Gobierna' }), h('div', { class: 'v', style: { fontSize: '12px' }, text: r.governing || '—' })),
     h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Verificaciones' }), h('div', { class: 'v', text: String(r.checks.filter((c) => !c.skip).length) }))));
+  if (r.geometry && r.geometry.errors) {
+    const gw = h('div', { class: 'warn-row fatal', style: { cursor: 'pointer' } }, svg('circle-alert', 15), h('span', { text: `La geometría del modelo tiene ${r.geometry.errors} error${r.geometry.errors > 1 ? 'es' : ''} (piezas que se cruzan, cordones o pernos fuera de sitio): revíselos en la pestaña «Geometría»; las verificaciones suponen un modelo coherente.` }));
+    gw.addEventListener('click', () => E.ui.rtabs && E.ui.rtabs.show('geo'));
+    box.append(h('div', { class: 'warns' }, gw));
+  }
   if (r.warnings && r.warnings.length) box.append(h('div', { class: 'warns' }, r.warnings.map((w) => h('div', { class: `warn-row ${/^(ERROR|FATAL)/i.test(w) ? 'fatal' : ''}` }, svg('alert-triangle', 15), h('span', { text: w })))));
   // ---- por operación
   const groups = new Map();
