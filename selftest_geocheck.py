@@ -77,6 +77,19 @@ if "degenerada" not in codes(GC.check(m)):
     fail("no se detecta un recorte que elimina toda la pieza")
 print(f"{'defectos sembrados':34} cordón separado, perno fuera, choque, pieza suelta, pernos superpuestos y recorte total se detectan: OK")
 
+# 6b) cartelas: se recortan contra el principal, se sueldan a él y la diagonal no choca con la columna ni con la cartela
+for ej in ("CN-07_placa_base_con_diagonal.scp", "CN-03_cordon_con_diagonales.scp", "CN-01_columna_con_vigas.scp"):
+    pj = load_book(os.path.join(ROOT, "ejemplos", ej))[0]
+    mj = AS.build_model(pj)
+    gi = GC.check(mj)
+    malos = [e["text"] for e in gi if e["sev"] == "error" and any(("Cartela" in n or n.startswith("D") or n.startswith("M")) and n in e["parts"] for n in e["parts"])
+             and e["code"] in ("choque", "suelta", "soldadura", "perno")]
+    if malos:
+        fail(f"{ej}: cartela / diagonal con errores: {malos[:3]}")
+    if not any(w.name.startswith("Cartela") for w in mj.welds) and ej.startswith("CN-07"):
+        fail("la cartela de CN-07 no tiene cordones contra el principal")
+print(f"{'cartelas':34} recortadas contra el principal, soldadas a él, sin choques con la diagonal: OK")
+
 # 7) API
 g = api.geometry_check({"connection": api._dump(prj)})
 v = api.verify({"connection": api._dump(prj)})

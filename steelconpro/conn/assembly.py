@@ -20,6 +20,7 @@ from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, Weld, unit
 from . import ops as OPS
 from .ops import member_faces, FaceFrame
+from . import polyclip as PCLIP
 from .specs import (GENERIC_OPS, OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
                     OP_COPE, OP_CONT, TAB_MODES, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
 
@@ -724,6 +725,25 @@ def auto_cope_for(nd, m, op=None):
 
 
 # ================================================================================================== cartelas (placa comun por plano)
+def _clear_of_main(shp, start, dirv, sx, sy, ext, msx, msy) -> float:
+    """Cuánto hay que retrasar un miembro (a lo largo de su eje) para que las esquinas de su sección no queden dentro de la sección del principal."""
+    rects = outer_extent(shp)
+    if isinstance(rects, tuple):                                  # redondo o libre: se usan los cuatro puntos del círculo / caja
+        R = shp.d / 2.0
+        pts = [(R, 0.0), (-R, 0.0), (0.0, R), (0.0, -R), (0.7 * R, 0.7 * R), (-0.7 * R, 0.7 * R), (0.7 * R, -0.7 * R), (-0.7 * R, -0.7 * R)]
+    else:
+        pts = [(x, y) for (x0, y0, x1, y1) in rects for x in (x0, x1) for y in (y0, y1)]
+    d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
+    best = 0.0
+    for (a, b) in pts:
+        P = start + sx * a + sy * b
+        o2 = (float(np.dot(P, msx)), float(np.dot(P, msy)))
+        r = ray_exit(ext, o2, d2)
+        if r is not None and r > best:
+            best = r
+    return best
+
+
 def _hull(pts):
     """Envolvente convexa (Andrew) de puntos 2D."""
     P = sorted(set((round(p[0], 5), round(p[1], 5)) for p in pts))
@@ -752,7 +772,8 @@ def _gusset_outline(ctx):
     rows = max(1, int(op.n_bolts))
     s = max(op.bolt_s, 2.5)
     ov = (rows - 1) * s + 3.0 + 1.0
-    gl = 2.0 if op.kind == OP_GUSSET else 6.0
+    push = float(getattr(ctx, "push", 0.0))                      # el miembro inclinado se aleja del principal hasta que su sección no lo toque
+    gl = (2.0 if op.kind == OP_GUSSET else 6.0) + push
     tip = gl + (ov if op.kind == OP_GUSSET else 0.0)
     if op.gus_L > 0:
         if op.kind == OP_GUSSET:
@@ -784,6 +805,137 @@ def _gusset_members(ctxs, nd):
     return groups
 
 
+def _slot_tube(part, c, u0, width, w_tip_s):
+    """Abre en las paredes de un tubo rectangular (las que cruza el plano de la cartela) una ranura de ancho `width` centrada en el lateral `u0` desde el extremo
+    de llegada hasta `w_tip_s` (distancia `s` del apoyo a lo largo del miembro).  Devuelve True si se abrió."""
+    done = False
+    new = []
+    for pr in part.prisms:
+        W = np.cross(np.asarray(pr.U, float), np.asarray(pr.V, float))
+        ok = (pr.circle is None and len(pr.poly) == 4 and abs(float(np.dot(W, c.dir))) > 0.99 and abs(float(np.dot(np.asarray(pr.U, float), c.sx))) > 0.99
+              and abs(float(np.dot(np.asarray(pr.V, float), c.sy))) > 0.99)
+        if not ok:
+            new.append(pr)
+            continue
+        xs = sorted(q[0] for q in pr.poly)
+        ys = sorted(q[1] for q in pr.poly)
+        x0, x1, y0, y1 = xs[0], xs[-1], ys[0], ys[-1]
+        sgn = 1.0 if float(np.dot(np.cross(np.asarray(pr.U, float), np.asarray(pr.V, float)), c.dir)) > 0 else -1.0        # U y V siguen a sx y sy; u crece con sx
+        ou = float(np.dot(np.asarray(pr.o, float) - c.Q, c.sx))                                                           # lateral del origen del prisma
+        a, b = u0 - width / 2.0 - ou, u0 + width / 2.0 - ou                                                               # ranura en la coordenada u del prisma
+        if not (x0 < a and b < x1) or (y1 - y0) > (x1 - x0) * 0.5:                                                         # solo las paredes anchas que cruza el plano
+            new.append(pr)
+            continue
+        wtip = float(np.dot(c.Q + c.dir * w_tip_s - np.asarray(pr.o, float), W))
+        lo, hi = (pr.w0, min(max(wtip, pr.w0), pr.w1)) if sgn > 0 else (min(max(wtip, pr.w0), pr.w1), pr.w1)
+        if hi - lo < 1e-6:
+            new.append(pr)
+            continue
+        import copy as _cp
+        rest = _cp.copy(pr)
+        if sgn > 0:
+            rest.w0 = hi
+        else:
+            rest.w1 = lo
+        parts_ = [rest] if rest.w1 - rest.w0 > 1e-6 else []
+        for (xa, xb) in ((x0, a), (b, x1)):
+            q = _cp.copy(pr)
+            q.poly = [(xa, y0), (xb, y0), (xb, y1), (xa, y1)]
+            q.w0, q.w1 = lo, hi
+            q.holes, q.holes_extra, q.cut_planes = [], [], list(pr.cut_planes)
+            parts_.append(q)
+        new += parts_
+        done = True
+    if done:
+        part.prisms = new
+    return done
+
+
+def _main_cut_polys(part, P0, n, e1, e2, lat, t):
+    """Polígonos convexos (en el plano de la cartela: e1, e2 desde P0) que ocupa el miembro principal dentro del espesor de la cartela [lat − t/2, lat + t/2]."""
+    out = []
+    lo, hi = lat - t / 2.0, lat + t / 2.0
+    for pr in part.prisms:
+        if pr.circle is not None:
+            ro = pr.circle[0]
+            ring = [np.asarray(pr.to_global(ro * math.cos(a), ro * math.sin(a), w), float) for w in (pr.w0, pr.w1) for a in np.linspace(0, 2 * math.pi, 24, endpoint=False)]
+            edges = [(k, (k + 1) % 24) for k in range(24)] + [(24 + k, 24 + (k + 1) % 24) for k in range(24)] + [(k, 24 + k) for k in range(24)]
+            V = ring
+        else:
+            if len(pr.poly) < 3:
+                continue
+            m = len(pr.poly)
+            V = [np.asarray(pr.to_global(u, v, w), float) for w in (pr.w0, pr.w1) for (u, v) in pr.poly]
+            edges = [(k, (k + 1) % m) for k in range(m)] + [(m + k, m + (k + 1) % m) for k in range(m)] + [(k, m + k) for k in range(m)]
+        d = [float(np.dot(q - P0, n)) for q in V]
+        pts = [V[k] for k in range(len(V)) if lo - 1e-9 <= d[k] <= hi + 1e-9]
+        for (a, b) in edges:
+            da, db = d[a], d[b]
+            if abs(db - da) < 1e-12:
+                continue
+            for plane in (lo, hi):
+                tt = (plane - da) / (db - da)
+                if 0.0 < tt < 1.0:
+                    pts.append(V[a] + tt * (V[b] - V[a]))
+        if len(pts) < 3:
+            continue
+        poly = PCLIP.hull([(float(np.dot(q - P0, e1)), float(np.dot(q - P0, e2))) for q in pts])
+        if len(poly) >= 3 and abs(PCLIP.area(poly)) > 1e-6:
+            out.append(PCLIP.ccw(poly))
+    return out
+
+
+def _contact_on_outline(contact, outlines, step=0.25, tol=2e-3):
+    """Tramos de los segmentos de contacto que quedan sobre el contorno final de la cartela (otro recorte pudo quitar parte de ellos)."""
+    out = []
+    for a, b in contact:
+        L = math.dist(a, b)
+        n = max(int(math.ceil(L / step)), 1)
+        run = None
+        for i in range(n):
+            t0, t1 = i / n, (i + 1) / n
+            mid = (a[0] + (b[0] - a[0]) * (t0 + t1) / 2, a[1] + (b[1] - a[1]) * (t0 + t1) / 2)
+            on = any(_dist_poly(mid, o_) < tol for o_ in outlines)
+            if on and run is None:
+                run = t0
+            if (not on or i == n - 1) and run is not None:
+                te = t1 if on else t0
+                out.append(((a[0] + (b[0] - a[0]) * run, a[1] + (b[1] - a[1]) * run), (a[0] + (b[0] - a[0]) * te, a[1] + (b[1] - a[1]) * te)))
+                run = None
+    return out
+
+
+def _dist_poly(p, poly):
+    best = 1e9
+    for i in range(len(poly)):
+        a, b = poly[i], poly[(i + 1) % len(poly)]
+        ab = (b[0] - a[0], b[1] - a[1])
+        L2 = ab[0] ** 2 + ab[1] ** 2
+        t = 0.0 if L2 < 1e-18 else min(1.0, max(0.0, ((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / L2))
+        best = min(best, math.hypot(p[0] - a[0] - t * ab[0], p[1] - a[1] - t * ab[1]))
+    return best
+
+
+def _merge_segments(segs):
+    """Une segmentos 2D consecutivos y colineales: [(a, b)] -> [(a, b)] (los cordones salen de a un tramo por arista del principal)."""
+    segs = [(tuple(a), tuple(b)) for a, b in segs if math.dist(a, b) > 1e-6]
+    out = []
+    for a, b in segs:
+        for k, (c, d) in enumerate(out):
+            if math.dist(b, c) < 1e-6 or math.dist(a, d) < 1e-6 or math.dist(a, c) < 1e-6 or math.dist(b, d) < 1e-6:
+                u1 = (b[0] - a[0], b[1] - a[1])
+                u2 = (d[0] - c[0], d[1] - c[1])
+                if abs(u1[0] * u2[1] - u1[1] * u2[0]) < 1e-6 * max(math.hypot(*u1) * math.hypot(*u2), 1e-9):
+                    pts = [a, b, c, d]
+                    ref = u2
+                    pts.sort(key=lambda q: q[0] * ref[0] + q[1] * ref[1])
+                    out[k] = (pts[0], pts[-1])
+                    break
+        else:
+            out.append((a, b))
+    return out
+
+
 def _build_gussets(ctxs, nd, mdl):
     for gi, g in enumerate(_gusset_members(ctxs, nd)):
         n = g["n"]
@@ -808,10 +960,44 @@ def _build_gussets(ctxs, nd, mdl):
         if len(hull) < 3:
             continue
         o = g["P0"] + n * (lat - t / 2.0)
-        pr = Prism(poly=hull, o=tuple(map(float, o)), U=tuple(map(float, e1)), V=tuple(map(float, e2)), w0=0.0, w1=t)
+        # la cartela no puede ocupar el espacio del miembro principal: se le resta su sección (en el espesor de la cartela) y el borde de contacto se suelda
+        pieces, contact = [(hull, [])], []
+        main_part = next((q for q in mdl.parts if q.name == nd.main_name), None)
+        for cpoly in (_main_cut_polys(main_part, g["P0"], n, e1, e2, lat, t) if main_part is not None else []):
+            nxt = []
+            for (outer, holes) in pieces:
+                try:
+                    res = PCLIP.subtract(outer, cpoly)
+                except Exception:                                    # polígonos degenerados: se deja la pieza como está
+                    res = [(outer, holes, [])]
+                for (o2, h2, ct) in res:
+                    nxt.append((o2, list(holes) + list(h2)))
+                    contact += ct
+            pieces = nxt
+        contact = _contact_on_outline(contact, [o_ for o_, _h in pieces])        # solo los tramos que siguen siendo borde de la cartela
+        if not pieces:
+            mdl.notes.append(f"Cartela {gi + 1}: queda toda dentro del miembro principal; revise su posición.")
+            continue
+        prisms = []
+        for (outer, holes) in pieces:
+            pr = Prism(poly=[tuple(map(float, q)) for q in outer], o=tuple(map(float, o)), U=tuple(map(float, e1)), V=tuple(map(float, e2)), w0=0.0, w1=t)
+            pr.holes_extra = [list(map(tuple, hh)) for hh in holes]
+            prisms.append(pr)
         Fy, Fu = _steel(g["items"][0].op.plate_steel, True)
         names = "+".join(c.m.name for c in g["items"])
-        mdl.parts.append(Part(f"Cartela {gi + 1}", "gusset", f"Cartela PL {t:g} ({names})", Fy, Fu, [pr], t=t))
+        mdl.parts.append(Part(f"Cartela {gi + 1}", "gusset", f"Cartela PL {t:g} ({names})", Fy, Fu, prisms, t=t))
+        wsz = float(g["items"][0].op.weld_size)
+        for k, (a2, b2) in enumerate(_merge_segments(contact)):           # cordones de la cartela contra el principal, por sus dos caras
+            for sg in (1.0, -1.0):
+                P0 = g["P0"] + e1 * a2[0] + e2 * a2[1] + n * (lat + sg * t / 2.0)
+                P1 = g["P0"] + e1 * b2[0] + e2 * b2[1] + n * (lat + sg * t / 2.0)
+                if float(np.linalg.norm(P1 - P0)) < 0.2:
+                    continue
+                ed = np.asarray(b2, float) - np.asarray(a2, float)
+                nrm2 = np.array([ed[1], -ed[0]]) / max(float(np.linalg.norm(ed)), 1e-12)          # normal de la arista de C, hacia afuera de C = hacia la cartela
+                nB = unit(e1 * nrm2[0] + e2 * nrm2[1])
+                mdl.welds.append(Weld(f"Cartela {gi + 1}-W{k + 1}{'a' if sg > 0 else 'b'}", f"Cartela {gi + 1}", nd.main_name, tuple(map(float, P0)), tuple(map(float, P1)),
+                                      tuple(map(float, n * sg)), tuple(map(float, nB)), wsz, 70.0, f"G{gi + 1}"))
         for c in g["items"]:
             if c.op.kind != OP_GUSSET:
                 continue
@@ -820,12 +1006,22 @@ def _build_gussets(ctxs, nd, mdl):
             rows = max(1, int(c.op.n_bolts))
             s = max(c.op.bolt_s, 2.5)
             gauge = max(min(hm * 0.5, 6.0), 2.5)
+            slotted = False
             if _is_open(shp):
                 grip = [(f"Cartela {gi + 1}", 0.0, t), (c.partname, t, t + shp.tw)]
                 p0, nut = lat + t / 2.0, t + shp.tw
             else:
-                grip = [(c.partname, 0.0, shp.bf)]
                 p0, nut = shp.bf / 2.0, shp.bf
+                u0 = float(np.dot(g["P0"] + n * lat - c.Q, c.sx))
+                tp_ = next((q for q in mdl.parts if q.name == c.partname), None)
+                tipg = _gusset_outline(c)[1] + (ov if c.op.kind == OP_GUSSET else 0.0)
+                if c.op.gus_L > 0:
+                    tipg = c.op.gus_L
+                if tp_ is not None and shp.kind == HSS_RECT and _slot_tube(tp_, c, u0, t + 0.12, tipg + 0.5):
+                    slotted = True
+                    grip = [(c.partname, 0.0, shp.tw), (f"Cartela {gi + 1}", shp.bf / 2.0 - u0 - t / 2.0, shp.bf / 2.0 - u0 + t / 2.0), (c.partname, shp.bf - shp.tw, shp.bf)]
+                else:
+                    grip = [(c.partname, 0.0, shp.bf)]
             for i in range(rows):
                 for k, sg in enumerate((1, -1)):
                     mdl.bolts.append(_bolt(f"{m.name}-B{i + 1}{k + 1}", c.at(gl + 1.5 + i * s, p0, sg * gauge / 2.0), -c.sx, c.db, 0.0, nut, grip, c.op.bolt_grade))
@@ -1127,6 +1323,14 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
             ctxs_m.append(c)
         c = ctxs_m[0]
         ms = (max(mss) + float(m.gap)) if mss else gap_eff(m)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
+        if any(c_.op.kind in GUSSET_OPS for c_ in ctxs_m if c_.op is not None):
+            push = _clear_of_main(shp, Q + dirv * ms, dirv, sx, sy, ext, msx, msy)
+            if push > 1e-6:                                         # la esquina de la sección del miembro inclinado penetra en el principal: se retrasa el miembro
+                ms += push
+                for c_ in ctxs_m:
+                    c_.push = push
+                    if c_.op is not None and c_.op.kind in GUSSET_OPS:
+                        c_.op_gl_push = push
         tag = m.name
         for o in ops:
             if o.kind == OP_CONT and hw:

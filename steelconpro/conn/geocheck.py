@@ -261,7 +261,7 @@ def _bolts(mdl, parts, boxes, out):
                 add("fuera", "error", b, pn, mid)
                 prev = (pn, s0, s1)
                 continue
-            if prev is not None and min(s0, s1) - max(prev[1], prev[2]) > 0.07:
+            if prev is not None and min(s0, s1) - max(prev[1], prev[2]) > 0.07 and not any(parts[q].kind in ("brace", "column") for q in (prev[0], pn) if q in parts):      # el aire dentro de un tubo (cartela en ranura) es normal
                 add("hueco", "aviso", b, f"{prev[0]}» y «{pn}", mid, -(min(s0, s1) - max(prev[1], prev[2])), [prev[0], pn])
             prev = (pn, s0, s1)
             # distancia del eje al borde de la pieza
