@@ -90,6 +90,19 @@ for ej in ("CN-07_placa_base_con_diagonal.scp", "CN-03_cordon_con_diagonales.scp
         fail("la cartela de CN-07 no tiene cordones contra el principal")
 print(f"{'cartelas':34} recortadas contra el principal, soldadas a él, sin choques con la diagonal: OK")
 
+# 6c) barrido ortogonal: ningún caso lanza excepciones y los errores de geometría no crecen respecto de la línea base conocida
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+import io, contextlib                                                      # noqa: E402
+import barrido_geometria as BG                                             # noqa: E402
+with contextlib.redirect_stdout(io.StringIO()):
+    cr, bad = BG.run()
+n_bad = sum(sum(c.values()) for c in bad.values())
+if cr:
+    fail(f"el barrido lanzó excepciones: {cr[:2]}")
+if n_bad > 6:
+    fail(f"el barrido ortogonal da {n_bad} errores de geometría (línea base: 6, doble ángulo con tubo en columna estrecha): {dict((k, dict(v)) for k, v in bad.items())}")
+print(f"{'barrido ortogonal':34} 288 combinaciones (8 conexiones × 3 principales × 3 vigas × 4 acimuts): sin excepciones, {n_bad} errores (base 6): OK")
+
 # 7) API
 g = api.geometry_check({"connection": api._dump(prj)})
 v = api.verify({"connection": api._dump(prj)})

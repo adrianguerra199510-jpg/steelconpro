@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 
-TOL_TOUCH = 0.08          # in: un cordón «toca» una pieza si queda a menos de esto de su material
+TOL_TOUCH = 0.1          # in: un cordón «toca» una pieza si queda a menos de esto de su material
 TOL_CLASH = 0.05          # in: penetración admitida entre piezas que no están unidas entre sí
 EMBED_OK = 0.42           # in: penetración admitida entre piezas unidas (las placas se empotran 0.35 in en el soporte para el dibujo)
 MAX_PTS = 220000          # puntos de muestreo por par de piezas

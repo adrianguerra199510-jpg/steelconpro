@@ -44,8 +44,9 @@ def viga_a_viga() -> Project:
     nd = PRE.build(MODE_BEAM, "sec2", "I", "tab")
     nd.members[0].shape = "W18X35"
     _set(nd, "S1", OP_EP_FLUSH)
+    nd.members[0].off = 0.0                          # la placa extrema va entre las alas del principal: la viga centrada, sin chocar con ellas
     nd.operations.append(Operation(kind=OP_COPE, member="S2", cope_top=2.0, cope_len=4.5))
-    nd.members.append(Member(name="S3", shape="W14X22", az=60.0, pos=36.0, off=nd.members[0].off + 1.0, L=48.0))
+    nd.members.append(Member(name="S3", shape="W14X22", az=90.0, pos=36.0, off=nd.members[1].off + 1.0, L=48.0))
     nd.operations.append(Operation(kind=OP_DANG, member="S3"))
     nd.loads = [Load("Caso 1", "S1", Vz=-20.0), Load("Caso 1", "S2", Vz=-25.0), Load("Caso 1", "S3", Vz=-10.0)]
     p.node = nd
@@ -72,7 +73,7 @@ def columna_con_placa_base() -> Project:
     for m in nd.members:
         m.pos = 30.0                                 # un solo nudo: las vigas y la diagonal llegan a la columna cerca de la placa base
     _set(nd, "V1", OP_EP_FLUSH)
-    nd.members.append(Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=0.0, el=45.0, pos=20.0, L=60.0))
+    nd.members.append(Member(name="D1", shape="HSS4X4X1/4", steel="ASTM A500 Gr.C (HSS rect.)", az=90.0, el=45.0, pos=20.0, L=60.0))
     nd.operations.append(Operation(kind=OP_GUSSET, member="D1", plate_t=0.5))
     nd.operations.append(Operation(kind=OP_BASE, member=nd.main_name, end=-1))
     nd.loads = [Load("Caso 1", "V1", Vz=-15.0), Load("Caso 1", "V2", Vz=-15.0), Load("Caso 1", "D1", N=2.0)]
@@ -100,8 +101,8 @@ def refuerzo_con_placas() -> Project:
     nd.operations = []
     nd.main_len_neg, nd.main_len_pos = 24.0, 24.0
     a = _gen(nd, OP_PLATE, parent=nd.main_name, face=FACES_I[0], shape=PLATE_SHAPES[4], pl_L=14.0, pl_W=6.0, pl_L2=3.0, plate_t=0.5, pl_s=24.0)
-    b = _gen(nd, OP_PLATE, parent=a.name, face="Cara +", role="Rigidizador", orient=PLATE_ORIENTS[1], pl_L=5.0, pl_W=3.0, plate_t=0.375)
-    _gen(nd, OP_HOLE, parent=a.name, face="Cara +", rows=1, cols=2, bolt_g=3.0)
+    b = _gen(nd, OP_PLATE, parent=a.name, face="Cara +", role="Rigidizador", orient=PLATE_ORIENTS[1], pl_L=5.0, pl_W=3.0, plate_t=0.375, pl_s=7.0)
+    _gen(nd, OP_HOLE, parent=a.name, face="Cara +", rows=1, cols=2, bolt_g=3.0, pl_s=3.0)
     _gen(nd, OP_FILLET, targets=[b.name], weld_size=0.1875)
     nd.members = []
     nd.loads = []

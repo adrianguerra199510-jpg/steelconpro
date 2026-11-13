@@ -235,6 +235,17 @@ def _n_rows(ctx, hmax, edge=1.5):
     return n, s
 
 
+def _support_wall(nd, m, mshape) -> float:
+    """Espesor de la pared del principal que atraviesan los pernos de una conexión (ala o alma de un perfil I, pared de un tubo)."""
+    try:
+        face = attach_info(nd, m)["face"]
+    except Exception:
+        face = "cara"
+    if mshape.kind == W_SHAPE:
+        return float(mshape.tf if face == "ala" else mshape.tw) or 0.5
+    return float(mshape.tw or mshape.tf or 0.5)
+
+
 def gap_eff(m) -> float:
     """Separacion del extremo del miembro a la cara del principal para las conexiones de corte: 1/2 in más el desplazamiento sobre el eje del miembro."""
     return max(0.5 + float(m.gap), 0.0)
@@ -344,7 +355,7 @@ def _tab_geometry(ctx, tag):
         ctx.notes.append(f"{ctx.m.name}: caben {fit} pernos en {hmax:.1f} in; se dibujan {fit} de {n}.")
         n = fit
         H = min(H, (n - 1) * s + 3.0) if ctx.op.tab_H <= 0 else H
-    lat = (_halfw(shp) + t / 2.0) if _is_open(shp) else 0.0
+    lat = _halfw(shp) + t / 2.0                                       # la placa va contra el alma de un perfil abierto o contra la pared lateral de un tubo
     Lp = Wd
     ty = float(getattr(ctx.op, 'tab_y', 0.0))
     tyc = 0.0                                                      # centro de la placa respecto del eje de la viga (los pernos siguen al eje de la viga)
@@ -409,14 +420,9 @@ def _tab_geometry(ctx, tag):
     if ctx.op.tab_H <= 0 or True:
         pass
     zs = [ty + (i - (n - 1) / 2.0) * s for i in range(n)]
-    if _is_open(shp):
-        grip = [(name, 0.0, t), (ctx.partname, t, t + shp.tw)]
-        p0 = lat + t / 2.0
-        nut = t + shp.tw
-    else:
-        grip = [(ctx.partname, 0.0, shp.bf)]
-        p0 = shp.bf / 2.0
-        nut = shp.bf
+    grip = [(name, 0.0, t), (ctx.partname, t, t + shp.tw)]          # perfil abierto: el alma; tubo: la pared lateral
+    p0 = lat + t / 2.0
+    nut = t + shp.tw
     welded_beam = ctx.op.beam_conn == "Soldada" and _is_open(shp)
     k = 0
     for j in range(cols):
@@ -481,12 +487,17 @@ def _dang_geometry(ctx, tag):
         pr.o = tuple(map(float, ctx.Q))
         ctx.parts.append(Part(f"Angulo {tag}-{k + 1}", "angle", f"Angulo L {lo:g}x{la:g}x{t:g}", Fy, Fu, [pr], t=t))
     zs = [(i - (n - 1) / 2.0) * s for i in range(n)]
-    grip = [(f"Angulo {tag}-1", 0.0, t), (ctx.partname, t, t + 2 * l0), (f"Angulo {tag}-2", t + 2 * l0, 2 * t + 2 * l0)]
+    st = float(getattr(ctx, "sup_t", 1.0 - t)) if ctx.main_name else 1.0 - t              # pared del principal que atraviesan los pernos de las piernas salientes
+    if _is_open(shp):
+        grip = [(f"Angulo {tag}-1", 0.0, t), (ctx.partname, t, t + 2 * l0), (f"Angulo {tag}-2", t + 2 * l0, 2 * t + 2 * l0)]
+    else:                                                          # tubo: el perno cruza las dos paredes laterales
+        tw_ = float(shp.tw)
+        grip = [(f"Angulo {tag}-1", 0.0, t), (ctx.partname, t, t + tw_), (ctx.partname, t + 2 * l0 - tw_, t + 2 * l0), (f"Angulo {tag}-2", t + 2 * l0, 2 * t + 2 * l0)]
     for i, z in enumerate(zs):
         ctx.bolts.append(_bolt(f"{tag}-B{i + 1}", ctx.at(sb, l0 + t, z), -ctx.sx, ctx.db, 0.0, 2 * t + 2 * l0, grip, ctx.op.bolt_grade))
         for k, sg in enumerate((1, -1)):                # pernos de las alas salientes hacia el soporte
-            ctx.bolts.append(_bolt(f"{tag}-S{i + 1}{k + 1}", ctx.at(t, sg * (l0 + lo * 0.62), z), -ctx.dir, ctx.db, 0.0, t + 1.0,
-                                   [(f"Angulo {tag}-{k + 1}", 0.0, t)], ctx.op.bolt_grade))
+            ctx.bolts.append(_bolt(f"{tag}-S{i + 1}{k + 1}", ctx.at(t, sg * (l0 + lo * 0.62), z), -ctx.dir, ctx.db, 0.0, t + st,
+                                   [(f"Angulo {tag}-{k + 1}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
     return la
 
 
@@ -505,8 +516,9 @@ def _seat_geometry(ctx, tag):
     for k, sg in enumerate((1, -1)):
         ctx.bolts.append(_bolt(f"{tag}-A{k + 1}", ctx.at(Lh * 0.62, sg * gauge / 2.0, yb - t), ctx.sy, ctx.db, 0.0, t + (shp.tf if shp.tf > 0 else 0.5),
                                [(f"Asiento {tag}", 0.0, t), (ctx.partname, t, t + (shp.tf if shp.tf > 0 else 0.5))], ctx.op.bolt_grade))
-        ctx.bolts.append(_bolt(f"{tag}-S{k + 1}", ctx.at(t, sg * gauge / 2.0, yb - Lv * 0.6), -ctx.dir, ctx.db, 0.0, t + 1.0,
-                               [(f"Asiento {tag}", 0.0, t)], ctx.op.bolt_grade))
+        st = float(getattr(ctx, "sup_t", 1.0)) if ctx.main_name else 1.0
+        ctx.bolts.append(_bolt(f"{tag}-S{k + 1}", ctx.at(t, sg * gauge / 2.0, yb - Lv * 0.6), -ctx.dir, ctx.db, 0.0, t + st,
+                               [(f"Asiento {tag}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
     return max(g, 0.5)
 
 
@@ -588,10 +600,11 @@ def _endplate_geometry(ctx, tag, extended):
     pr = _plate_prism(poly, ctx.Q - ctx.dir * (-EMBED * 0.0), ctx.sx, ctx.sy, 0.0, t)      # U×V = sx×sy = dir: extruye hacia el miembro
     Fy, Fu = _steel(ctx.op.plate_steel, True)
     ctx.parts.append(Part(f"Placa extrema {tag}", "plate", f"Placa extrema PL {t:g}", Fy, Fu, [pr], t=t))
+    st = float(getattr(ctx, "sup_t", 1.0)) if ctx.main_name else 1.0
     for i, v in enumerate(rows):
         for k, sg in enumerate((1, -1)):
-            ctx.bolts.append(_bolt(f"{tag}-B{i + 1}{k + 1}", ctx.at(t, sg * (gb / 2.0 if not hollow else wide / 2.0 - 1.25), v), -ctx.dir, ctx.db, 0.0, t + 1.0,
-                                   [(f"Placa extrema {tag}", 0.0, t)], ctx.op.bolt_grade))
+            ctx.bolts.append(_bolt(f"{tag}-B{i + 1}{k + 1}", ctx.at(t, sg * (gb / 2.0 if not hollow else wide / 2.0 - 1.25), v), -ctx.dir, ctx.db, 0.0, t + st,
+                                   [(f"Placa extrema {tag}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
     ctx.welds += beam_end_welds(ctx, tag, f"Placa extrema {tag}", t)           # soldadura de la viga a la placa, con el tipo elegido por cara
     return t
 
@@ -602,11 +615,11 @@ def _weld_geometry(ctx, tag):
     if _is_open(shp):
         _tab_geometry(ctx, tag)
     if ctx.main_name:
-        ctx.welds += beam_end_welds(ctx, f"{tag}f", ctx.main_name, 0.12, faces=("top", "bot"))      # alas soldadas al soporte con el tipo elegido por ala
+        ctx.welds += beam_end_welds(ctx, f"{tag}f", ctx.main_name, 0.06, faces=("top", "bot"))      # alas soldadas al soporte con el tipo elegido por ala
     return 0.12
 
 
-def _continuity(ctx, nd, tag, main_frame_, mshape, t):
+def _continuity(ctx, nd, tag, main_frame_, mshape, t, wsize=0.25, welds=None):
     """Placas de continuidad dentro de una columna I frente a las alas de la viga que llega a su ala (operacion «Placas de continuidad»)."""
     if mshape.kind != W_SHAPE:
         return []
@@ -626,7 +639,18 @@ def _continuity(ctx, nd, tag, main_frame_, mshape, t):
             y0, y1 = -(mshape.d / 2.0 - mshape.tf), (mshape.d / 2.0 - mshape.tf)
             poly = [(min(x0, x1), y0), (max(x0, x1), y0), (max(x0, x1), y1), (min(x0, x1), y1)]
             pr = Prism(poly=poly, o=tuple(map(float, A * (zc - t / 2.0))), U=tuple(map(float, msx)), V=tuple(map(float, msy)), w0=0.0, w1=t)
-            out.append(Part(f"Continuidad {tag}-{k + 1}{j + 1}", "stiff", f"Placa de continuidad PL {t:g}", Fy, Fu, [pr], t=t))
+            nm = f"Continuidad {tag}-{k + 1}{j + 1}"
+            out.append(Part(nm, "stiff", f"Placa de continuidad PL {t:g}", Fy, Fu, [pr], t=t))
+            if welds is not None and ctx.main_name:                # cordones al alma y a la cara interna de las dos alas, por las dos caras de la placa
+                zc_ = A * zc
+                yin = mshape.d / 2.0 - mshape.tf
+                for sz, nA in ((t / 2.0, A), (-t / 2.0, -A)):
+                    base_ = A * (zc + sz)
+                    for (pa, pb, nB_) in ((base_ + msx * x0 + msy * y0, base_ + msx * x0 + msy * y1, msx * sg),                    # contra el alma
+                                          (base_ + msx * x0 + msy * y1, base_ + msx * x1 + msy * y1, -msy),                       # contra el ala superior
+                                          (base_ + msx * x0 + msy * y0, base_ + msx * x1 + msy * y0, msy)):                       # contra el ala inferior
+                        welds.append(Weld(f"{nm}-W{len(welds) + 1}", nm, ctx.main_name, tuple(map(float, pa)), tuple(map(float, pb)), tuple(map(float, nA * (1 if sz > 0 else 1))),
+                                          tuple(map(float, nB_)), float(wsize), 70.0, f"C{tag}"))
     return out
 
 
@@ -769,17 +793,17 @@ def _gusset_outline(ctx):
     dm = max(min(shp.d if not shp.is_round else shp.d, 16.0), 4.0)
     hb = op.gus_hb if op.gus_hb > 0 else max(dm * 1.05, 7.0)
     hm = op.gus_hm if op.gus_hm > 0 else max(dm * 0.9, 5.0)
+    if shp.kind == HSS_RECT and op.gus_hm <= 0:                  # un tubo con ranura: la cartela atraviesa sus paredes
+        hm = max(hm, float(shp.d) + 1.0)
+        hb = max(hb, hm)
     rows = max(1, int(op.n_bolts))
     s = max(op.bolt_s, 2.5)
     ov = (rows - 1) * s + 3.0 + 1.0
     push = float(getattr(ctx, "push", 0.0))                      # el miembro inclinado se aleja del principal hasta que su sección no lo toque
     gl = (2.0 if op.kind == OP_GUSSET else 6.0) + push
-    tip = gl + (ov if op.kind == OP_GUSSET else 0.0)
+    tip = gl + (ov if op.kind == OP_GUSSET else 4.0)             # la cartela entra en el miembro (traslape): pernos o cordones
     if op.gus_L > 0:
-        if op.kind == OP_GUSSET:
-            tip = op.gus_L                                       # la cartela se alarga, el miembro queda donde estaba
-        else:
-            gl = tip = op.gus_L                                  # soldada: el miembro termina donde termina la cartela
+        tip = max(op.gus_L, gl + 1.0)                            # largo de la cartela desde el apoyo; el miembro queda donde estaba
     cut = min(max(op.gus_cut, 0.0), hm / 2.0, max(tip, 0.1))
     pts = [ctx.at(-EMBED, 0.0, -hb / 2.0), ctx.at(-EMBED, 0.0, hb / 2.0)]
     if cut > 1e-6:
@@ -936,6 +960,61 @@ def _merge_segments(segs):
     return out
 
 
+def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull):
+    """Miembro soldado a la cartela: cordones por los bordes de la cartela sobre el alma del miembro (perfil abierto) o por las ranuras de las paredes (tubo)."""
+    _, gl, _ov, hm = _gusset_outline(c)
+    tip = gl + 4.0
+    if c.op.gus_L > 0:
+        tip = max(c.op.gus_L, gl + 1.0)
+    shp = c.shape
+    wsz = float(c.op.weld_size)
+    name = f"Cartela {gi + 1}"
+    P0 = g["P0"]
+    if _is_open(shp):
+        tpl = [(P0 + e1 * x + e2 * y) for (x, y) in hull]
+        sy_ = [(float(np.dot(q - c.Q, c.dir)), float(np.dot(q - c.Q, c.sy))) for q in tpl]
+        k = 0
+        for i in range(len(hull)):
+            a, b = i, (i + 1) % len(hull)
+            (sa, _ya), (sb, _yb) = sy_[a], sy_[b]
+            lo, hi = min(sa, sb), max(sa, sb)
+            if hi < gl - 1e-6 or lo > tip + 1e-6:
+                continue
+            if abs(sb - sa) < 1e-6:
+                if abs(sa - tip) > 0.05 or abs(sa - gl) < 1e-6:      # solo el borde de la punta
+                    continue
+                ta, tb = 0.0, 1.0
+            else:
+                ta, tb = (max(gl, lo) - sa) / (sb - sa), (min(tip, hi) - sa) / (sb - sa)
+                ta, tb = max(0.0, min(1.0, ta)), max(0.0, min(1.0, tb))
+                if ta > tb:
+                    ta, tb = tb, ta
+            pa, pb = hull[a], hull[b]
+            qa = (pa[0] + (pb[0] - pa[0]) * ta, pa[1] + (pb[1] - pa[1]) * ta)
+            qb = (pa[0] + (pb[0] - pa[0]) * tb, pa[1] + (pb[1] - pa[1]) * tb)
+            if math.dist(qa, qb) < 0.3:
+                continue
+            ed = np.array([pb[0] - pa[0], pb[1] - pa[1]])
+            nrm2 = np.array([ed[1], -ed[0]]) / max(float(np.linalg.norm(ed)), 1e-12)           # hacia afuera de la cartela (contorno CCW)
+            nA = unit(e1 * nrm2[0] + e2 * nrm2[1])
+            k += 1
+            mdl.welds.append(Weld(f"{name}-M{c.m.name}{k}", name, c.partname, tuple(map(float, P0 + e1 * qa[0] + e2 * qa[1] + n * (lat - t / 2.0))),
+                                  tuple(map(float, P0 + e1 * qb[0] + e2 * qb[1] + n * (lat - t / 2.0))), tuple(map(float, nA)), tuple(map(float, n)), wsz, 70.0, f"G{gi + 1}{c.m.name}"))
+    elif shp.kind == HSS_RECT:
+        u0 = float(np.dot(P0 + n * lat - c.Q, c.sx))
+        for sy_sign in (1.0, -1.0):
+            for sg in (1.0, -1.0):                                   # las dos caras de la cartela en la ranura de cada pared
+                pa = c.Q + c.dir * gl + c.sx * (u0 + sg * t / 2.0) + c.sy * (sy_sign * shp.d / 2.0)
+                pb = c.Q + c.dir * tip + c.sx * (u0 + sg * t / 2.0) + c.sy * (sy_sign * shp.d / 2.0)
+                mdl.welds.append(Weld(f"{name}-M{c.m.name}{'a' if sy_sign > 0 else 'b'}{'1' if sg > 0 else '2'}", name, c.partname, tuple(map(float, pa)), tuple(map(float, pb)),
+                                      tuple(map(float, c.sx * sg)), tuple(map(float, c.sy * sy_sign)), wsz, 70.0, f"G{gi + 1}{c.m.name}"))
+        tp_ = next((q for q in mdl.parts if q.name == c.partname), None)
+        if tp_ is not None:
+            _slot_tube(tp_, c, u0, t + 0.12, tip + 0.5)
+    else:
+        mdl.notes.append(f"{c.m.name}: la soldadura de la cartela a un miembro de esa sección no se dibuja.")
+
+
 def _build_gussets(ctxs, nd, mdl):
     for gi, g in enumerate(_gusset_members(ctxs, nd)):
         n = g["n"]
@@ -1000,6 +1079,7 @@ def _build_gussets(ctxs, nd, mdl):
                                       tuple(map(float, n * sg)), tuple(map(float, nB)), wsz, 70.0, f"G{gi + 1}"))
         for c in g["items"]:
             if c.op.kind != OP_GUSSET:
+                _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull)
                 continue
             m, shp = c.m, c.shape
             _, gl, ov, hm = _gusset_outline(c)
@@ -1289,6 +1369,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         align = None
         for k, cop in enumerate(conns or [None]):                 # cada operacion de conexion del miembro se arma en el orden de la lista
             c = _Ctx(m, cop, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
+            c.sup_t = _support_wall(nd, m, mshape)
             c.partname = m.name
             c.main_name = nd.main_name
             tag = m.name if k == 0 else f"{m.name}.{k + 1}"
@@ -1298,6 +1379,11 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 if fr is not None:                                 # la placa se alinea con otro elemento (p. ej. la cara de la columna) y no con el miembro conectado
                     c.dir, c.sx, c.sy = fr
                     align = (fr[0], k)
+            if cop is not None and kind in (OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_TAB):
+                sn = support_normal(nd, m)
+                if sn is not None and 0.3 < abs(float(np.dot(dirv, sn))) < 0.985:
+                    mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(abs(float(np.dot(dirv, sn))), 1.0))):.0f}° respecto de la normal): "
+                                     f"«{kind}» se dibuja con sus placas perpendiculares al miembro y no a la cara del apoyo; revise o alinee la placa con «Alinear a».")
             ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
             if kind == OP_TAB:
                 c.extra = tab_extra(nd, m, cop)
@@ -1317,7 +1403,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 ms_k = _weld_geometry(c, tag)
             elif kind in GUSSET_OPS:
                 _, gl, ov, hm = _gusset_outline(c)
-                ms_k = gl if kind == OP_GUSSET else gl + 0.1
+                ms_k = gl
             if ms_k is not None:
                 mss.append(ms_k)
             ctxs_m.append(c)
@@ -1334,7 +1420,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         tag = m.name
         for o in ops:
             if o.kind == OP_CONT and hw:
-                pl = _continuity(c, nd, tag, (A, msx, msy), mshape, o.cont_t)
+                pl = _continuity(c, nd, tag, (A, msx, msy), mshape, o.cont_t, o.weld_size, mdl.welds)
                 if not pl:
                     mdl.notes.append(f"{m.name}: las placas de continuidad solo se dibujan en una columna I a la que llega el miembro por la cara del ala.")
                 mdl.parts += pl
