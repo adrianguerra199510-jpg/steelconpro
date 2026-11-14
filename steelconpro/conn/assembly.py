@@ -219,10 +219,45 @@ class _Ctx:
         self.welds = []
         self.extra = 0.0                # placa simple hasta las alas del principal: retroceso de la viga
         self.main_name = ""
+        # ---- llegada esviada / inclinada: normal de la cara plana del apoyo (None = no se conoce o el apoyo no es plano), retroceso del extremo del miembro
+        #      para librar esa cara y ejes PROPIOS del miembro (dir / sx / sy pasan a ser los de la placa cuando esta se alinea con el apoyo)
+        self.sn = None
+        self.ret = 0.0
+        self.bdir, self.bsx, self.bsy = dirv, sx, sy
+        self.mfr = None                 # (eje, sx, sy) del principal
+        self.aligned = False            # la placa esta alineada con otro elemento (dir / sx / sy son los de la placa)
 
     def at(self, s, lat=0.0, v=0.0):
         """Punto a `s` del apoyo Q a lo largo del miembro, `lat` en sx y `v` en sy."""
         return self.Q + s * self.dir + lat * self.sx + v * self.sy
+
+    @property
+    def oblique(self) -> bool:
+        """El miembro llega a una cara plana del apoyo que NO es perpendicular a su eje (esviaje en planta y / o pendiente)."""
+        return self.sn is not None and float(np.dot(self.bdir, self.sn)) < 0.99995
+
+    def face_s(self, lat=0.0, v=0.0) -> float:
+        """Distancia, a lo largo de `dir`, desde Q hasta el plano de la cara del apoyo en el punto (lat, v) de la seccion del miembro (0 si llega de frente)."""
+        if not self.oblique:
+            return 0.0
+        cn = float(np.dot(self.dir, self.sn))
+        if cn < 0.05:
+            return 0.0
+        return -(lat * float(np.dot(self.sx, self.sn)) + v * float(np.dot(self.sy, self.sn))) / cn
+
+    def on_face(self, lat=0.0, v=0.0):
+        """Punto del plano de la cara del apoyo a (lat, v) de la seccion."""
+        return self.at(self.face_s(lat, v), lat, v)
+
+    def u_face(self, lats, vs) -> float:
+        """Menor distancia a la cara del apoyo en un recuadro (lats, vs): hasta ahi se alarga una placa para despues recortarla contra la cara."""
+        return min(self.face_s(a, b) for a in lats for b in vs) if self.oblique else 0.0
+
+    def clip_support(self, prism):
+        """Recorta el prisma contra el plano de la cara del apoyo (se conserva el lado de afuera): la pieza queda apoyada sin entrar en el soporte."""
+        if self.oblique:
+            prism.cut_planes = list(prism.cut_planes) + [(tuple(map(float, self.Q)), tuple(map(float, -np.asarray(self.sn, float))))]
+        return prism
 
 
 def _n_rows(ctx, hmax, edge=1.5):
@@ -292,6 +327,47 @@ def aligned_frame(nd, m, op, dirv, sx, sy):
     return member_dir(o), osx, osy
 
 
+def flat_support_normal(nd, m):
+    """Normal exterior de la cara PLANA del principal (perfil I o HSS rectangular) en la que llega `m`, o None si el apoyo no es plano, no la toca o el miembro
+    llega casi paralelo a ella (menos de ~11° de la cara: no se puede apoyar una placa)."""
+    ms = shape_of(nd.main_shape)
+    if ms.kind not in (W_SHAPE, HSS_RECT):
+        return None
+    n = support_normal(nd, m)
+    if n is None or float(np.dot(member_dir(m), n)) < 0.2:
+        return None
+    return n
+
+
+def skew_retreat(shp, sn, dirv, sx, sy) -> float:
+    """Cuanto hay que retrasar el extremo (cortado a escuadra) de un miembro que llega esviado a la cara plana de normal `sn` para que ninguna esquina de su
+    seccion toque el plano de la cara (0 si llega de frente)."""
+    if sn is None:
+        return 0.0
+    cn = float(np.dot(dirv, sn))
+    if cn >= 0.99995 or cn < 0.2:
+        return 0.0
+    if shp.is_round or shp.kind == GEN:
+        R = float(shp.d) / 2.0
+        pts = [(R, 0.0), (-R, 0.0), (0.0, R), (0.0, -R), (0.7071 * R, 0.7071 * R), (-0.7071 * R, 0.7071 * R), (0.7071 * R, -0.7071 * R), (-0.7071 * R, -0.7071 * R)]
+    else:
+        pts = [(x, y) for (x0, y0, x1, y1) in shp.rects() for x in (x0, x1) for y in (y0, y1)]
+    sxn, syn = float(np.dot(sx, sn)), float(np.dot(sy, sn))
+    return max(0.0, max(-(a * sxn + b * syn) / cn for (a, b) in pts))
+
+
+def fix_weld_normals(welds):
+    """Los filetes de una placa contra una cara que no le es perpendicular: nA y nB (normales de las dos superficies) dejan de ser ortogonales; el prisma del
+    cordon necesita los dos catetos, cada uno sobre su superficie y perpendiculares al eje del cordon: se proyecta cada normal sobre la superficie de la otra."""
+    for w in welds:
+        a, b = unit(w.nA), unit(w.nB)
+        c = float(np.dot(a, b))
+        if abs(c) < 1e-6 or abs(c) > 0.9995:
+            continue
+        w.nA = tuple(map(float, unit(a - c * b)))
+        w.nB = tuple(map(float, unit(b - c * a)))
+
+
 def tab_extra(nd, m, op) -> float:
     """Placa simple «hasta el interior de las alas»: cuánto se saca la viga del principal (del alma al borde de las alas) para que no choque con ellas.
     0 si no aplica (el principal no es un perfil I o la viga no llega por el alma)."""
@@ -309,17 +385,18 @@ def _tab_split(op, ctx=None) -> bool:
     return bool(op.tab_split or str(op.tab_mode).startswith("Dos placas"))
 
 
-def tab_dims(op, m, shp, db, extra=0.0):
-    """Medidas de la placa simple: (filas, separacion, columnas, separacion entre columnas, alto, ancho, a) en in; `a` = distancia de la soldadura a la primera columna."""
+def tab_dims(op, m, shp, db, extra=0.0, ret=0.0):
+    """Medidas de la placa simple: (filas, separacion, columnas, separacion entre columnas, alto, ancho, a) en in; `a` = distancia de la soldadura a la primera columna.
+    `ret` = retroceso del extremo de la viga por llegar esviada a la cara del apoyo."""
     s = max(op.bolt_s, 3 * db * 0.8)
     n = max(1, int(op.n_bolts))
     g = max(op.bolt_g, 3 * db * 0.8)
     cols = max(1, int(getattr(op, "n_cols", 1)))
-    a = gap_eff(m) + extra + 2.5
+    a = gap_eff(m) + extra + ret + 2.5
     H = op.tab_H if op.tab_H > 0 else (n - 1) * s + 3.0
     Wd = op.tab_W if op.tab_W > 0 else a + (cols - 1) * g + 1.5
     if getattr(op, 'beam_conn', 'Atornillada') == 'Soldada' and op.tab_W <= 0:
-        Wd = gap_eff(m) + extra + 5.0                                  # soldada: la placa se traslapa 5 in sobre el alma de la viga
+        Wd = gap_eff(m) + extra + ret + 5.0                            # soldada: la placa se traslapa 5 in sobre el alma de la viga
     return n, s, cols, g, H, Wd, a
 
 
@@ -343,13 +420,28 @@ def _finish_welds(ctx, n0, t_plate):
 
 
 def _tab_geometry(ctx, tag):
-    """Placa simple sobre la cara del soporte (soldada con filete a ambos lados) y atornillada al alma de la viga: filas × columnas de pernos."""
+    """Placa simple sobre la cara del soporte (soldada con filete a ambos lados) y atornillada al alma de la viga: filas × columnas de pernos.
+    Con la opción «hasta el interior de las alas» (`ctx.extra` > 0) la viga sale hasta el borde de las alas del principal y hay dos disposiciones, según hacia dónde
+    miran las alas del principal: si son perpendiculares al peralte de la viga (viga maestra horizontal) la placa se escalona y llena el espacio entre las alas,
+    soldada a ellas y al alma; si son perpendiculares a su ancho (columna con la viga horizontal) la placa es plana, soldada al alma de la columna, y con
+    «dos placas arriba y abajo» se agregan dos placas horizontales del alma a las alas, a la altura de las alas de la viga."""
     m, shp = ctx.m, ctx.shape
     t = ctx.t
     n_w0 = len(ctx.welds)
     extra = float(getattr(ctx, 'extra', 0.0))
-    n, s, cols, g, H, Wd, a = tab_dims(ctx.op, m, shp, ctx.db, extra)
-    Hf = (float(ctx.mshape.d) - 2.0 * float(ctx.mshape.tf)) if extra > 0 else H      # altura de la placa entre las alas del principal (llena el espacio hasta las alas)
+    ret = float(getattr(ctx, 'ret', 0.0))
+    n, s, cols, g, H, Wd, a = tab_dims(ctx.op, m, shp, ctx.db, extra, ret)
+    msy = ctx.mfr[2] if ctx.mfr is not None else None
+    if extra > 0 and msy is not None:
+        stepped = abs(float(np.dot(ctx.sy, msy))) >= 0.7                          # alas del principal perpendiculares al peralte de la viga: la placa llena el espacio entre ellas
+        columnar = (not stepped) and abs(float(np.dot(ctx.sx, msy))) >= 0.7        # alas perpendiculares al ancho de la viga (columna): placas horizontales
+    else:
+        stepped = columnar = extra > 0
+    two_plates = extra > 0 and _tab_split(ctx.op, ctx)
+    if two_plates and not columnar:
+        ctx.notes.append(f"{m.name}: «dos placas arriba y abajo» solo se arma cuando las alas del principal quedan a los lados de la viga (columna con la viga horizontal); se dibuja una sola placa.")
+        two_plates = False
+    Hf = (float(ctx.mshape.d) - 2.0 * float(ctx.mshape.tf)) if (extra > 0 and (stepped or two_plates)) else H      # espacio libre entre las alas del principal
     hmax = _clear_depth(shp)
     if n > 1 and (n - 1) * s + 2 * 1.0 > hmax + 1e-9:
         fit = max(1, int((hmax - 2.0) / s) + 1)
@@ -360,41 +452,44 @@ def _tab_geometry(ctx, tag):
     Lp = Wd
     ty = float(getattr(ctx.op, 'tab_y', 0.0))
     tyc = 0.0                                                      # centro de la placa respecto del eje de la viga (los pernos siguen al eje de la viga)
-    if extra > 0:                                                  # la placa se centra en el alma del principal, no en el eje de la viga
+    if stepped or two_plates:                                      # la placa se centra en el alma del principal, no en el eje de la viga
         Aax = np.asarray(ctx.dmain_axis, float) if getattr(ctx, 'dmain_axis', None) is not None else None
         qperp = ctx.Q - (Aax * float(np.dot(ctx.Q, Aax)) if Aax is not None else 0.0)
         tyc = -float(np.dot(qperp, ctx.sy))
     ty_p = ty + tyc
     clip = float(ctx.op.tab_clip)
     clip = 0.0 if clip < 0 else clip                                    # recorte opcional de las esquinas junto al soporte
-    if extra > 0:                                                       # placa escalonada: llena el espacio entre las alas y, fuera de ellas, se reduce a la placa de los pernos
-        e = min(extra, Lp - 0.5)
+    lats = (lat - t / 2.0, lat + t / 2.0)
+    x0 = lambda y: ctx.u_face(lats, (y,))                              # noqa: E731  borde de la placa junto a la cara del apoyo (0 si llega de frente; si no, se recorta contra la cara)
+    cn_w = max(float(np.dot(ctx.dir, ctx.sn)), 0.2) if ctx.sn is not None else 1.0
+    e = min(extra / cn_w + min(ctx.face_s(lats[0], 0.0), ctx.face_s(lats[1], 0.0)), Lp - 0.5) if extra > 0 else 0.0   # donde la placa escalonada pasa al ancho de la placa de pernos
+    sep_ = Ht = None
+    if stepped and not two_plates:                                      # placa escalonada: llena el espacio entre las alas y, fuera de ellas, se reduce a la placa de los pernos
         Ht = min(H, Hf) if ctx.op.tab_H <= 0 else H
-        two = _tab_split(ctx.op, ctx)
-        if two:                                                         # la placa de corte se apoya entre las dos placas (soldada a ellas) y sale hacia la viga con su alto de pernos
-            tp_ = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
-            sep_ = float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else (float(shp.d) - float(shp.tf) - tp_ if getattr(shp, "tf", 0) else Ht)   # por defecto, las placas quedan alineadas con el centro de las alas de la viga
-            sep_ = max(sep_, 0.5)
-            Ht = H if ctx.op.tab_H > 0 else min(H, sep_)
-            poly = [(0.0, ty - sep_ / 2), (e, ty - sep_ / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty + sep_ / 2), (0.0, ty + sep_ / 2)]
-        else:
-            poly = [(0.0, ty_p - Hf / 2), (e, ty_p - Hf / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty_p + Hf / 2), (0.0, ty_p + Hf / 2)]
+        poly = [(x0(ty_p - Hf / 2), ty_p - Hf / 2), (e, ty_p - Hf / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty_p + Hf / 2), (x0(ty_p + Hf / 2), ty_p + Hf / 2)]
+        H = Ht
+    elif two_plates:                                                    # la placa de corte se apoya entre las dos placas (soldada a ellas) y sale hacia la viga con su alto de pernos
+        tp_ = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
+        sep_ = float(ctx.op.tp_sep) if ctx.op.tp_sep > 0 else (float(shp.d) - float(shp.tf) - tp_ if getattr(shp, "tf", 0) else H)   # por defecto, las placas quedan alineadas con el centro de las alas de la viga
+        sep_ = max(sep_, 0.5)
+        Ht = H if ctx.op.tab_H > 0 else min(H, sep_)
+        poly = [(x0(ty - sep_ / 2), ty - sep_ / 2), (e, ty - sep_ / 2), (e, ty - Ht / 2), (Lp, ty - Ht / 2), (Lp, ty + Ht / 2), (e, ty + Ht / 2), (e, ty + sep_ / 2), (x0(ty + sep_ / 2), ty + sep_ / 2)]
         H = Ht
     else:
         clip = min(clip, H / 2.0 - 0.1, Lp - 0.1)
+        yl, yh = ty_p - H / 2, ty_p + H / 2
         if clip > 1e-6:
-            poly = [(0.0, ty_p - H / 2 + clip), (clip, ty_p - H / 2), (Lp, ty_p - H / 2), (Lp, ty_p + H / 2), (clip, ty_p + H / 2), (0.0, ty_p + H / 2 - clip)]
+            poly = [(x0(yl + clip), yl + clip), (x0(yl) + clip, yl), (Lp, yl), (Lp, yh), (x0(yh) + clip, yh), (x0(yh - clip), yh - clip)]
         else:
-            poly = [(0.0, ty_p - H / 2), (Lp, ty_p - H / 2), (Lp, ty_p + H / 2), (0.0, ty_p + H / 2)]            # la placa nace en la cara del soporte (x = 0)
-    pr = _plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t)
+            poly = [(x0(yl), yl), (Lp, yl), (Lp, yh), (x0(yh), yh)]            # la placa nace en la cara del soporte (x = 0)
+    pr = ctx.clip_support(_plate_prism(poly, ctx.Q + (lat + t / 2.0) * ctx.sx, ctx.dir, ctx.sy, 0.0, t))
     name = f"Placa {tag}"
     Fy, Fu = _steel(ctx.op.plate_steel, True)
-    two_plates = extra > 0 and _tab_split(ctx.op, ctx)
+    nBs = ctx.sn if ctx.oblique else ctx.dir                            # normal de la cara del apoyo hacia el lado de la viga
     if two_plates:                                                      # dos placas horizontales (como placas de continuidad) a la altura de las alas de la viga: del alma a las alas del principal
         tp = float(ctx.op.tp_t) if ctx.op.tp_t > 0 else t
-        dflt = (float(shp.d) - 2.0 * float(shp.tf)) if getattr(shp, "tf", 0) else H
         sep = sep_                                                                    # distancia libre entre las dos placas (a lo largo del peralte de la viga)
-        e2 = min(extra, Lp - 0.5)
+        e2 = min(max(e, 0.5), Lp - 0.5)
         Aax2 = np.asarray(ctx.dmain_axis, float) if getattr(ctx, 'dmain_axis', None) is not None else None
         qp = ctx.Q - (Aax2 * float(np.dot(ctx.Q, Aax2)) if Aax2 is not None else 0.0)
         lc = -float(np.dot(qp, ctx.sx))                                  # centro del alma del principal respecto del eje de la viga, en sentido lateral
@@ -404,22 +499,21 @@ def _tab_geometry(ctx, tag):
             yc = ty + sgn * (sep / 2.0 + tp / 2.0)                       # la cara interior de la placa queda a «sep / 2» del eje
             ya, yb = sorted((yc - tp / 2.0, yc + tp / 2.0))
             w0, w1 = sorted((wsg * ya, wsg * yb))
-            pp = _plate_prism([(0.0, lc - hw2), (e2, lc - hw2), (e2, lc + hw2), (0.0, lc + hw2)], ctx.Q, ctx.dir, ctx.sx, w0, w1)
+            xl = lambda l_: ctx.u_face((l_,), (ya, yb))                  # noqa: E731
+            pp = ctx.clip_support(_plate_prism([(xl(lc - hw2), lc - hw2), (e2, lc - hw2), (e2, lc + hw2), (xl(lc + hw2), lc + hw2)], ctx.Q, ctx.dir, ctx.sx, w0, w1))
             nm = f"Placa {tag}-{'S' if sgn > 0 else 'I'}"
             ctx.parts.append(Part(nm, "stiff", f"Placa PL {tp:g} × {Hf:g} × {e2:g}", Fy, Fu, [pp], t=tp))
             if ctx.main_name:
                 w2 = float(ctx.op.tp_weld) if ctx.op.tp_weld > 0 else float(ctx.op.weld_size)      # cateto de las placas contra la columna
                 for ysd, nsy in ((ya, -1.0), (yb, 1.0)):                 # cordones por las dos caras de la placa
-                    P0 = ctx.Q + ctx.sy * ysd + ctx.sx * (lc - hw2)       # contra el alma del principal (borde x = 0)
-                    P1 = ctx.Q + ctx.sy * ysd + ctx.sx * (lc + hw2)
-                    ctx.welds.append(Weld(f"{nm}-W{'1' if nsy > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, ctx.sy * nsy)), tuple(map(float, ctx.dir)), w2, 70.0, tag))
+                    P0 = ctx.on_face(lc - hw2, ysd)                      # contra el alma del principal (borde x = 0)
+                    P1 = ctx.on_face(lc + hw2, ysd)
+                    ctx.welds.append(Weld(f"{nm}-W{'1' if nsy > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, ctx.sy * nsy)), tuple(map(float, nBs)), w2, 70.0, tag))
                     for sl, lat_ in ((1.0, lc + hw2), (-1.0, lc - hw2)):   # contra la cara interna de cada ala
-                        P0 = ctx.Q + ctx.sy * ysd + ctx.sx * lat_
-                        ctx.welds.append(Weld(f"{nm}-F{'a' if sl > 0 else 'b'}{'1' if nsy > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, P0 + ctx.dir * e2)),
+                        P0 = ctx.on_face(lat_, ysd)
+                        ctx.welds.append(Weld(f"{nm}-F{'a' if sl > 0 else 'b'}{'1' if nsy > 0 else '2'}", nm, ctx.main_name, tuple(map(float, P0)), tuple(map(float, ctx.at(e2, lat_, ysd))),
                                               tuple(map(float, ctx.sy * nsy)), tuple(map(float, -ctx.sx * sl)), w2, 70.0, tag))
     ctx.parts.append(Part(name, "plate", f"Placa simple PL {t:g} × {max(H, Hf):g} × {Wd:g}", Fy, Fu, [pr], t=t))
-    if ctx.op.tab_H <= 0 or True:
-        pass
     zs = [ty + (i - (n - 1) / 2.0) * s for i in range(n)]
     grip = [(name, 0.0, t), (ctx.partname, t, t + shp.tw)]          # perfil abierto: el alma; tubo: la pared lateral
     p0 = lat + t / 2.0
@@ -434,59 +528,112 @@ def _tab_geometry(ctx, tag):
             ctx.bolts.append(_bolt(f"{tag}-B{k}", ctx.at(a + j * g, p0, z), -ctx.sx, ctx.db, 0.0, nut, grip, ctx.op.bolt_grade))
     if welded_beam:                                                # filetes de la placa al alma de la viga: borde superior, borde inferior y borde del extremo
         wv = float(ctx.op.weld_size)
-        s0_ = gap_eff(m) + extra
+        s0_ = gap_eff(m) + extra + ret
         yt, yb = ty + H / 2.0, ty - H / 2.0
         webf = _halfw(shp)                                          # cara del alma por la que se apoya la placa
         for k_, (vv, nsy) in enumerate(((yt, 1.0), (yb, -1.0))):
-            P0 = ctx.Q + ctx.dir * s0_ + ctx.sx * webf + ctx.sy * vv
-            P1 = ctx.Q + ctx.dir * Wd + ctx.sx * webf + ctx.sy * vv
+            P0 = ctx.at(s0_, webf, vv)
+            P1 = ctx.at(Wd, webf, vv)
             ctx.welds.append(Weld(f"{name}-V{k_ + 1}", name, ctx.partname, tuple(map(float, P0)), tuple(map(float, P1)), tuple(map(float, ctx.sy * nsy)), tuple(map(float, ctx.sx)), wv, 70.0, tag))
-        Pa = ctx.Q + ctx.dir * Wd + ctx.sx * webf + ctx.sy * yb
-        Pb = ctx.Q + ctx.dir * Wd + ctx.sx * webf + ctx.sy * yt
+        Pa = ctx.at(Wd, webf, yb)
+        Pb = ctx.at(Wd, webf, yt)
         ctx.welds.append(Weld(f"{name}-V3", name, ctx.partname, tuple(map(float, Pa)), tuple(map(float, Pb)), tuple(map(float, ctx.dir)), tuple(map(float, ctx.sx)), wv, 70.0, tag))
     # soldaduras de filete en la cara del soporte, una a cada lado de la placa
     if ctx.main_name:
         w = float(ctx.op.weld_size)
         for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-            hw_ = (sep_ if two_plates else (Hf if extra > 0 else H)) / 2.0
+            hw_ = (sep_ if two_plates else (Hf if stepped else H)) / 2.0
             cy_ = ty if two_plates else ty_p
-            p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (cy_ - hw_ + (0.0 if extra > 0 else clip))
-            p1_ = ctx.Q + lat_face * ctx.sx + ctx.sy * (cy_ + hw_ - (0.0 if extra > 0 else clip))
+            cl_ = 0.0 if (stepped or two_plates) else clip
+            p0_ = ctx.on_face(lat_face, cy_ - hw_ + cl_)
+            p1_ = ctx.on_face(lat_face, cy_ + hw_ - cl_)
             ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
-                                  tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.dir)), w, 70.0, tag))
+                                  tuple(map(float, ctx.sx * sg)), tuple(map(float, nBs)), w, 70.0, tag))
         if two_plates:                                              # la placa de corte se suelda a la cara interior de cada placa, por sus dos caras
-            e2_ = min(extra, Lp - 0.5)
+            e2_ = min(max(e, 0.5), Lp - 0.5)
             for vs, nfl in ((ty + sep_ / 2.0, -1.0), (ty - sep_ / 2.0, 1.0)):
                 for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-                    p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * vs
-                    ctx.welds.append(Weld(f"{name}-P{'S' if nfl < 0 else 'I'}{'a' if sg > 0 else 'b'}", name, f"Placa {tag}-{'S' if nfl < 0 else 'I'}", tuple(map(float, p0_)), tuple(map(float, p0_ + ctx.dir * e2_)),
+                    p0_ = ctx.on_face(lat_face, vs)
+                    ctx.welds.append(Weld(f"{name}-P{'S' if nfl < 0 else 'I'}{'a' if sg > 0 else 'b'}", name, f"Placa {tag}-{'S' if nfl < 0 else 'I'}", tuple(map(float, p0_)), tuple(map(float, ctx.at(e2_, lat_face, vs))),
                                           tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * nfl)), w, 70.0, tag))
-        if extra > 0 and not two_plates:                           # filetes de los bordes superior e inferior de la placa contra la cara interna de las alas del principal
+        if stepped and not two_plates:                             # filetes de los bordes superior e inferior de la placa contra la cara interna de las alas del principal
             for k_, (vs, nfl) in enumerate(((ty_p + Hf / 2.0, -1.0), (ty_p - Hf / 2.0, 1.0))):
                 for sg, lat_face in ((1.0, lat + t / 2.0), (-1.0, lat - t / 2.0)):
-                    p0_ = ctx.Q + lat_face * ctx.sx + ctx.sy * vs
-                    p1_ = p0_ + ctx.dir * max(min(extra, Lp - 0.5), 0.1)
+                    p0_ = ctx.on_face(lat_face, vs)
+                    p1_ = ctx.at(max(e, ctx.face_s(lat_face, vs) + 0.1), lat_face, vs)
                     ctx.welds.append(Weld(f"{name}-F{k_ + 1}{'a' if sg > 0 else 'b'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
                                           tuple(map(float, ctx.sx * sg)), tuple(map(float, ctx.sy * nfl)), w, 70.0, tag))
     _finish_welds(ctx, n_w0, t)
     return Lp
 
 
+def _face_room(ctx, P, e) -> float:
+    """Distancia desde el punto `P` de la cara del apoyo hasta el borde de esa cara del principal, siguiendo la dirección `e` (contenida en la cara).
+    1e9 si no se conoce el contorno (principal redondo o libre)."""
+    if ctx.mfr is None or ctx.mshape.is_round or ctx.mshape.kind not in (W_SHAPE, HSS_RECT):
+        return 1e9
+    _A, msx, msy = ctx.mfr
+    n = ctx.sn if ctx.sn is not None else ctx.dir
+    Pi = np.asarray(P, float) - np.asarray(n, float) * 0.02                       # un poco hacia adentro del material
+    o2 = (float(np.dot(Pi, msx)), float(np.dot(Pi, msy)))
+    d2 = (float(np.dot(e, msx)), float(np.dot(e, msy)))
+    if math.hypot(*d2) < 1e-9:
+        return 1e9
+    for r in ctx.mshape.rects():
+        if r[0] - 1e-6 <= o2[0] <= r[2] + 1e-6 and r[1] - 1e-6 <= o2[1] <= r[3] + 1e-6:
+            sx_ = ray_exit([r], o2, d2)
+            return float(sx_) if sx_ is not None else 0.0
+    return 0.0
+
+
+def _on_support(ctx, P, margin=0.0) -> bool:
+    """El punto `P` (sobre la cara del apoyo) cae sobre material del principal (perfil I o HSS rectangular), a más de `margin` del borde de su cara.
+    True si no se conoce el contorno del principal (redondo o libre)."""
+    if ctx.mfr is None or ctx.mshape.is_round or ctx.mshape.kind not in (W_SHAPE, HSS_RECT) or ctx.sn is None:
+        return True
+    _A, msx, msy = ctx.mfr
+    sn_ = np.asarray(ctx.sn, float)
+    Pi = np.asarray(P, float) - sn_ * float(np.dot(np.asarray(P, float) - ctx.Q, sn_)) - sn_ * 0.02          # se lleva al plano de la cara y un poco hacia adentro
+    x, y = float(np.dot(Pi, msx)), float(np.dot(Pi, msy))
+    return any(r[0] + margin <= x <= r[2] - margin and r[1] + margin <= y <= r[3] - margin for r in ctx.mshape.rects())
+
+
 def _dang_geometry(ctx, tag):
+    """Doble ángulo: dos ángulos con una pierna contra el alma de la viga (atornillada) y la otra contra la cara del soporte (atornillada).  Si la viga llega
+    esviada o inclinada, la pierna del soporte se apoya (plana) en la cara y la pierna del alma sigue el alma de la viga: son dos prismas del mismo ángulo."""
     m, shp = ctx.m, ctx.shape
     t = ctx.t
     n, s = _n_rows(ctx, _clear_depth(shp))
-    sb = gap_eff(m) + 2.5
-    la = ctx.op.dang_la if ctx.op.dang_la > 0 else sb + 1.5
+    ret = float(ctx.ret)
+    sb = gap_eff(m) + ret + 2.5
+    la = (ctx.op.dang_la + ret) if ctx.op.dang_la > 0 else sb + 1.5
     lo = max(ctx.op.dang_lo, 1.5)
     H = ctx.op.dang_H if ctx.op.dang_H > 0 else (n - 1) * s + 3.0
     l0 = _halfw(shp)
     Fy, Fu = _steel(ctx.op.plate_steel, True)
+    sn = ctx.sn if ctx.oblique else ctx.dir
+    legs = []                                                       # (a lo largo de la cara disponible, origen de la pierna del soporte, eje a lo largo de la cara, eje 'alto')
     for k, sg in enumerate((1, -1)):
-        poly = [(-EMBED, sg * l0), (la, sg * l0), (la, sg * (l0 + t)), (t, sg * (l0 + t)), (t, sg * (l0 + lo)), (-EMBED, sg * (l0 + lo))]
-        pr = _plate_prism(poly, ctx.Q, ctx.dir, ctx.sx, -H / 2.0, H / 2.0)      # U×V = dir×sx = sy
-        pr.o = tuple(map(float, ctx.Q))
-        ctx.parts.append(Part(f"Angulo {tag}-{k + 1}", "angle", f"Angulo L {lo:g}x{la:g}x{t:g}", Fy, Fu, [pr], t=t))
+        Pc = ctx.on_face(sg * l0, 0.0)                              # donde la cara interior de la pierna del alma toca la cara del soporte
+        ef = unit(sg * ctx.sx - float(np.dot(sg * ctx.sx, sn)) * np.asarray(sn, float))
+        room = _face_room(ctx, Pc, ef) if ctx.main_name else 1e9
+        lo_k = min(lo, room)
+        legs.append((lo_k, room, Pc, ef))
+        if lo_k < lo - 1e-6:
+            ctx.notes.append(f"{m.name}: la pierna del ángulo al soporte se acorta de {lo:g} a {lo_k:g} in: la cara del principal no es más ancha.")
+        if not ctx.oblique:
+            emb = EMBED if lo_k >= 2.0 else 0.0                     # sin pernos al soporte (cara muy angosta) el ángulo no se mete en él
+            poly = [(-emb, sg * l0), (la, sg * l0), (la, sg * (l0 + t)), (t, sg * (l0 + t)), (t, sg * (l0 + lo_k)), (-emb, sg * (l0 + lo_k))]
+            pr = _plate_prism(poly, ctx.Q, ctx.dir, ctx.sx, -H / 2.0, H / 2.0)      # U×V = dir×sx = sy
+            prs = [pr]
+        else:
+            ub = ctx.u_face((sg * l0, sg * (l0 + t)), (-H / 2.0, H / 2.0))
+            web = ctx.clip_support(_plate_prism([(ub, sg * l0), (la, sg * l0), (la, sg * (l0 + t)), (ub, sg * (l0 + t))], ctx.Q, ctx.dir, ctx.sx, -H / 2.0, H / 2.0))
+            U = ef
+            V = np.cross(sn, U)                                         # U×V = sn: la pierna se extruye hacia afuera del soporte
+            lg = _plate_prism([(0.0, -H / 2.0), (lo_k, -H / 2.0), (lo_k, H / 2.0), (0.0, H / 2.0)], Pc, U, V, 0.0, t)
+            prs = [web, lg]
+        ctx.parts.append(Part(f"Angulo {tag}-{k + 1}", "angle", f"Angulo L {lo_k:g}x{la:g}x{t:g}", Fy, Fu, prs, t=t))
     zs = [(i - (n - 1) / 2.0) * s for i in range(n)]
     st = float(getattr(ctx, "sup_t", 1.0 - t)) if ctx.main_name else 1.0 - t              # pared del principal que atraviesan los pernos de las piernas salientes
     if _is_open(shp):
@@ -497,30 +644,78 @@ def _dang_geometry(ctx, tag):
     for i, z in enumerate(zs):
         ctx.bolts.append(_bolt(f"{tag}-B{i + 1}", ctx.at(sb, l0 + t, z), -ctx.sx, ctx.db, 0.0, 2 * t + 2 * l0, grip, ctx.op.bolt_grade))
         for k, sg in enumerate((1, -1)):                # pernos de las alas salientes hacia el soporte
-            ctx.bolts.append(_bolt(f"{tag}-S{i + 1}{k + 1}", ctx.at(t, sg * (l0 + lo * 0.62), z), -ctx.dir, ctx.db, 0.0, t + st,
+            lo_k, room, Pc, ef = legs[k]
+            if lo_k < 2.0 and ctx.main_name:
+                if i == 0:
+                    ctx.notes.append(f"{m.name}: la cara del principal es demasiado angosta para atornillar la pierna del ángulo {k + 1} al soporte.")
+                continue
+            a_b = max(min(0.62 * lo_k, room - 1.25), min(1.0, lo_k / 2.0))
+            if not ctx.oblique:
+                p = ctx.at(t, sg * (l0 + a_b), z)
+            else:
+                p = Pc + ef * a_b + np.cross(sn, ef) * z + np.asarray(sn, float) * t
+            ax = -np.asarray(sn, float)
+            ctx.bolts.append(_bolt(f"{tag}-S{i + 1}{k + 1}", p, ax, ctx.db, 0.0, t + st,
                                    [(f"Angulo {tag}-{k + 1}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
     return la
 
 
 def _seat_geometry(ctx, tag):
+    """Ángulo de asiento: pierna horizontal bajo el ala inferior de la viga (atornillada a ella) y pierna vertical contra la cara del apoyo (atornillada a él).
+    Si la viga llega esviada o inclinada, la pierna vertical se apoya plana en la cara y la horizontal sigue a la viga (dos prismas del mismo ángulo)."""
     m, shp = ctx.m, ctx.shape
     t = max(ctx.t, 0.375)
     Lh, Lv = max(ctx.op.seat_Lh, 2.0), max(ctx.op.seat_Lv, 2.0)
     W = ctx.op.seat_W if ctx.op.seat_W > 0 else min(max(shp.bf if shp.bf > 0 else 6.0, 4.0), 12.0)
     yb = -shp.d / 2.0
     g = gap_eff(m)
-    poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh, yb - t), (Lh, yb), (-EMBED, yb)]
-    pr = _plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0)        # U×V = dir×sy = -sx (simetrico)
+    ret = float(ctx.ret)
+    ofs = ret + max(float(m.gap), 0.0)                                              # el extremo de la viga se retrasa por el esviaje y por el desplazamiento del usuario: el ángulo lo sigue
     Fy, Fu = _steel(ctx.op.plate_steel, True)
-    ctx.parts.append(Part(f"Asiento {tag}", "angle", f"Angulo de asiento L {Lh:g}x{Lv:g}x{t:g}", Fy, Fu, [pr], t=t))
+    st = float(getattr(ctx, "sup_t", 1.0)) if ctx.main_name else 1.0
     gauge = min(max(W - 2.5, 1.5), 4.0)
+    if ctx.main_name:                                              # la pierna vertical no debe salirse de la cara del principal (p. ej. contra el alma de una viga maestra)
+        sn0 = ctx.sn if ctx.oblique else ctx.dir
+        down = -(ctx.sy - float(np.dot(ctx.sy, sn0)) * np.asarray(sn0, float))
+        if float(np.linalg.norm(down)) > 1e-6:
+            room_v = _face_room(ctx, ctx.on_face(0.0, yb), unit(down))
+            if room_v < Lv - 1e-6:
+                ctx.notes.append(f"{m.name}: la pierna vertical del asiento se acorta de {Lv:g} a {max(room_v, 1.0):.2f} in: la cara del principal no es más alta.")
+                Lv = max(room_v, 1.0)
+    if not ctx.oblique:
+        poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh + ofs, yb - t), (Lh + ofs, yb), (-EMBED, yb)]
+        prs = [_plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0)]        # U×V = dir×sy = -sx (simetrico)
+    else:
+        sn = np.asarray(ctx.sn, float)
+        ub = ctx.u_face((-W / 2.0, W / 2.0), (yb - t, yb))
+        horiz = ctx.clip_support(_plate_prism([(ub, yb - t), (Lh + ofs, yb - t), (Lh + ofs, yb), (ub, yb)], ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0))
+        perp = ctx.sx - float(np.dot(ctx.sx, sn)) * sn
+        cphi = max(float(np.linalg.norm(perp)), 0.2)                                  # el ancho del asiento sobre la cara es W / cos(esviaje)
+        Wf = W / cphi
+        ef = unit(perp)
+        C = ctx.on_face(0.0, yb)                                                      # punto de la cara donde la pierna horizontal tiene su cara superior
+        Vf = np.cross(sn, ef)
+        up = 1.0 if float(np.dot(Vf, ctx.sy)) >= 0 else -1.0                           # sentido «arriba» del eje V de la pierna
+        b0, b1 = (-Lv, 0.0) if up > 0 else (0.0, Lv)
+        vert = _plate_prism([(-Wf / 2.0, b0), (Wf / 2.0, b0), (Wf / 2.0, b1), (-Wf / 2.0, b1)], C, ef, Vf, 0.0, t)
+        prs = [horiz, vert]
+        room = min(_face_room(ctx, C, ef), _face_room(ctx, C, -ef)) if ctx.main_name else 1e9
+        if room < Wf / 2.0 - 1e-6:
+            ctx.notes.append(f"{m.name}: el asiento ({Wf:.1f} in sobre la cara) es más ancho que la cara del principal.")
+    ctx.parts.append(Part(f"Asiento {tag}", "angle", f"Angulo de asiento L {Lh:g}x{Lv:g}x{t:g}", Fy, Fu, prs, t=t))
     for k, sg in enumerate((1, -1)):
-        ctx.bolts.append(_bolt(f"{tag}-A{k + 1}", ctx.at(Lh * 0.62, sg * gauge / 2.0, yb - t), ctx.sy, ctx.db, 0.0, t + (shp.tf if shp.tf > 0 else 0.5),
+        ctx.bolts.append(_bolt(f"{tag}-A{k + 1}", ctx.at(Lh * 0.62 + ofs, sg * gauge / 2.0, yb - t), ctx.sy, ctx.db, 0.0, t + (shp.tf if shp.tf > 0 else 0.5),
                                [(f"Asiento {tag}", 0.0, t), (ctx.partname, t, t + (shp.tf if shp.tf > 0 else 0.5))], ctx.op.bolt_grade))
-        st = float(getattr(ctx, "sup_t", 1.0)) if ctx.main_name else 1.0
-        ctx.bolts.append(_bolt(f"{tag}-S{k + 1}", ctx.at(t, sg * gauge / 2.0, yb - Lv * 0.6), -ctx.dir, ctx.db, 0.0, t + st,
+        if not ctx.oblique:
+            p, ax = ctx.at(t, sg * gauge / 2.0, yb - Lv * 0.6), -ctx.dir
+        else:
+            p, ax = C + ef * (sg * gauge / 2.0) + Vf * (-Lv * 0.6 * up) + sn * t, -sn
+        if ctx.main_name and not _on_support(ctx, p + ax * t):
+            ctx.notes.append(f"{m.name}: la cara del principal no alcanza para atornillar el asiento al soporte (perno {k + 1}).")
+            continue
+        ctx.bolts.append(_bolt(f"{tag}-S{k + 1}", p, ax, ctx.db, 0.0, t + st,
                                [(f"Asiento {tag}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
-    return max(g, 0.5)
+    return 0.5 + ret
 
 
 def endplate_layout(op, shp, extended):
@@ -546,9 +741,11 @@ def endplate_layout(op, shp, extended):
     return {"t": t, "hh": hh, "gb": gb, "wide": wide, "rows": rows, "hollow": hollow, "bf": bf}
 
 
-def beam_end_welds(ctx, tag, B_name, s_face, faces=("top", "bot", "web")):
+def beam_end_welds(ctx, tag, B_name, s_face, faces=("top", "bot", "web"), plane=None):
     """Cordones del contorno de la sección del miembro contra la placa (o el soporte) en `s_face` (distancia desde Q a lo largo de ctx.dir), uno por segmento
-    del contorno, con el tipo elegido por cara del miembro: ala superior, ala inferior y alma.  Devuelve los Weld."""
+    del contorno, con el tipo elegido por cara del miembro: ala superior, ala inferior y alma.  Devuelve los Weld.
+    `plane` = (punto, normal hacia el miembro) del plano donde termina el miembro cuando no es perpendicular a su eje (extremo cortado en ángulo contra una
+    placa alineada con el apoyo): el contorno de la sección (en los ejes PROPIOS del miembro) se lleva a ese plano siguiendo su eje."""
     from .fem.model3d import i_section, rect_tube
     from .specs import WELD_TYPES, WELD_SIDES
     shp, op = ctx.shape, ctx.op
@@ -566,7 +763,16 @@ def beam_end_welds(ctx, tag, B_name, s_face, faces=("top", "bot", "web")):
     tmap = {"top": min(float(getattr(shp, "tf", 0.5)) or 0.5, 0.375), "bot": min(float(getattr(shp, "tf", 0.5)) or 0.5, 0.375), "web": float(op.weld_size)}
     out = []
     n = len(poly)
-    nB = ctx.dir
+    bd, bx, by = np.asarray(ctx.bdir, float), np.asarray(ctx.bsx, float), np.asarray(ctx.bsy, float)           # ejes propios del miembro
+    if plane is None:
+        pl_pt, nB = ctx.Q + ctx.dir * s_face, np.asarray(ctx.dir, float)
+    else:
+        pl_pt, nB = np.asarray(plane[0], float), unit(plane[1])
+    cth = max(float(np.dot(bd, nB)), 0.05)
+
+    def onto(a_, b_):                                              # punto de la sección (a_, b_) llevado al plano a lo largo del eje del miembro
+        P = ctx.Q + a_ * bx + b_ * by
+        return P + bd * (float(np.dot(pl_pt - P, nB)) / cth)
     for k in range(n):
         a, b = poly[k], poly[(k + 1) % n]
         ym = 0.5 * (a[1] + b[1])
@@ -576,14 +782,14 @@ def beam_end_welds(ctx, tag, B_name, s_face, faces=("top", "bot", "web")):
         ty = types[f]
         if f != "web" and abs(a[1] - b[1]) > 1e-6 and abs(a[0] - b[0]) < 1e-6:
             continue                                                # el cordón va sobre las caras del ala (exterior e interior), no sobre su canto
-        P0 = ctx.at(s_face, a[0], a[1])
-        P1 = ctx.at(s_face, b[0], b[1])
+        P0 = onto(a[0], a[1])
+        P1 = onto(b[0], b[1])
         if float(np.linalg.norm(P1 - P0)) < 0.05:
             continue
-        nA = ctx.sx * (b[1] - a[1]) - ctx.sy * (b[0] - a[0])
+        nA = bx * (b[1] - a[1]) - by * (b[0] - a[0])
         nA = nA / max(float(np.linalg.norm(nA)), 1e-12)
         if ty == WELD_TYPES[0] and getattr(op, "weld_side", WELD_SIDES[0]) != WELD_SIDES[0]:
-            ref = (ctx.sy * (1.0 if ym > 0 else -1.0)) if f != "web" else ctx.sx        # ala: lado 1 = exterior; alma: lado 1 = +sx
+            ref = (by * (1.0 if ym > 0 else -1.0)) if f != "web" else bx        # ala: lado 1 = exterior; alma: lado 1 = +sx
             if not OPS.side_ok(op, nA, ref):
                 continue
         size = float(op.weld_size) if ty == WELD_TYPES[0] else (tmap[f] if ty == WELD_TYPES[1] else 0.5 * tmap[f])
@@ -598,15 +804,41 @@ def _endplate_geometry(ctx, tag, extended):
     L = endplate_layout(ctx.op, shp, extended)
     t, hh, gb, wide, rows, hollow = L["t"], L["hh"], L["gb"], L["wide"], L["rows"], L["hollow"]
     poly = [(-wide / 2, -hh), (wide / 2, -hh), (wide / 2, hh), (-wide / 2, hh)]
-    pr = _plate_prism(poly, ctx.Q - ctx.dir * (-EMBED * 0.0), ctx.sx, ctx.sy, 0.0, t)      # U×V = sx×sy = dir: extruye hacia el miembro
+    # la placa se centra en el eje de la viga a la altura de su cara exterior: si la placa esta alineada con el apoyo y la viga llega esviada, el eje corta
+    # el plano de la placa desplazado respecto de Q (en el plano de la cara)
+    cth = max(float(np.dot(ctx.bdir, ctx.dir)), 0.05)
+    Q0 = ctx.Q + t * (np.asarray(ctx.bdir, float) / cth - np.asarray(ctx.dir, float))
+    if cth < 0.9999 and (ctx.op.ep_w <= 0 or ctx.op.ep_h <= 0) and not shp.is_round:     # extremo cortado en ángulo: la sección proyectada sobre la placa es más ancha / alta
+        us, vs = [], []
+        for (x0_, y0_, x1_, y1_) in shp.rects():
+            for a_ in (x0_, x1_):
+                for b_ in (y0_, y1_):
+                    P_ = ctx.Q + a_ * np.asarray(ctx.bsx, float) + b_ * np.asarray(ctx.bsy, float)
+                    P_ = P_ + np.asarray(ctx.bdir, float) * (float(np.dot(Q0 + ctx.dir * t - P_, ctx.dir)) / cth)
+                    us.append(float(np.dot(P_ - Q0, ctx.sx)))
+                    vs.append(float(np.dot(P_ - Q0, ctx.sy)))
+        if ctx.op.ep_w <= 0:
+            wide = max(wide, 2.0 * max(abs(min(us)), abs(max(us))) + 1.5)
+        if ctx.op.ep_h <= 0:
+            ext_ = max(ctx.op.ep_ext, 2.0) if (extended or hollow) else 0.5
+            hh = max(hh, max(abs(min(vs)), abs(max(vs))) + ext_)
+        poly = [(-wide / 2, -hh), (wide / 2, -hh), (wide / 2, hh), (-wide / 2, hh)]
+    pr = _plate_prism(poly, Q0, ctx.sx, ctx.sy, 0.0, t)      # U×V = sx×sy = dir: extruye hacia el miembro
     Fy, Fu = _steel(ctx.op.plate_steel, True)
     ctx.parts.append(Part(f"Placa extrema {tag}", "plate", f"Placa extrema PL {t:g}", Fy, Fu, [pr], t=t))
     st = float(getattr(ctx, "sup_t", 1.0)) if ctx.main_name else 1.0
+    off_sup = 0
     for i, v in enumerate(rows):
         for k, sg in enumerate((1, -1)):
-            ctx.bolts.append(_bolt(f"{tag}-B{i + 1}{k + 1}", ctx.at(t, sg * (gb / 2.0 if not hollow else wide / 2.0 - 1.25), v), -ctx.dir, ctx.db, 0.0, t + st,
+            p = Q0 + t * ctx.dir + sg * (gb / 2.0 if not hollow else wide / 2.0 - 1.25) * ctx.sx + v * ctx.sy
+            if ctx.main_name and not _on_support(ctx, p - t * ctx.dir):
+                off_sup += 1                                            # el perno caería fuera de la cara del principal: no se dibuja
+                continue
+            ctx.bolts.append(_bolt(f"{tag}-B{i + 1}{k + 1}", p, -ctx.dir, ctx.db, 0.0, t + st,
                                    [(f"Placa extrema {tag}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
-    ctx.welds += beam_end_welds(ctx, tag, f"Placa extrema {tag}", t)           # soldadura de la viga a la placa, con el tipo elegido por cara
+    if off_sup:
+        ctx.notes.append(f"{m.name}: {off_sup} perno(s) de la placa extrema caen fuera de la cara del principal (la placa es más grande que la cara): no se dibujan.")
+    ctx.welds += beam_end_welds(ctx, tag, f"Placa extrema {tag}", t, plane=(Q0 + ctx.dir * t, ctx.dir))           # soldadura de la viga a la placa, con el tipo elegido por cara
     return t
 
 
@@ -616,7 +848,12 @@ def _weld_geometry(ctx, tag):
     if _is_open(shp):
         _tab_geometry(ctx, tag)
     if ctx.main_name:
-        ctx.welds += beam_end_welds(ctx, f"{tag}f", ctx.main_name, 0.06, faces=("top", "bot"))      # alas soldadas al soporte con el tipo elegido por ala
+        plane = (ctx.Q + np.asarray(ctx.sn, float) * 0.06, ctx.sn) if ctx.oblique else None          # llega esviada: el extremo de la viga se corta en ángulo contra la cara
+        fw = beam_end_welds(ctx, f"{tag}f", ctx.main_name, 0.06, faces=("top", "bot"), plane=plane)      # alas soldadas al soporte con el tipo elegido por ala
+        keep = [w for w in fw if all(_on_support(ctx, q, -0.02) for q in (w.p0, w.p1, 0.5 * (np.asarray(w.p0, float) + np.asarray(w.p1, float))))]
+        if len(keep) < len(fw):
+            ctx.notes.append(f"{ctx.m.name}: parte de las alas de la viga queda fuera de la cara del principal: sin soldadura en {len(fw) - len(keep)} cordón(es).")
+        ctx.welds += keep
     return 0.12
 
 
@@ -745,7 +982,8 @@ def auto_cope_for(nd, m, op=None):
     if not info["touches"]:
         return None
     _, sx, sy = member_frame(m)
-    ct, cb, cl = auto_cope(shp, info["Q"] + info["dir"] * gap_eff(m), info["dir"], sx, sy, solids)
+    ret = skew_retreat(shp, flat_support_normal(nd, m), info["dir"], sx, sy)                  # llega esviada: el extremo de la viga se retrasa
+    ct, cb, cl = auto_cope(shp, info["Q"] + info["dir"] * (gap_eff(m) + ret), info["dir"], sx, sy, solids)
     return (ct, cb, cl) if (ct > 0 or cb > 0) else None
 
 
@@ -1576,6 +1814,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         shp = shape_of(m.shape)
         dirv = member_dir(m)
         _, sx, sy = member_frame(m)
+        sn_m = flat_support_normal(nd, m)                       # normal de la cara plana del principal en la que llega (None si no es plana o llega casi paralelo)
         P0, o2 = attach_point(nd, m, (A, msx, msy))
         d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
         s_ex = exit_dist(ext, o2, d2)
@@ -1595,25 +1834,46 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
             c.sup_t = _support_wall(nd, m, mshape)
             c.partname = m.name
             c.main_name = nd.main_name
+            c.mfr = (A, msx, msy)
+            c.sn = sn_m
             tag = m.name if k == 0 else f"{m.name}.{k + 1}"
             kind = cop.kind if cop else None
             if cop is not None and kind in (OP_EP_FLUSH, OP_EP_EXT, OP_SEAT):
-                fr = aligned_frame(nd, m, cop, dirv, sx, sy)
+                to_main = bool(getattr(cop, "align_to", "")) and cop.align_to == nd.main_name
+                fr = None if (kind == OP_SEAT and (to_main or not getattr(cop, "align_to", ""))) else aligned_frame(nd, m, cop, dirv, sx, sy)     # el asiento se apoya solo en la cara
+                if fr is None and c.oblique and kind in (OP_EP_FLUSH, OP_EP_EXT):          # llega esviada o inclinada: la placa extrema se apoya en la cara del apoyo
+                    d2_ = unit(sn_m)
+                    up_ = sy - d2_ * float(np.dot(sy, d2_))
+                    if np.linalg.norm(up_) < 1e-6:
+                        up_ = sx - d2_ * float(np.dot(sx, d2_))
+                    up_ = unit(up_)
+                    fr = (d2_, unit(np.cross(up_, d2_)), up_)
+                    mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
+                                     f"la placa extrema se apoya en la cara y la viga se corta en ángulo contra ella.")
                 if fr is not None:                                 # la placa se alinea con otro elemento (p. ej. la cara de la columna) y no con el miembro conectado
                     c.dir, c.sx, c.sy = fr
+                    c.aligned = True
+                    if kind == OP_SEAT:
+                        c.sn = None
                     align = (fr[0], k)
-            if cop is not None and kind in (OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_TAB):
-                sn = support_normal(nd, m)
-                if sn is not None and 0.3 < abs(float(np.dot(dirv, sn))) < 0.985:
-                    mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(abs(float(np.dot(dirv, sn))), 1.0))):.0f}° respecto de la normal): "
-                                     f"«{kind}» se dibuja con sus placas perpendiculares al miembro y no a la cara del apoyo; revise o alinee la placa con «Alinear a».")
+            if cop is not None and kind == OP_WELD and c.oblique:        # alas soldadas contra una cara esviada: el extremo de la viga se corta en ángulo contra ella
+                align = (unit(sn_m), k)
+                mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
+                                 f"la viga se corta en ángulo contra la cara y sus alas se sueldan a ella.")
+            if cop is not None and kind in (OP_TAB, OP_DANG, OP_SEAT) and c.oblique and not c.aligned:
+                c.ret = skew_retreat(shp, c.sn, dirv, sx, sy)
+                if c.ret > 0.05:
+                    mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
+                                     f"la placa se apoya en la cara y el extremo de la viga se retrasa {c.ret:.2f} in para librarla.")
             ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
             if kind == OP_TAB:
                 c.extra = tab_extra(nd, m, cop)
                 c.dmain_axis = A
+                if c.extra > 0 and c.oblique:                      # la viga tambien debe librar los bordes de las alas del principal
+                    c.ret = max(c.ret, _clear_of_main(shp, Q + dirv * (0.5 + c.extra), dirv, sx, sy, ext, msx, msy))
                 _tab_geometry(c, tag)
                 if c.extra > 0:
-                    ms_k = 0.5 + c.extra                          # la viga queda fuera de las alas del principal
+                    ms_k = 0.5 + c.extra + c.ret                  # la viga queda fuera de las alas del principal
             elif kind == OP_DANG:
                 _dang_geometry(c, tag)
             elif kind == OP_SEAT:
@@ -1631,7 +1891,10 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 mss.append(ms_k)
             ctxs_m.append(c)
         c = ctxs_m[0]
-        ms = (max(mss) + float(m.gap)) if mss else gap_eff(m)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
+        rigid = any(c_.op.kind in (OP_EP_FLUSH, OP_EP_EXT, OP_WELD) for c_ in ctxs_m if c_.op is not None)
+        if rigid and abs(float(m.gap)) > 1e-9:
+            mdl.notes.append(f"{m.name}: el desplazamiento sobre el eje no se aplica a la placa extrema ni a las alas soldadas (el miembro va soldado a la placa o al soporte).")
+        ms = (max(mss) + (0.0 if rigid else float(m.gap))) if mss else gap_eff(m) + max(c_.ret for c_ in ctxs_m)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
         if any(c_.op.kind in GUSSET_OPS for c_ in ctxs_m if c_.op is not None):
             push = _clear_of_main(shp, Q + dirv * ms, dirv, sx, sy, ext, msx, msy)
             if push > 1e-6:                                         # la esquina de la sección del miembro inclinado penetra en el principal: se retrasa el miembro
@@ -1652,7 +1915,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
             d2 = align[0]
             cth = float(np.dot(dirv, d2))
             if abs(cth) > 0.05 and cth < 0.9999:
-                extra = (max(shp.d, shp.bf) / 2.0) * math.sqrt(max(1.0 - cth * cth, 0.0)) / abs(cth) + 0.5
+                extra = (math.hypot(shp.d, shp.bf) / 2.0) * math.sqrt(max(1.0 - cth * cth, 0.0)) / abs(cth) + 0.5
                 acut = (tuple(map(float, Q + d2 * ms)), tuple(map(float, -d2)))
                 ms -= extra
                 Lm += extra
@@ -1689,6 +1952,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 p.owner = m.name
                 mdl.parts.append(p)
             mdl.bolts += c_.bolts
+            fix_weld_normals(c_.welds)
             mdl.welds += c_.welds
             mdl.notes += c_.notes
         end = Q + dirv * (ms + Lm)
