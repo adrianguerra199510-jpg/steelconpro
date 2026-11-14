@@ -1113,7 +1113,7 @@ def _merge_segments(segs):
     return out
 
 
-def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull):
+def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
     """Miembro soldado a la cartela: cordones por los bordes de la cartela sobre el alma del miembro (perfil abierto) o por las ranuras de las paredes (tubo)."""
     _, gl, _ov, hm = _gusset_outline(c)
     tip = gl + 4.0
@@ -1133,6 +1133,8 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull):
             lo, hi = min(sa, sb), max(sa, sb)
             if hi < gl - 1e-6 or lo > tip + 1e-6:
                 continue
+            if max(abs(_ya), abs(_yb)) > shp.d / 2.0 + 0.3:          # solo los bordes de la cartela que quedan sobre el miembro (no los de contacto con el soporte)
+                continue
             if abs(sb - sa) < 1e-6:
                 if abs(sa - tip) > 0.05 or abs(sa - gl) < 1e-6:      # solo el borde de la punta
                     continue
@@ -1151,7 +1153,7 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull):
             nrm2 = np.array([ed[1], -ed[0]]) / max(float(np.linalg.norm(ed)), 1e-12)           # hacia afuera de la cartela (contorno CCW)
             nA = unit(e1 * nrm2[0] + e2 * nrm2[1])
             k += 1
-            mdl.welds.append(Weld(f"{name}-M{c.m.name}{k}", name, c.partname, tuple(map(float, P0 + e1 * qa[0] + e2 * qa[1] + n * (lat - t / 2.0))),
+            mdl.welds.append(Weld(f"{name}-M{c.m.name}{'' if pi == 0 else chr(96 + pi)}{k}", name, c.partname, tuple(map(float, P0 + e1 * qa[0] + e2 * qa[1] + n * (lat - t / 2.0))),
                                   tuple(map(float, P0 + e1 * qb[0] + e2 * qb[1] + n * (lat - t / 2.0))), tuple(map(float, nA)), tuple(map(float, n)), wsz, 70.0, f"G{gi + 1}{c.m.name}"))
     elif shp.kind == HSS_RECT:
         u0 = float(np.dot(P0 + n * lat - c.Q, c.sx))
@@ -1188,6 +1190,18 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
             for p in outline:
                 q = np.asarray(p) - g["P0"]
                 pts2.append((float(np.dot(q, e1)), float(np.dot(q, e2))))
+        for (_fn, fpt, fnrm) in floors:                      # la cartela baja hasta la placa base: sus esquinas de la base se prolongan hasta su cara superior (cartela de esquina)
+            fnrm = np.asarray(fnrm, float)
+            for c in g["items"]:
+                h = float(np.dot(c.Q - np.asarray(fpt, float), fnrm))
+                if -0.01 < h < 40.0 and abs(float(np.dot(fnrm, n))) < 0.2:
+                    hor = c.dir - fnrm * float(np.dot(c.dir, fnrm))
+                    if float(np.linalg.norm(hor)) < 1e-6:
+                        continue
+                    hor = unit(hor)
+                    for d_in in (0.0, EMBED):                  # punto de la cara del soporte bajo el apoyo del miembro (y empotrado un poco), sobre la placa base
+                        q = c.Q - fnrm * (h + 0.05) - hor * d_in - g["P0"]
+                        pts2.append((float(np.dot(q, e1)), float(np.dot(q, e2))))
         hull = _hull(pts2)
         if len(hull) < 3:
             continue
@@ -1233,6 +1247,8 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
                     a2, b2 = cl
                 ed = np.asarray(b2, float) - np.asarray(a2, float)
                 Le = float(np.linalg.norm(ed))
+                if Le < 0.8 and any(math.dist(x_[0], x_[1]) >= 0.8 for x_ in [(a_, b_) for (a_, b_, s_) in contact if s_ == si]):
+                    continue                                     # esquirlas de la base de la cartela contra el interior del ala: no se sueldan
                 if Le < 0.2:
                     continue
                 nrm2 = np.array([ed[1], -ed[0]]) / Le
@@ -1281,13 +1297,14 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
                                   tuple(map(float, nB)), wsz, 70.0, f"G{gi + 1}" + ("" if sups[si]["name"] == nd.main_name else f"-{sups[si]['name']}")))
         for c in g["items"]:
             if c.op.kind != OP_GUSSET:
-                _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull)
+                for pi_, (outer_, _h) in enumerate(pieces):         # los cordones siguen el contorno real de cada trozo (ya recortado contra el soporte)
+                    _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, PCLIP.ccw(outer_), pi_)
                 continue
             m, shp = c.m, c.shape
             _, gl, ov, hm = _gusset_outline(c)
             rows = max(1, int(c.op.n_bolts))
             s = max(c.op.bolt_s, 2.5)
-            gauge = max(min(hm * 0.5, 6.0), 2.5)
+            gauge = min(max(min(hm * 0.5, 6.0), 2.5), max(float(shp.d) - 2.5, 2.0))        # los pernos dentro del peralte del miembro
             slotted = False
             sgn_c = 1.0 if float(np.dot(c.sx, n)) >= 0 else -1.0                 # el eje lateral del miembro puede mirar al revés que la normal de la cartela
             if _is_open(shp):

@@ -3,7 +3,7 @@
  "version": 2,
  "conexiones": [
   {
-   "name": "Ejemplo: diagonal que llega 10 in por encima del eje de trabajo del nudo (desplazamiento sobre la columna)",
+   "name": "Ejemplo: diagonal con su eje desplazado 3 in a un lado del eje de la columna (llega excéntrica sobre el ala)",
    "element": "TP-A25",
    "author": "",
    "date": "",
@@ -31,8 +31,8 @@
       "az": 0.0,
       "el": -45.0,
       "pos": 0.0,
-      "off": 10.0,
-      "off2": 0.0,
+      "off": 0.0,
+      "off2": 3.0,
       "L": 72.0,
       "roll": 0.0,
       "gap": 0.0

@@ -135,7 +135,7 @@ def ex_a07():
 
 def ex_a08():
     nd = _col("W14X90", 0.0, 120.0, end=2)
-    nd.members = [_mem("D1", "HSS6X6X3/8", 0.0, 45.0, pos=14.0)]
+    nd.members = [_mem("D1", "HSS6X6X3/8", 0.0, 45.0, pos=1.0)]
     nd.operations = [_gus("D1", gus_hb=26.0), Operation(kind=OP_BASE, member="Columna", end=-1)]
     nd.loads = [Load("Caso 1", "D1", N=-40.0), Load("Caso 1", "Columna", N=-60.0, side=1),
                 Load("Caso 2", "D1", N=40.0), Load("Caso 2", "Columna", N=-60.0, side=1)]
@@ -144,7 +144,7 @@ def ex_a08():
 
 def ex_a09():
     nd = _col("W14X90", 0.0, 120.0, end=2)
-    nd.members = [_mem("D1", "W8X31", 90.0, 50.0, pos=14.0)]
+    nd.members = [_mem("D1", "W8X31", 90.0, 50.0, pos=1.0)]
     nd.operations = [_gus("D1", bolted=False, t=0.625, gus_hb=26.0), Operation(kind=OP_BASE, member="Columna", end=-1)]
     nd.loads = [Load("Caso 1", "D1", N=-40.0), Load("Caso 1", "Columna", N=-60.0, side=1),
                 Load("Caso 2", "D1", N=40.0), Load("Caso 2", "Columna", N=-60.0, side=1)]
@@ -265,9 +265,9 @@ def ex_a24():
 
 def ex_a25():
     nd = _col()
-    nd.members = [_mem("D1", "HSS6X6X3/8", 0.0, -45.0, off=10.0)]
+    nd.members = [_mem("D1", "HSS6X6X3/8", 0.0, -45.0, off2=3.0)]
     nd.operations = [_gus("D1")]
-    return _prj("TP-A25", "diagonal que llega 10 in por encima del eje de trabajo del nudo (desplazamiento sobre la columna)", _loads(nd))
+    return _prj("TP-A25", "diagonal con su eje desplazado 3 in a un lado del eje de la columna (llega excéntrica sobre el ala)", _loads(nd))
 
 
 def ex_a26():
@@ -276,9 +276,6 @@ def ex_a26():
 
 def ex_a27():
     nd = TY.build_nodo("base", {"col_shape": "W12X79", "brace_shape": "HSS6X6X3/8", "angle": 40.0, "n_braces": 4, "h": 24.0})
-    for o in nd.operations:
-        if o.kind == OP_GUSSET:
-            o.gus_hb = 28.0
     return _with_base_data(_prj("TP-A27", "tipología «Plato base» con cuatro diagonales (una en cada cara de la columna)", nd))
 
 

@@ -21,7 +21,7 @@ I_STEEL = "ASTM A992"
 def schema(kind: str) -> list:
     """Campos del formulario de cada tipología: [{key, label, type, default, items?, length?}]."""
     brace = {"key": "brace_shape", "label": "Perfil de las diagonales", "type": "shape", "default": "HSS5X5X3/8"}
-    ang = {"key": "angle", "label": "Ángulo de las diagonales sobre la horizontal (°)", "type": "num", "default": 45.0, "lo": 10, "hi": 80}
+    ang = {"key": "angle", "label": "Ángulo de las diagonales sobre la horizontal (°)", "type": "num", "default": 45.0, "lo": 25, "hi": 80}
     if kind == "base":
         return [{"key": "col_shape", "label": "Perfil de la columna", "type": "shape", "default": "W14X90"}, brace, ang,
                 {"key": "n_braces", "label": "Número de diagonales", "type": "int", "default": 2, "lo": 0, "hi": 4},
@@ -37,9 +37,16 @@ def schema(kind: str) -> list:
 
 def _vals(kind, params):
     out = {f["key"]: f["default"] for f in schema(kind)}
+    lim = {f["key"]: (f.get("lo"), f.get("hi")) for f in schema(kind)}
     for k, v in (params or {}).items():
         if k in out and v not in (None, ""):
-            out[k] = type(out[k])(v) if not isinstance(out[k], bool) else bool(v)
+            try:
+                out[k] = type(out[k])(v) if not isinstance(out[k], bool) else bool(v)
+            except (TypeError, ValueError):
+                continue                                           # dato inválido: se deja el valor por omisión
+            lo, hi = lim[k]
+            if lo is not None and not isinstance(out[k], bool):
+                out[k] = type(out[k])(min(max(out[k], lo), hi))   # dentro de los límites del formulario
     return out
 
 
