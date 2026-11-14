@@ -242,7 +242,7 @@ def run():
           f"{n_bp} nudos con placa en miembros o en el lado +, al designar el principal la placa sigue: OK")
 
     # ---------------------------------------------------------------- cartelas: una por plano
-    for geom, nmem, ngus in (("V", 2, 1), ("N", 2, 1), ("X", 4, 1), ("D", 1, 1)):
+    for geom, nmem, ngus in (("V", 2, 1), ("N", 2, 1), ("X", 4, 2), ("D", 1, 1)):
         nt = PRE.build(MODE_CHORD, geom, "I", "gus_bolt")
         mt = AS.build_nodo(nt)
         g = [p for p in mt.parts if p.kind == "gusset"]
@@ -255,7 +255,7 @@ def run():
     nt.members[1].az = 90.0
     if len([p for p in AS.build_nodo(nt).parts if p.kind == "gusset"]) != 2:
         FAIL.append("nudos: dos diagonales en planos distintos llevan dos cartelas")
-    print(f"{'crucetas':34} V, N, X, D: una cartela por plano; atornillada con pernos, soldada sin pernos: OK")
+    print(f"{'crucetas':34} V, N, D: una cartela por plano (X: una por cara del cordón); atornillada con pernos, soldada sin pernos: OK")
 
     # ---------------------------------------------------------------- todos los presets arman un modelo valido y verificable
     n_models = 0
