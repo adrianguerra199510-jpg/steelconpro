@@ -116,7 +116,7 @@ def build_items(nd: Nodo):
         elif op.kind == OP_DANG:
             spec = DoubleAngle(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,
                                angle=_angle_label(op.plate_t), angle_steel=op.plate_steel, bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
-                               n=max(int(op.n_bolts), 2), s=op.bolt_s, L_ang=(op.dang_H if op.dang_H > 0 else (max(int(op.n_bolts), 2) - 1) * op.bolt_s + 3.0), gap=gap_eff(m) + member_ret(nd, m, op), weld_size=op.weld_size, **cp)
+                               n=max(int(op.n_bolts), 2), s=op.bolt_s, L_ang=(op.dang_H if op.dang_H > 0 else (max(int(op.n_bolts), 2) - 1) * op.bolt_s + 3.0), gap=gap_eff(m) + member_ret(nd, m, op), gw=2.0 + member_ret(nd, m, op), weld_size=op.weld_size, **cp)
             items.append(Item(op, m, "shear", spec, None, engine=double_angle))
         elif op.kind == OP_SEAT:
             spec = Seated(beam=m.shape, beam_steel=m.steel, sup_kind=sup_kind, sup_label=nd.main_shape, sup_steel=nd.main_steel,

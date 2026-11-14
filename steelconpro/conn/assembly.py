@@ -1969,7 +1969,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                     c.saddle = (mshape.d / 2.0, np.asarray(A, float), np.asarray(rq_, float))        # placa simple sobre un tubo redondo: borde con silla
                     c.ret = _clear_of_main(shp, Q + dirv * gap_eff(m), dirv, sx, sy, ext, msx, msy)               # la viga no debe entrar en el tubo
                 elif kind in (OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD):
-                    mdl.notes.append(f"{m.name}: «{kind}» no se puede apoyar en un principal redondo (cara curva): se dibuja contra el plano tangente y no toca al tubo; use placa simple (con silla) o una placa propia.")
+                    mdl.notes.append(f"{m.name}: «{kind}» no se puede apoyar en un principal redondo (cara curva): se dibuja contra el plano tangente y queda separado del tubo; use placa simple (con silla) o una placa propia.")
             if cop is not None and kind in (OP_TAB, OP_DANG, OP_SEAT) and c.oblique and not c.aligned:
                 c.ret = skew_retreat(shp, c.sn, dirv, sx, sy)
                 if c.ret > 0.05:
