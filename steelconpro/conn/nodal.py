@@ -210,9 +210,14 @@ def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, 
 
 
 def _draw_items(nd: Nodo, loads: list, bal: dict, ends: dict) -> list:
-    """Cargas del caso para dibujarlas en el visor, cada una en el extremo de su elemento QUE LLEGA AL NUDO, tal como se escriben (sin trasladarlas por el largo del miembro):
-    [{pos, F, M, kind, name}].  Los miembros conectados se dibujan en su punto de apoyo sobre el principal; el principal y su reacción, en el cruce de ejes."""
-    O = np.zeros(3)
+    """Cargas del caso para dibujarlas en el visor.  Los VALORES son los del extremo que llega al nudo (sin trasladarlos por el largo del miembro: un giro liberado no
+    dibuja momento), pero por claridad las flechas se colocan en el extremo opuesto (libre) de cada elemento: [{pos, F, M, kind, name}].
+    `ends` = {miembro: punto del extremo libre}."""
+    A = AS.main_frame(nd)[0]
+    lneg, lpos = nd.lengths()
+    if lneg + lpos < 1.0:
+        lneg = lpos = 24.0
+    Eside = lambda side: A * side * (lpos if side > 0 else lneg)                  # noqa: E731
     items = []
     for l in loads:
         if l.member == NODE:
@@ -223,20 +228,15 @@ def _draw_items(nd: Nodo, loads: list, bal: dict, ends: dict) -> list:
             if side == bal["side"]:
                 continue
             F, M = _vec(l, local_axes(nd, nd.main_name, side))
-            items.append({"pos": O.tolist(), "F": F.tolist(), "M": M.tolist(), "name": nd.main_name, "kind": "main"})
+            items.append({"pos": Eside(side).tolist(), "F": F.tolist(), "M": M.tolist(), "name": nd.main_name, "kind": "main"})
             continue
         ax = local_axes(nd, l.member)
-        m = nd.member_named(l.member)
-        if ax is None or m is None:
+        if ax is None or l.member not in ends:
             continue
         F, M = _vec(l, ax)
-        try:
-            Q = np.asarray(AS.attach_info(nd, m)["Q"], float)
-        except Exception:
-            Q = _node_point(nd, l.member)
-        items.append({"pos": Q.tolist(), "F": F.tolist(), "M": M.tolist(), "name": l.member, "kind": "member"})
+        items.append({"pos": np.asarray(ends[l.member], float).tolist(), "F": F.tolist(), "M": M.tolist(), "name": l.member, "kind": "member"})
     R, MR = np.array(bal["R"]), np.array(bal["M"])
-    items.append({"pos": O.tolist(), "F": R.tolist(), "M": MR.tolist(), "name": nd.main_name + " (reacción)", "kind": "reaction"})
+    items.append({"pos": Eside(bal["side"]).tolist(), "F": R.tolist(), "M": MR.tolist(), "name": nd.main_name + " (reacción)", "kind": "reaction"})
     return items
 
 

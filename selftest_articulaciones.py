@@ -8,7 +8,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 from steelconpro.model import load_book                                    # noqa: E402
-from steelconpro.conn import nodal as NOD, specs as SP                     # noqa: E402
+from steelconpro.conn import nodal as NOD, specs as SP, assembly as AS     # noqa: E402
 from steelconpro import api                                                # noqa: E402
 
 fails = []
@@ -47,11 +47,10 @@ a = api.nodal({"connection": api._dump(p)})["cases"][0]["draw"]
 d2 = next(d for d in a if d["name"] == "S2")
 if np.linalg.norm(d2["M"]) > 1e-9:
     fail(f"S2 articulado dibuja momento {d2['M']}")
-import steelconpro.conn.assembly as AS                                     # noqa: E402
-Q2 = np.asarray(AS.attach_info(nd, nd.member_named("S2"))["Q"], float)
-if np.linalg.norm(np.asarray(d2["pos"]) - Q2) > 1e-6:
-    fail(f"S2: la carga no se dibuja en su apoyo: {d2['pos']} vs {Q2}")
-print(f"{'articulaciones':34} automáticas por conexión, manuales, sin momento por largo, cargas en el extremo del nudo: OK")
+tags = {t[1]: np.asarray(t[0], float) for t in AS.build_model(p).tags}
+if np.linalg.norm(np.asarray(d2["pos"]) - tags["S2"]) > 1e-6:
+    fail(f"S2: la flecha debe dibujarse en su extremo libre: {d2['pos']} vs {tags['S2']}")
+print(f"{'articulaciones':34} automáticas por conexión, manuales, sin momento por largo, valores en el extremo del nudo y flechas en el extremo libre: OK")
 if fails:
     print(f"\nFALLAS ({len(fails)}):")
     sys.exit(1)
