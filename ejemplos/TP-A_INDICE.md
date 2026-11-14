@@ -25,7 +25,7 @@ Generados con `python3 tools/ejemplos_arriostramientos.py` (una función `ex_aNN
 | `TP-A19_armadura_Pratt_soldada.scp` | nudo de armadura Pratt: diagonal y montante HSS soldados a una cartela soldada bajo el cordón superior | Cartela con miembro soldado | 0 / 0 | 0.38 |  |
 | `TP-A20_armadura_cordon_inferior.scp` | nudo del cordón inferior: dos diagonales y un montante HSS hacia arriba con cartela común sobre el cordón | Cartela atornillada | 0 / 0 | 0.38 |  |
 | `TP-A21_armadura_cordon_W.scp` | nudo de armadura con cordón de perfil W: dos diagonales HSS con cartela soldada al ala inferior del cordón | Cartela atornillada | 0 / 0 | 0.38 |  |
-| `TP-A22_armadura_X_cordon_HSS.scp` | nudo en X sobre un cordón: cuatro diagonales (dos cartelas, una por cada cara del cordón) | Cartela atornillada | 0 / 0 | 0.32 |  |
+| `TP-A22_armadura_X_cordon_HSS.scp` | nudo en X sobre un cordón: cuatro diagonales (dos cartelas, una por cada cara del cordón) | Cartela atornillada | 0 / 0 | 0.32 | Cartela 1: queda en 2 trozos separados por el miembro principal. |
 | `TP-A23_cartela_medidas_editadas.scp` | cartela con medidas editadas (largo 24, base 16, punta 9) y esquinas cortadas, diagonal HSS atornillada | Cartela atornillada | 0 / 0 | 0.45 |  |
 | `TP-A24_diagonal_esviada_30.scp` | diagonal en un plano esviado (30°) respecto de las caras de la columna: la cartela se corta en bisel contra el ala | Cartela atornillada | 0 / 0 | 0.45 |  |
 | `TP-A25_diagonal_desplazada_sobre_columna.scp` | diagonal con su eje desplazado 3 in a un lado del eje de la columna (llega excéntrica sobre el ala) | Cartela atornillada | 0 / 0 | 0.45 |  |
@@ -34,6 +34,11 @@ Generados con `python3 tools/ejemplos_arriostramientos.py` (una función `ex_aNN
 | `TP-A28_tipologia_columna_intermedia.scp` | tipología «Columna intermedia»: cuatro diagonales (dos por lado) | Cartela atornillada | 0 / 0 | 0.13 |  |
 | `TP-A29_tipologia_columna_superior.scp` | tipología «Columna superior»: la columna termina en el nudo con dos diagonales hacia abajo | Cartela atornillada | 0 / 0 | 0.13 |  |
 | `TP-A30_tipologia_nudo_vigas.scp` | tipología «Nudo de vigas»: viga principal inclinada con dos miembros que la cruzan | Cartela atornillada | 0 / 0 | 0.09 |  |
+| `TP-A31_X_cartela_central_HSS.scp` | cartela central de una X: la diagonal 1 sigue continua y la otra diagonal (en dos tramos) se atornilla a la cartela soldada a ella | Cartela atornillada | 0 / 0 | 0.32 | Cartela 1: queda en 2 trozos separados por el miembro principal. |
+| `TP-A32_X_cartela_central_W_soldada.scp` | cruce de una X con diagonal continua de perfil W y la otra diagonal W soldada a las cartelas | Cartela con miembro soldado | 0 / 0 | 0.32 |  |
+| `TP-A33_armadura_diagonales_angulo.scp` | armadura liviana: dos diagonales de ángulo atornilladas con cartela común bajo un cordón HSS | Cartela atornillada | 0 / 0 | 0.30 |  |
+| `TP-A34_armadura_diagonales_canal.scp` | armadura con diagonales de canal (el alma del canal contra la cartela) bajo un cordón HSS | Cartela atornillada | 0 / 0 | 0.33 |  |
+| `TP-A35_diagonal_angulo_soldada_columna.scp` | diagonal de ángulo soldada a su cartela, soldada al ala de una columna W | Cartela con miembro soldado | 0 / 0 | 0.26 |  |
 
 ## Tipologías no soportadas / limitaciones
 - Diagonales que se cruzan entre sí en el centro de un vano (X con cartela central): no hay cartela de cruce; se modela con un nudo en cada extremo.

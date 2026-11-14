@@ -139,7 +139,9 @@ def ex_a08():
     nd.operations = [_gus("D1", gus_hb=26.0), Operation(kind=OP_BASE, member="Columna", end=-1)]
     nd.loads = [Load("Caso 1", "D1", N=-40.0), Load("Caso 1", "Columna", N=-60.0, side=1),
                 Load("Caso 2", "D1", N=40.0), Load("Caso 2", "Columna", N=-60.0, side=1)]
-    return _with_base_data(_prj("TP-A08", "placa base: diagonal HSS con cartela atornillada soldada a la columna y apoyada y soldada sobre la placa base", nd))
+    p = _with_base_data(_prj("TP-A08", "placa base: diagonal HSS con cartela atornillada soldada a la columna y apoyada y soldada sobre la placa base", nd))
+    p.plate.N, p.conc.N2 = 36.0, 52.0                          # la placa se amplía hacia el lado de la cartela (si no, la cartela sobresale de la placa)
+    return p
 
 
 def ex_a09():
@@ -293,6 +295,46 @@ def ex_a30():
     return _prj("TP-A30", "tipología «Nudo de vigas»: viga principal inclinada con dos miembros que la cruzan", TY.build_nodo("vigas", {}))
 
 
+
+# ====================================================================================================== tercera ronda: cruce de X, ángulos y canales
+def _diag_main(shape, el=45.0):
+    return Nodo(main_name="Diagonal 1", main_shape=shape, main_steel=_steel(shape), main_az=0.0, main_el=el, main_end=END_LABELS[0], main_len_neg=60.0, main_len_pos=60.0)
+
+
+def ex_a31():
+    nd = _diag_main("HSS6X6X3/8")
+    nd.members = [_mem("D2", "HSS4X4X1/4", 0.0, -45.0, L=48.0), _mem("D3", "HSS4X4X1/4", 180.0, 45.0, L=48.0)]
+    nd.operations = [_gus("D2"), _gus("D3")]
+    return _prj("TP-A31", "cartela central de una X: la diagonal 1 sigue continua y la otra diagonal (en dos tramos) se atornilla a la cartela soldada a ella", _loads(nd, 25.0))
+
+
+def ex_a32():
+    nd = _diag_main("W10X33")
+    nd.members = [_mem("D2", "W6X15", 0.0, -45.0, L=48.0), _mem("D3", "W6X15", 180.0, 45.0, L=48.0)]
+    nd.operations = [_gus("D2", bolted=False), _gus("D3", bolted=False)]
+    return _prj("TP-A32", "cruce de una X con diagonal continua de perfil W y la otra diagonal W soldada a las cartelas", _loads(nd, 25.0))
+
+
+def ex_a33():
+    nd = _chord("HSS10X10X3/8")
+    nd.members = [_mem("D1", "L4X4X1/4", 0.0, -45.0, L=60.0), _mem("D2", "L4X4X1/4", 180.0, -45.0, L=60.0, roll=180.0)]
+    nd.operations = [_gus("D1", t=0.375), _gus("D2", t=0.375)]
+    return _prj("TP-A33", "armadura liviana: dos diagonales de ángulo atornilladas con cartela común bajo un cordón HSS", _loads(nd, 20.0))
+
+
+def ex_a34():
+    nd = _chord("HSS10X10X3/8")
+    nd.members = [_mem("D1", "C6X8.2", 0.0, -45.0, L=60.0), _mem("D2", "C6X8.2", 180.0, -45.0, L=60.0, roll=180.0)]
+    nd.operations = [_gus("D1", t=0.375), _gus("D2", t=0.375)]
+    return _prj("TP-A34", "armadura con diagonales de canal (el alma del canal contra la cartela) bajo un cordón HSS", _loads(nd, 25.0))
+
+
+def ex_a35():
+    nd = _col()
+    nd.members = [_mem("D1", "L4X4X1/4", 0.0, -45.0)]
+    nd.operations = [_gus("D1", bolted=False, t=0.375)]
+    return _prj("TP-A35", "diagonal de ángulo soldada a su cartela, soldada al ala de una columna W", _loads(nd, 20.0))
+
 EJEMPLOS = [
     ("TP-A01_diagonal_HSS_cartela_atornillada_ala_columna", ex_a01, "diagonal HSS, cartela atornillada, ala de columna W"),
     ("TP-A02_diagonal_HSS_cartela_soldada_ala_columna", ex_a02, "diagonal HSS ranurada y soldada, ala de columna W"),
@@ -324,6 +366,11 @@ EJEMPLOS = [
     ("TP-A28_tipologia_columna_intermedia", ex_a28, "tipología col intermedia"),
     ("TP-A29_tipologia_columna_superior", ex_a29, "tipología col superior"),
     ("TP-A30_tipologia_nudo_vigas", ex_a30, "tipología vigas"),
+    ("TP-A31_X_cartela_central_HSS", ex_a31, "cruce de X atornillado"),
+    ("TP-A32_X_cartela_central_W_soldada", ex_a32, "cruce de X soldado, perfiles W"),
+    ("TP-A33_armadura_diagonales_angulo", ex_a33, "diagonales de ángulo atornilladas"),
+    ("TP-A34_armadura_diagonales_canal", ex_a34, "diagonales de canal atornilladas"),
+    ("TP-A35_diagonal_angulo_soldada_columna", ex_a35, "ángulo soldado a columna W"),
 ]
 
 

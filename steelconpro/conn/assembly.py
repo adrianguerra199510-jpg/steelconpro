@@ -15,7 +15,7 @@ import math
 import numpy as np
 
 from .. import materials as M
-from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN
+from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN, ANGLE, CHANNEL
 from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, Weld, unit
 from . import ops as OPS
@@ -1062,7 +1062,7 @@ def _clear_of_main(shp, start, dirv, sx, sy, ext, msx, msy) -> float:
         r = ray_exit(ext, o2, d2)
         if r is not None and r > best:
             best = r
-    return best
+    return best + 0.1 if best > 1e-6 else best
 
 
 def _hull(pts):
@@ -1090,6 +1090,10 @@ def _gusset_outline(ctx):
     dm = max(min(shp.d if not shp.is_round else shp.d, 16.0), 4.0)
     hb = op.gus_hb if op.gus_hb > 0 else max(dm * 1.05, 7.0)
     hm = op.gus_hm if op.gus_hm > 0 else max(dm * 0.9, 5.0)
+    if shp.kind == W_SHAPE and op.gus_hm <= 0:                    # la cartela va entre las alas del perfil I
+        hm = min(hm, max(float(shp.d) - 2.0 * float(shp.tf) - 0.2, 2.0))
+        if op.gus_hb <= 0:
+            hb = min(hb, hm)                                          # sin ensanche: el traslape con el miembro queda entre sus alas
     if shp.kind == HSS_RECT and op.gus_hm <= 0:                  # un tubo con ranura: la cartela atraviesa sus paredes
         hm = max(hm, float(shp.d) + 1.0)
         hb = max(hb, hm)
@@ -1102,11 +1106,12 @@ def _gusset_outline(ctx):
     if op.gus_L > 0:
         tip = max(op.gus_L, gl + 1.0)                            # largo de la cartela desde el apoyo; el miembro queda donde estaba
     cut = min(max(op.gus_cut, 0.0), hm / 2.0, max(tip, 0.1))
+    yc = _open_plate(ctx, 0.0)[2] if not shp.is_hollow else 0.0       # la punta se centra en la pared del ángulo / canal que lleva los pernos
     pts = [ctx.at(-EMBED, 0.0, -hb / 2.0), ctx.at(-EMBED, 0.0, hb / 2.0)]
     if cut > 1e-6:
-        pts += [ctx.at(tip - cut, 0.0, hm / 2.0), ctx.at(tip, 0.0, hm / 2.0 - cut), ctx.at(tip, 0.0, -hm / 2.0 + cut), ctx.at(tip - cut, 0.0, -hm / 2.0)]
+        pts += [ctx.at(tip - cut, 0.0, yc + hm / 2.0), ctx.at(tip, 0.0, yc + hm / 2.0 - cut), ctx.at(tip, 0.0, yc - hm / 2.0 + cut), ctx.at(tip - cut, 0.0, yc - hm / 2.0)]
     else:
-        pts += [ctx.at(tip, 0.0, hm / 2.0), ctx.at(tip, 0.0, -hm / 2.0)]
+        pts += [ctx.at(tip, 0.0, yc + hm / 2.0), ctx.at(tip, 0.0, yc - hm / 2.0)]
     return pts, gl, ov, hm
 
 
@@ -1424,7 +1429,7 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
             lo, hi = min(sa, sb), max(sa, sb)
             if hi < gl - 1e-6 or lo > tip + 1e-6:
                 continue
-            if max(abs(_ya), abs(_yb)) > shp.d / 2.0 + 0.3:          # solo los bordes de la cartela que quedan sobre el miembro (no los de contacto con el soporte)
+            if (_ya + _yb) / 2.0 < _open_plate(c, t)[3] - 0.3 or (_ya + _yb) / 2.0 > _open_plate(c, t)[4] + 0.3:          # solo los bordes de la cartela que quedan sobre el miembro (no los de contacto con el soporte)
                 continue
             if abs(sb - sa) < 1e-6:
                 if abs(sa - tip) > 0.05 or abs(sa - gl) < 1e-6:      # solo el borde de la punta
@@ -1435,6 +1440,12 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
                 ta, tb = max(0.0, min(1.0, ta)), max(0.0, min(1.0, tb))
                 if ta > tb:
                     ta, tb = tb, ta
+            _yo0, _yo1 = _open_plate(c, t)[3], _open_plate(c, t)[4]
+            if abs(_yb - _ya) > 1e-9:                                # solo el tramo que cae sobre la pared del miembro (ángulo / canal: la cartela puede ser más ancha)
+                tl, th = sorted(((_yo0 - _ya) / (_yb - _ya), (_yo1 - _ya) / (_yb - _ya)))
+                ta, tb = max(ta, tl), min(tb, th)
+                if ta >= tb:
+                    continue
             pa, pb = hull[a], hull[b]
             qa = (pa[0] + (pb[0] - pa[0]) * ta, pa[1] + (pb[1] - pa[1]) * ta)
             qb = (pa[0] + (pb[0] - pa[0]) * tb, pa[1] + (pb[1] - pa[1]) * tb)
@@ -1444,8 +1455,8 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
             nrm2 = np.array([ed[1], -ed[0]]) / max(float(np.linalg.norm(ed)), 1e-12)           # hacia afuera de la cartela (contorno CCW)
             nA = unit(e1 * nrm2[0] + e2 * nrm2[1])
             k += 1
-            mdl.welds.append(Weld(f"{name}-M{c.m.name}{'' if pi == 0 else chr(96 + pi)}{k}", name, c.partname, tuple(map(float, P0 + e1 * qa[0] + e2 * qa[1] + n * (lat - t / 2.0))),
-                                  tuple(map(float, P0 + e1 * qb[0] + e2 * qb[1] + n * (lat - t / 2.0))), tuple(map(float, nA)), tuple(map(float, n)), wsz, 70.0, f"G{gi + 1}{c.m.name}"))
+            mdl.welds.append(Weld(f"{name}-M{c.m.name}{'' if pi == 0 else chr(96 + pi)}{k}", name, c.partname, tuple(map(float, P0 + e1 * qa[0] + e2 * qa[1] + n * (lat - (1.0 if lat >= 0 else -1.0) * t / 2.0))),
+                                  tuple(map(float, P0 + e1 * qb[0] + e2 * qb[1] + n * (lat - (1.0 if lat >= 0 else -1.0) * t / 2.0))), tuple(map(float, nA)), tuple(map(float, n * (1.0 if lat >= 0 else -1.0))), wsz, 70.0, f"G{gi + 1}{c.m.name}"))
     elif shp.kind == HSS_RECT:
         u0 = float(np.dot(P0 + n * lat - c.Q, c.sx))
         for sy_sign in (1.0, -1.0):
@@ -1502,6 +1513,25 @@ def _is_simple(poly):
     return all(not _segs_cross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n]) for i in range(n) for j in range(i + 2, n) if not (i == 0 and j == n - 1))
 
 
+def _open_plate(c, t):
+    """Perfil abierto contra la cartela: (lateral del centro de la cartela respecto del eje del miembro, espesor de la pared que se aprieta con los pernos,
+    centro y extremos de esa pared a lo largo de sy).  I: la cartela junto al alma.  Ángulo / canal: la cartela contra la cara exterior del ala del ángulo /
+    del alma del canal (el otro ala o las alas del canal quedan del lado contrario)."""
+    shp = c.shape
+    from ..shapes import ANGLE, CHANNEL
+    if shp.kind in (ANGLE, CHANNEL):
+        rects = list(shp.rects())
+        web = max(rects, key=lambda r: (r[3] - r[1]) if (r[2] - r[0]) <= (r[3] - r[1]) else 0.0)
+        others = [r for r in rects if r is not web]
+        x0, x1, y0, y1 = web[0], web[2], web[1], web[3]
+        if all(r[0] >= x0 - 1e-6 for r in others):
+            xp = x0 - t / 2.0                                     # el resto del perfil sale hacia +x: la cartela va por el lado −x
+        else:
+            xp = x1 + t / 2.0
+        return xp, x1 - x0, (y0 + y1) / 2.0, y0, y1
+    return _halfw(shp) + t / 2.0, shp.tw, 0.0, -shp.d / 2.0, shp.d / 2.0
+
+
 def _build_gussets(ctxs, nd, mdl, floors=()):
     for gi, g in enumerate(_gusset_members(ctxs, nd, mdl)):
         n = g["n"]
@@ -1510,12 +1540,15 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
         e2 = np.cross(n, e1)                               # e1×e2 = n
         t = max(max(c.t for c in g["items"]), 0.375)
         # desplazamiento lateral comun: junto al alma de los miembros abiertos; centrada si todos son huecos
-        lats = [(_halfw(c.shape) + t / 2.0) for c in g["items"] if _is_open(c.shape)]
-        lat = max(lats) if lats else 0.0
+        lats = [(1.0 if float(np.dot(c.sx, n)) >= 0 else -1.0) * _open_plate(c, t)[0] for c in g["items"] if _is_open(c.shape)]
+        lat = max(lats, key=abs) if lats else 0.0
+        for c in g["items"]:
+            if _is_open(c.shape) and c.shape.kind != W_SHAPE and lat * (1.0 if float(np.dot(c.sx, n)) >= 0 else -1.0) * _open_plate(c, t)[0] < 0:
+                mdl.notes.append(f"{c.m.name}: su ángulo / canal queda con la cartela del lado contrario del alma; gire el miembro 180° (giro del miembro) para que la cartela quede contra su cara exterior.")
         _A, msx, _msy = main_frame(nd)
         mshape = g["items"][0].mshape
         if _is_open(mshape) and abs(float(np.dot(n, msx))) > 0.99:       # el plano de la cartela coincide con el del alma del principal: se coloca a un lado
-            lat = max(lat, mshape.tw / 2.0 + t / 2.0)
+            lat = math.copysign(max(abs(lat), mshape.tw / 2.0 + t / 2.0), lat if lat != 0 else 1.0)
         pts2 = []
         for c in g["items"]:
             outline, *_ = _gusset_outline(c)
@@ -1651,9 +1684,12 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
             gauge = min(max(min(hm * 0.5, 6.0), 2.5), max(float(shp.d) - 2.5, 2.0))        # los pernos dentro del peralte del miembro
             slotted = False
             sgn_c = 1.0 if float(np.dot(c.sx, n)) >= 0 else -1.0                 # el eje lateral del miembro puede mirar al revés que la normal de la cartela
+            yc_ = 0.0
             if _is_open(shp):
-                grip = [(f"Cartela {gi + 1}", 0.0, t), (c.partname, t, t + shp.tw)]
-                p0, nut = sgn_c * (lat + t / 2.0), t + shp.tw
+                _xp, tw_web, yc_, _y0, _y1 = _open_plate(c, t)
+                s_g = 1.0 if lat >= 0 else -1.0
+                grip = [(f"Cartela {gi + 1}", 0.0, t), (c.partname, t, t + tw_web)]
+                p0, nut = sgn_c * (lat + s_g * t / 2.0), t + tw_web
             else:
                 p0, nut = shp.bf / 2.0, shp.bf
                 u0 = float(np.dot(g["P0"] + n * lat - c.Q, c.sx))
@@ -1668,7 +1704,7 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
                     grip = [(c.partname, 0.0, shp.bf)]
             for i in range(rows):
                 for k, sg in enumerate((1, -1)):
-                    mdl.bolts.append(_bolt(f"{m.name}-B{i + 1}{k + 1}", c.at(gl + 1.5 + i * s, p0, sg * gauge / 2.0), -c.sx * (sgn_c if _is_open(shp) else 1.0), c.db, 0.0, nut, grip, c.op.bolt_grade))
+                    mdl.bolts.append(_bolt(f"{m.name}-B{i + 1}{k + 1}", c.at(gl + 1.5 + i * s, p0, yc_ + sg * gauge / 2.0), -c.sx * ((sgn_c * (1.0 if lat >= 0 else -1.0)) if _is_open(shp) else 1.0), c.db, 0.0, nut, grip, c.op.bolt_grade))
 
 
 # ================================================================================================== modelo completo
@@ -2101,6 +2137,19 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         reg["Placa base"] = {"type": "placa base", "part": "Placa base", "t": tpb, "Fy": Fy_b, "Fu": Fu_b, "faces": {
             "Cara superior": FaceFrame(Ob + Fb @ np.array([0.0, 0.0, tpb]) - Fb[:, 0] * Bw / 2.0, Fb[:, 0], Fb[:, 2], Bw, Nw / 2.0, tpb),
             "Cara inferior": FaceFrame(Ob - Fb[:, 0] * Bw / 2.0, Fb[:, 0], -Fb[:, 2], Bw, Nw / 2.0, tpb)}}
+        circ = bpd.plate.shape == "Circular"
+        out = []
+        for w in mdl.welds:                                        # la cartela (o su cordón) apoya sobre la placa base: no debe sobresalir de sus bordes
+            if w.B != "Placa base":
+                continue
+            for q in (w.p0, w.p1):
+                loc = Fb.T @ (np.asarray(q, float) - Ob)
+                off = math.hypot(loc[0], loc[1]) - Bw / 2.0 if circ else max(abs(loc[0]) - Bw / 2.0, abs(loc[1]) - Nw / 2.0)
+                if off > 0.05:
+                    out.append((w.A, off))
+        for nm_ in sorted({a for a, _o in out}):
+            mx = max(o for a, o in out if a == nm_)
+            mdl.notes.append(f"{nm_} sobresale {mx:.1f} in del borde de la placa base: agrande la placa o reduzca la cartela.")
     for nm_, (s_, e_, d_) in free_ends.items():
         reg[nm_]["ends"] = (s_, e_, d_)
         _d, _sx, _sy = frames[nm_]

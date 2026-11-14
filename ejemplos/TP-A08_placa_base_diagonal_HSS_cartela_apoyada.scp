@@ -314,7 +314,7 @@
    },
    "plate": {
     "shape": "Rectangular",
-    "N": 22.0,
+    "N": 36.0,
     "B": 22.0,
     "Dp": 26.0,
     "tp": 2.0,
@@ -420,7 +420,7 @@
    "conc": {
     "material": "(personalizado)",
     "fc": 4.0,
-    "N2": 48.0,
+    "N2": 52.0,
     "B2": 48.0,
     "ha": 48.0,
     "cracked": true,
