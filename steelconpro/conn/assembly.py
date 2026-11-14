@@ -226,6 +226,7 @@ class _Ctx:
         self.bdir, self.bsx, self.bsy = dirv, sx, sy
         self.mfr = None                 # (eje, sx, sy) del principal
         self.aligned = False            # la placa esta alineada con otro elemento (dir / sx / sy son los de la placa)
+        self.saddle = None              # apoyo redondo: (radio, eje del principal, vector radial de Q): el borde de la placa sigue la curvatura del tubo (silla)
 
     def at(self, s, lat=0.0, v=0.0):
         """Punto a `s` del apoyo Q a lo largo del miembro, `lat` en sx y `v` en sy."""
@@ -238,6 +239,17 @@ class _Ctx:
 
     def face_s(self, lat=0.0, v=0.0) -> float:
         """Distancia, a lo largo de `dir`, desde Q hasta el plano de la cara del apoyo en el punto (lat, v) de la seccion del miembro (0 si llega de frente)."""
+        if self.saddle is not None:                                   # tubo redondo: la placa llega a la superficie cilindrica
+            R, Ax, rq = self.saddle
+            d = self.dir - Ax * float(np.dot(self.dir, Ax))
+            w = lat * (self.sx - Ax * float(np.dot(self.sx, Ax))) + v * (self.sy - Ax * float(np.dot(self.sy, Ax)))
+            a_ = float(np.dot(d, d))
+            if a_ < 1e-9:
+                return 0.0
+            b_ = 2.0 * float(np.dot(d, rq + w))
+            c_ = float(np.dot(rq + w, rq + w)) - R * R
+            disc = b_ * b_ - 4.0 * a_ * c_
+            return float((-b_ + math.sqrt(max(disc, 0.0))) / (2.0 * a_))
         if not self.oblique:
             return 0.0
         cn = float(np.dot(self.dir, self.sn))
@@ -251,7 +263,7 @@ class _Ctx:
 
     def u_face(self, lats, vs) -> float:
         """Menor distancia a la cara del apoyo en un recuadro (lats, vs): hasta ahi se alarga una placa para despues recortarla contra la cara."""
-        return min(self.face_s(a, b) for a in lats for b in vs) if self.oblique else 0.0
+        return min(self.face_s(a, b) for a in lats for b in vs) if (self.oblique or self.saddle is not None) else 0.0
 
     def clip_support(self, prism):
         """Recorta el prisma contra el plano de la cara del apoyo (se conserva el lado de afuera): la pieza queda apoyada sin entrar en el soporte."""
@@ -486,7 +498,10 @@ def _tab_geometry(ctx, tag):
     else:
         clip = min(clip, H / 2.0 - 0.1, Lp - 0.1)
         yl, yh = ty_p - H / 2, ty_p + H / 2
-        if clip > 1e-6:
+        if ctx.saddle is not None:                                      # borde junto al tubo redondo: sigue su curvatura
+            ys_ = [yl + (yh - yl) * i / 8.0 for i in range(9)]
+            poly = [(Lp, yl), (Lp, yh)] + [(x0(y_), y_) for y_ in reversed(ys_)]
+        elif clip > 1e-6:
             poly = [(x0(yl + clip), yl + clip), (x0(yl) + clip, yl), (Lp, yl), (Lp, yh), (x0(yh) + clip, yh), (x0(yh - clip), yh - clip)]
         else:
             poly = [(x0(yl), yl), (Lp, yl), (Lp, yh), (x0(yh), yh)]            # la placa nace en la cara del soporte (x = 0)
@@ -553,10 +568,13 @@ def _tab_geometry(ctx, tag):
             hw_ = (sep_ if two_plates else (Hf if stepped else H)) / 2.0
             cy_ = ty if two_plates else ty_p
             cl_ = 0.0 if (stepped or two_plates) else clip
-            p0_ = ctx.on_face(lat_face, cy_ - hw_ + cl_)
-            p1_ = ctx.on_face(lat_face, cy_ + hw_ - cl_)
-            ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
-                                  tuple(map(float, ctx.sx * sg)), tuple(map(float, nBs)), w, 70.0, tag))
+            nseg = 8 if ctx.saddle is not None else 1                  # contra un tubo redondo el cordón sigue la curva: varios tramos rectos
+            vv_ = [cy_ - hw_ + cl_ + (2.0 * hw_ - 2.0 * cl_) * i / nseg for i in range(nseg + 1)]
+            for i_ in range(nseg):
+                p0_ = ctx.on_face(lat_face, vv_[i_])
+                p1_ = ctx.on_face(lat_face, vv_[i_ + 1])
+                ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}" + (f".{i_ + 1}" if nseg > 1 else ""), name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
+                                      tuple(map(float, ctx.sx * sg)), tuple(map(float, nBs)), w, 70.0, tag))
         if two_plates:                                              # la placa de corte se suelda a la cara interior de cada placa, por sus dos caras
             e2_ = min(max(e, 0.5), Lp - 0.5)
             for vs, nfl in ((ty + sep_ / 2.0, -1.0), (ty - sep_ / 2.0, 1.0)):
@@ -1945,6 +1963,13 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 align = (unit(sn_m), k)
                 mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
                                  f"la viga se corta en ángulo contra la cara y sus alas se sueldan a ella.")
+            if cop is not None and mshape.is_round and s_ex is not None and shp.kind != 'GEN':
+                rq_ = Q - A * float(np.dot(Q, A))
+                if kind == OP_TAB and abs(float(np.dot(rq_, rq_)) - (mshape.d / 2.0) ** 2) < 0.05 * (mshape.d / 2.0) ** 2:
+                    c.saddle = (mshape.d / 2.0, np.asarray(A, float), np.asarray(rq_, float))        # placa simple sobre un tubo redondo: borde con silla
+                    c.ret = _clear_of_main(shp, Q + dirv * gap_eff(m), dirv, sx, sy, ext, msx, msy)               # la viga no debe entrar en el tubo
+                elif kind in (OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD):
+                    mdl.notes.append(f"{m.name}: «{kind}» no se puede apoyar en un principal redondo (cara curva): se dibuja contra el plano tangente y no toca al tubo; use placa simple (con silla) o una placa propia.")
             if cop is not None and kind in (OP_TAB, OP_DANG, OP_SEAT) and c.oblique and not c.aligned:
                 c.ret = skew_retreat(shp, c.sn, dirv, sx, sy)
                 if c.ret > 0.05:
