@@ -351,19 +351,31 @@ def mesh(args) -> dict:
         sc.add_faces(shank, _rgb("#2f4b7c"), 1.0, edges=False)
         sc.add_faces(head, _rgb("#44546a"), 1.0, edges=True)
         parts.append(_scene_to_json(sc, "Pernos", "bolt", {"label": f"{len(mdl.bolts)} pernos", "closed": True}))
+    plane_labels = []
+    for part in mdl.parts:                                        # volúmenes restados (Part.cuts): fantasmas translúcidos para ver qué se quita
+        for k, ct in enumerate(getattr(part, "cuts", None) or []):
+            cf = [[tuple(map(float, q)) for q in f] for f in ct.faces()]
+            if cf:
+                sc = _faces_scene(cf, _rgb("#c2185b"), 0.28, edges=True)
+                parts.append(_scene_to_json(sc, f"{part.name}·resta{k + 1}", "cut", {"label": f"Volumen restado de {part.name}", "owner": getattr(part, "owner", ""), "closed": True}))
     for tag, faces, color, alpha in mdl.extra:
         fl = [[tuple(map(float, q)) for q in f] for f in faces]
         pts += [q for f in fl for q in f]
         sc = _faces_scene(fl, _rgb(color), alpha, edges=tag != "conc")
         if tag.startswith("plane:"):
+            for f in fl:                                          # contorno azul marcado y nombre del plano: se distingue de las piezas (translúcido, sin espesor)
+                if len(f) >= 3:
+                    sc.add_polyline(list(f) + [f[0]], (0.1, 0.45, 0.85), 1.0)
+                    c = np.mean(np.asarray(f, float), axis=0)
+                    plane_labels.append({"pos": list(map(float, c)), "text": "Plano " + tag.split(":", 1)[1]})
             parts.append(_scene_to_json(sc, tag.split(":", 1)[1], "plane", {"label": "Plano de trabajo " + tag.split(":", 1)[1], "owner": ""}))
         else:
-            parts.append(_scene_to_json(sc, f"Placa base · {tag}", "base_" + tag, {"label": "Placa base", "owner": "op:base"}))
+            parts.append(_scene_to_json(sc, f"Placa base · {tag}", "base_" + tag, {"label": "Placa base", "owner": "op:base", "closed": True}))
     P = np.asarray(pts, float).reshape(-1, 3)
     lo, hi = (P.min(axis=0).tolist(), P.max(axis=0).tolist()) if len(P) else ([0, 0, 0], [1, 1, 1])
     dims = [{"a": list(map(float, a)), "b": list(map(float, b)), "off": list(map(float, off)),
              "value": float(val) if not isinstance(val, str) else val, "views": list(views)} for a, b, off, val, views in mdl.dims]
-    labels = [{"pos": list(map(float, pos)), "text": text} for pos, text in mdl.tags]
+    labels = [{"pos": list(map(float, pos)), "text": text} for pos, text in mdl.tags] + plane_labels
     return {"parts": parts, "dims": dims, "labels": labels, "notes": mdl.notes, "bounds": [lo, hi], "unit": "in"}
 
 
