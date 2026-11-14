@@ -237,6 +237,7 @@ function plateBody(body, E, op, ctx, info, names, el, nd, us, addForm, index) {
     if (op.shape === C.shapes[4]) items.push(numField('Ancho de la base superior (0 = igual)', 'pl_L2', 'L', 0, 600));
     items.push({ path: 'plate_steel', label: 'Acero de la placa', type: 'combo', items: C.plate_steels.map((s) => s.name) });
     geom.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Geometría' }), addForm(items)));
+    geom.append(refPosCard(op, ctx, info, el, addForm, rebuild));
     if (op.shape === C.shapes[6]) geom.append(polyEditor(op, ctx));
     const oi = [{ path: 'opening', label: 'Abertura en la placa', type: 'combo', items: C.openings }];
     if (op.opening === C.openings[1]) oi.push(numField('Diámetro', 'op_D', 'L', 0.1, 200), numField('Desplazamiento en el largo', 'op_x', 'L', -300, 300), numField('Desplazamiento en el ancho', 'op_y', 'L', -300, 300));
@@ -406,7 +407,7 @@ function angleBody(body, E, op, ctx, info, el, nd, addForm) {
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Geometría' }), addForm([
     numField('Pierna sobre la cara (a lo ancho)', 'leg_a', 'L', 0.5, 40), numField('Pierna saliente', 'leg_b', 'L', 0.5, 40), numField('Espesor', 'plate_t', 'L', 0.0625, 3, 0.0625), numField('Largo del ángulo', 'pl_L', 'L', 0.5, 600),
     numField('Posición del centro a lo largo', 'pl_s', 'L', -600, 6000), numField('Desplazamiento transversal', 'pl_u', 'L', -600, 600),
-    { path: 'leg_side', label: 'Pierna saliente hacia', type: 'combo', items: [1, -1] }, { path: 'plate_steel', label: 'Acero', type: 'combo', items: C.plate_steels.map((s) => s.name) }])), un);
+    { path: 'leg_side', label: 'Pierna saliente hacia', type: 'combo', items: [1, -1] }, { path: 'plate_steel', label: 'Acero', type: 'combo', items: C.plate_steels.map((s) => s.name) }])), refPosCard(op, ctx, info, el, addForm, () => {}), un);
   body.append(root);
   return root;
 }
@@ -450,20 +451,21 @@ function trimBody(body, E, op, ctx, info, el, nd, addForm) {
   const build = () => {
     clear(box);
     const miter = op.trim_mode === C.trim_modes[1];
+    const vol = op.trim_mode === C.trim_modes[2];                       // contra el volumen de otro elemento: no usa cara
     const members = info.filter((e) => e.type === 'miembro');
     const tgtEl = info.find((x) => x.name === (op.targets || [])[0]);
-    const isPlate = !!tgtEl && tgtEl.type === 'placa';
-    const cuttable = info.filter((e) => e.type === 'miembro' || e.type === 'placa');
+    const isPlate = !!tgtEl && (tgtEl.type === 'placa' || tgtEl.type === 'ángulo');
+    const cuttable = info.filter((e) => e.type === 'miembro' || e.type === 'placa' || e.type === 'ángulo');
     const e = el(op.parent);
     box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Elementos' }), h('div', { class: 'form-grid' },
       field('Elemento que se recorta', selectInput({ value: (op.targets || [])[0] || '', options: [{ value: '', label: '—' }, ...cuttable.map((m) => ({ value: m.name, label: `${m.name} — ${m.type}` }))], onChange: (v) => { op.targets = v ? [v] : []; build(); ctx.onChange(); } })),
       isPlate ? h('div') : field('Extremo', selectInput({ value: op.trim_end, options: ['Inicio', 'Fin'], onChange: (v) => { op.trim_end = v; ctx.onChange(); } })),
       field(miter ? 'Otro miembro del inglete' : 'Elemento contra el que se recorta', selectInput({ value: op.parent, options: [{ value: '', label: '—' }, ...(miter ? members : info).map((x) => ({ value: x.name, label: `${x.name} — ${x.type}` }))], onChange: (v) => { op.parent = v; const x = el(v); if (x && !x.faces.includes(op.face)) op.face = x.faces[0]; build(); ctx.onChange(); } })),
-      miter ? h('div') : field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } }))),
-    miter ? null : h('div', { style: { height: '10px' } }), miter ? null : addForm([numField('Holgura respecto de la cara', 'trim_gap', 'L', -6, 12)])));
-    if (isPlate) box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Corte de la placa' }), addForm([{ path: 'trim_flip', label: 'Conservar el otro lado del plano', type: 'check', wide: true }]), h('p', { class: 'hint-text', text: 'La placa se corta con el plano de la cara elegida (más la holgura); por defecto se conserva el lado donde está la placa. Los bordes, cordones y pernos de la placa usan el contorno ya recortado.' })));
-    if (!isPlate) box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Soldadura' }), addForm([{ path: 'trim_weld', label: 'Soldar el contorno del miembro recortado', type: 'check', wide: true }]),
-      op.trim_weld ? addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides }]) : h('p', { class: 'hint-text', text: 'Agrega un cordón alrededor de la sección del miembro, en el plano del recorte (con holgura 0).' })));
+      (miter || vol) ? h('div') : field('Cara', selectInput({ value: op.face, options: e ? e.faces : [], onChange: (v) => { op.face = v; ctx.onChange(); } }))),
+    miter ? null : h('div', { style: { height: '10px' } }), miter ? null : addForm([numField(vol ? 'Holgura alrededor del elemento' : 'Holgura respecto de la cara', 'trim_gap', 'L', -6, 12)])));
+    if (isPlate) box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Corte de la placa' }), addForm([{ path: 'trim_flip', label: vol ? 'Conservar lo que queda dentro del elemento' : 'Conservar el otro lado del plano', type: 'check', wide: true }]), h('p', { class: 'hint-text', text: 'La placa se corta con el plano de la cara elegida (más la holgura); por defecto se conserva el lado donde está la placa. Los bordes, cordones y pernos de la placa usan el contorno ya recortado.' })));
+    box.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Soldadura' }), addForm([{ path: 'trim_weld', label: isPlate ? 'Soldar el borde recortado donde toca al otro elemento' : 'Soldar el elemento recortado donde toca al otro elemento', type: 'check', wide: true }]),
+      op.trim_weld ? addForm([numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides }]) : h('p', { class: 'hint-text', text: 'El cordón va solo en los tramos donde la pieza recortada toca al elemento que la corta (con holgura 0): contorno de la sección en un miembro, borde nuevo en una placa o un ángulo.' })));
   };
   root.onField = (p) => { if (p === 'trim_weld') build(); };
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Tipo de recorte' }), segmented(C.trim_modes.map((m) => ({ value: m, label: m })), op.trim_mode, (v) => { op.trim_mode = v; build(); ctx.onChange(); })), box);
@@ -497,6 +499,21 @@ function workplaneBody(body, E, op, ctx, info, nd, addForm) {
   const mdlRoot = root; root.refresh = () => form.refresh();
   body.append(root);
   return root;
+}
+
+// posición de una placa o ángulo referenciada a la cara de otro elemento (miembro, placa, ángulo, bloque, plano de trabajo)
+function refPosCard(op, ctx, info, el, addForm, rebuild) {
+  const others = info.filter((x) => x.name !== op.name);
+  const e = el(op.pos_ref);
+  const fc = [];
+  const box = h('div', { class: 'card-sec' }, h('h4', { text: 'Posición referenciada a otro elemento' }),
+    h('div', { class: 'form-grid' },
+      field('Elemento de referencia', selectInput({ value: op.pos_ref || '', options: [{ value: '', label: 'Ninguno (posición propia)' }, ...others.map((x) => ({ value: x.name, label: `${x.name} — ${x.type}` }))],
+        onChange: (v) => { op.pos_ref = v; const ee = el(v); op.pos_ref_face = ee ? (ee.faces.includes(op.pos_ref_face) ? op.pos_ref_face : ee.faces[0]) : ''; rebuild(); ctx.onChange(); } })),
+      e && e.faces.length > 1 ? field('Cara de referencia', selectInput({ value: op.pos_ref_face || e.faces[0], options: e.faces, onChange: (v) => { op.pos_ref_face = v; ctx.onChange(); } })) : h('div')),
+    op.pos_ref ? addForm([numField('Desplazamiento respecto del plano de esa cara', 'pos_ref_off', 'L', -600, 600, null, null, 'Medido a lo largo de la normal de la cara de referencia.')]) : null,
+    h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'El centro de la placa queda sobre el plano de la cara elegida (más el desplazamiento): por ejemplo, un rigidizador a la altura del ala de una viga. Fija la posición en el sentido de la cara padre que más se acerca a la normal de ese plano; el otro sentido sigue siendo el de «Posición» y «Desplazamiento transversal».' }));
+  return box;
 }
 
 // ---------------------------------------------------------------------------------------------------------- bloque de concreto
