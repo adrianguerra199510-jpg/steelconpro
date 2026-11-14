@@ -673,6 +673,14 @@ def _seat_geometry(ctx, tag):
     Fy, Fu = _steel(ctx.op.plate_steel, True)
     st = float(getattr(ctx, "sup_t", 1.0)) if ctx.main_name else 1.0
     gauge = min(max(W - 2.5, 1.5), 4.0)
+    if ctx.main_name:                                              # la pierna vertical no debe salirse de la cara del principal (p. ej. contra el alma de una viga maestra)
+        sn0 = ctx.sn if ctx.oblique else ctx.dir
+        down = -(ctx.sy - float(np.dot(ctx.sy, sn0)) * np.asarray(sn0, float))
+        if float(np.linalg.norm(down)) > 1e-6:
+            room_v = _face_room(ctx, ctx.on_face(0.0, yb), unit(down))
+            if room_v < Lv - 1e-6:
+                ctx.notes.append(f"{m.name}: la pierna vertical del asiento se acorta de {Lv:g} a {max(room_v, 1.0):.2f} in: la cara del principal no es más alta.")
+                Lv = max(room_v, 1.0)
     if not ctx.oblique:
         poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh + ofs, yb - t), (Lh + ofs, yb), (-EMBED, yb)]
         prs = [_plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0)]        # U×V = dir×sy = -sx (simetrico)
@@ -1660,7 +1668,10 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 mss.append(ms_k)
             ctxs_m.append(c)
         c = ctxs_m[0]
-        ms = (max(mss) + float(m.gap)) if mss else gap_eff(m) + max(c_.ret for c_ in ctxs_m)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
+        rigid = any(c_.op.kind in (OP_EP_FLUSH, OP_EP_EXT, OP_WELD) for c_ in ctxs_m if c_.op is not None)
+        if rigid and abs(float(m.gap)) > 1e-9:
+            mdl.notes.append(f"{m.name}: el desplazamiento sobre el eje no se aplica a la placa extrema ni a las alas soldadas (el miembro va soldado a la placa o al soporte).")
+        ms = (max(mss) + (0.0 if rigid else float(m.gap))) if mss else gap_eff(m) + max(c_.ret for c_ in ctxs_m)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
         if any(c_.op.kind in GUSSET_OPS for c_ in ctxs_m if c_.op is not None):
             push = _clear_of_main(shp, Q + dirv * ms, dirv, sx, sy, ext, msx, msy)
             if push > 1e-6:                                         # la esquina de la sección del miembro inclinado penetra en el principal: se retrasa el miembro
