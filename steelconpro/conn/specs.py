@@ -170,6 +170,9 @@ class Operation:
     pl_s: float = 12.0           # posicion del centro de la placa a lo largo del elemento padre desde su inicio, in
     pl_u: float = 0.0            # desplazamiento transversal del centro respecto del centro de la cara, in
     pl_rot: float = 0.0          # giro de la placa en el plano de la cara, grados
+    pos_ref: str = ""            # posición referenciada: elemento (miembro, placa, ángulo, bloque, plano de trabajo) cuyo plano de cara fija una de las coordenadas del centro de la placa
+    pos_ref_face: str = ""       # cara del elemento de referencia (el plano de trabajo no necesita elegirla)
+    pos_ref_off: float = 0.0     # desplazamiento del plano de referencia a lo largo de su normal, in
     pl_clip: float = 1.0         # lado del recorte de la esquina (forma recortada), in
     weld_all: bool = True        # soldadura en todo el contorno (si no, solo los lados largos)
     rows: int = 2                # pernos en la direccion del elemento padre
@@ -377,7 +380,7 @@ class Nodo:
         for i, o in enumerate(self.operations):
             if o.makes_element and o.name == name:
                 continue
-            if o.parent == name or name in (o.targets or []) or o.weld_main == name or any(t[0] == name for t in (o.weld_to or [])) or (o.member == name and o.kind != OP_BASE and o.kind in GENERIC_OPS):
+            if o.parent == name or o.pos_ref == name or name in (o.targets or []) or o.weld_main == name or any(t[0] == name for t in (o.weld_to or [])) or (o.member == name and o.kind != OP_BASE and o.kind in GENERIC_OPS):
                 out.append(i)
         return out
 
@@ -392,6 +395,8 @@ class Nodo:
                 o.member = new
             if o.parent == old:
                 o.parent = new
+            if o.pos_ref == old:
+                o.pos_ref = new
             o.targets = [new if x == old else x for x in (o.targets or [])]
             o.weld_main = new if o.weld_main == old else o.weld_main
             o.weld_to = [[new if t[0] == old else t[0], t[1]] for t in (o.weld_to or [])]
@@ -417,6 +422,8 @@ class Nodo:
             for o in self.operations:
                 if o.parent == old:
                     o.parent = new
+                if o.pos_ref == old:
+                    o.pos_ref = new
                 o.targets = [new if x == old else x for x in (o.targets or [])]
                 o.weld_main = new if o.weld_main == old else o.weld_main
                 o.weld_to = [[new if t[0] == old else t[0], t[1]] for t in (o.weld_to or [])]
@@ -429,6 +436,8 @@ class Nodo:
                 o.member = new
             if o.parent == old:
                 o.parent = new
+            if o.pos_ref == old:
+                o.pos_ref = new
             o.targets = [new if x == old else x for x in (o.targets or [])]
             o.weld_main = new if o.weld_main == old else o.weld_main
             o.weld_to = [[new if t[0] == old else t[0], t[1]] for t in (o.weld_to or [])]

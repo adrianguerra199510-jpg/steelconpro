@@ -179,7 +179,7 @@ def ordered(nd) -> list:
         moved = False
         for item in list(pending):
             i, o = item
-            need = {o.parent} - {""} | set(o.targets or [])
+            need = {o.parent} - {""} | set(o.targets or []) | ({o.pos_ref} - {""} if o.kind in (OP_PLATE, OP_ANGLE) else set())
             if o.kind == OP_ALIGN or (o.kind == OP_FILLET and o.weld_main):
                 need = {o.parent} - {""} | ({o.weld_main} - {""}) | {t[0] for t in (o.weld_to or [])}
             if o.kind == OP_CUT:
@@ -316,6 +316,32 @@ def member_contour_lines(frame, ff, edges=None):
             nA3 = nA3 / max(float(np.linalg.norm(nA3)), 1e-12)
             out.append((P0, P1, nA3, nB, gi))
     return out
+
+
+def resolve_position(o, parent, reg):
+    """Posición referenciada: copia de la operación con `pl_s` o `pl_u` calculado para que el centro de la placa quede sobre el plano de la cara de referencia
+    (`pos_ref` + `pos_ref_face`), desplazado `pos_ref_off`.  Se resuelve la coordenada de la cara padre cuyo eje tiene la mayor componente de la normal del
+    plano; la otra queda como la escribió el usuario.  -> (operación, aviso o "")"""
+    import copy
+    ref = reg.get(o.pos_ref)
+    if ref is None:
+        return o, f"el elemento de referencia «{o.pos_ref}» no existe; se usa la posición escrita."
+    fr = ref["faces"].get(o.pos_ref_face) or ref["faces"].get("Plano")
+    if fr is None:
+        return o, f"elija la cara de «{o.pos_ref}» que fija la posición de la placa."
+    ff = parent["faces"][o.face]
+    Nr = np.asarray(fr.N, float)
+    Nr = Nr / max(float(np.linalg.norm(Nr)), 1e-12)
+    Pr = np.asarray(fr.O, float) + Nr * float(o.pos_ref_off)
+    a, b = float(Nr @ ff.A), float(Nr @ ff.U)
+    if max(abs(a), abs(b)) < 0.2:
+        return o, f"el plano de «{o.pos_ref}» ({o.pos_ref_face}) es paralelo a la cara «{o.face}» de «{o.parent}» y no fija la posición; se usa la posición escrita."
+    o2 = copy.copy(o)
+    if abs(a) >= abs(b):
+        o2.pl_s = float(Nr @ (Pr - ff.O - ff.U * float(o.pl_u))) / a
+    else:
+        o2.pl_u = float(Nr @ (Pr - ff.O - ff.A * float(o.pl_s))) / b
+    return o2, ""
 
 
 def _bisect_in(part, p, ax, s_out, s_in, n=12):
@@ -583,6 +609,11 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
         if o.kind in (OP_PLATE, OP_BOLTS, OP_ANGLE, OP_HOLE) and (parent is None or o.face not in parent["faces"]):
             mdl.notes.append(f"Operación {i + 1} «{o.kind}»: elija el elemento y la cara a la que se une (cara «{o.face}» de «{o.parent}»).")
             continue
+        if o.kind in (OP_PLATE, OP_ANGLE) and o.pos_ref:
+            o, msg = resolve_position(o, parent, reg)
+            ent["op"] = o
+            if msg:
+                mdl.notes.append(f"Operación {i + 1}: {msg}")
         db = bolt_db(o.bolt_size)
         wtype = o.weld_type
         if o.kind == OP_PLATE:
