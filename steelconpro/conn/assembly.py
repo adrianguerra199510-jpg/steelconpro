@@ -21,6 +21,7 @@ from .fem.model3d import Model3D, Part, Bolt, Prism, Weld, unit
 from . import ops as OPS
 from .ops import member_faces, FaceFrame
 from . import polyclip as PCLIP
+from .geocheck import part_mask
 from .specs import (GENERIC_OPS, OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
                     OP_COPE, OP_CONT, TAB_MODES, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
 
@@ -821,7 +822,7 @@ def _gusset_outline(ctx):
     return pts, gl, ov, hm
 
 
-def _gusset_members(ctxs, nd):
+def _gusset_members(ctxs, nd, mdl=None):
     """Una cartela por plano: la envolvente de los contornos de los miembros que comparten plano (p. ej. las dos diagonales de una V)."""
     groups = []
     for c in ctxs:
@@ -835,6 +836,7 @@ def _gusset_members(ctxs, nd):
         else:
             groups.append({"n": n, "P0": c.P0, "items": [c]})
     out = []
+    main_part = next((q for q in mdl.parts if q.name == nd.main_name), None) if mdl is not None else None
     for g in groups:                                               # en un mismo plano, solo comparten cartela los miembros cuyos contornos se tocan (no los de lados opuestos del principal)
         if len(g["items"]) < 2:
             out.append(g)
@@ -854,8 +856,9 @@ def _gusset_members(ctxs, nd):
             return i
         for i in range(len(polys)):
             for j in range(i + 1, len(polys)):
-                if len(polys[i]) >= 3 and len(polys[j]) >= 3 and (PCLIP.intersect_convex(polys[i], polys[j]) or
-                                                                  min(_dist_poly(q, polys[j]) for q in polys[i]) < 0.5):
+                ci, cj = g["items"][i], g["items"][j]
+                mid = (ci.Q + cj.Q) / 2.0 + 0.1 * (ci.dir + cj.dir) / 2.0
+                if main_part is None or not bool(part_mask(main_part, mid[None, :])[0]):       # el principal no se interpone entre los dos apoyos: comparten cartela
                     comp[find(j)] = find(i)
         roots = {}
         for i, c in enumerate(g["items"]):
@@ -1171,7 +1174,7 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
 
 
 def _build_gussets(ctxs, nd, mdl, floors=()):
-    for gi, g in enumerate(_gusset_members(ctxs, nd)):
+    for gi, g in enumerate(_gusset_members(ctxs, nd, mdl)):
         n = g["n"]
         ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
         e1 = unit(np.cross(ref, n))
