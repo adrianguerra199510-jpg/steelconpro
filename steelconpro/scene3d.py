@@ -51,6 +51,18 @@ def tri_poly(P):
     return out
 
 
+def _fan(P, nv, ln):
+    """Triangulacion en abanico de un poligono convexo (todos los giros al mismo lado que su normal); None si no es convexo o es degenerado."""
+    if ln < 1e-14:
+        return None
+    n = len(P)
+    d = np.roll(P, -1, axis=0) - P
+    c = np.cross(d, np.roll(d, -1, axis=0)) @ nv
+    if (c < -1e-9 * ln).any():
+        return None
+    return [(0, i, i + 1) for i in range(1, n - 1)]
+
+
 def _newell(P):
     nv = np.zeros(3)
     for i in range(len(P)):
@@ -79,25 +91,36 @@ class Scene:
     # ---------------------------------------------------------------- primitivas
     def add_faces(self, faces, rgb, alpha=1.0, edges=True, all_edges=False):
         """Poligonos 3D (lista de listas de (x, y, z)) con sombreado plano y aristas vivas opcionales."""
-        tri_rows = []
+        vs, ns_ = [], []
         edge_map = {}
         col = np.array([*rgb, alpha], float)
         for f in faces:
             P = np.asarray(f, float)
-            if len(P) < 3:
+            n = len(P)
+            if n < 3:
                 continue
-            nrm = _newell(P)
-            for (i, j, k) in tri_poly(P):
-                for q in (P[i], P[j], P[k]):
-                    tri_rows.append(np.concatenate([q, nrm, col]))
+            nv = np.cross(P, np.roll(P, -1, axis=0)).sum(axis=0)
+            ln = float(np.linalg.norm(nv))
+            nrm = nv / ln if ln > 1e-14 else nv
+            T = _fan(P, nv, ln) if n > 3 else None
+            if T is None:
+                T = tri_poly(P) if n > 3 else [(0, 1, 2)]
+            if len(T):
+                T = np.asarray(T, np.int64).reshape(-1)
+                vs.append(P[T])
+                ns_.append(np.broadcast_to(nrm, (len(T), 3)))
             if edges:
-                n = len(P)
+                R = np.round(P, 5).tolist()
+                keys = [tuple(r) for r in R]
                 for i in range(n):
-                    a, b = P[i], P[(i + 1) % n]
-                    key = tuple(sorted((tuple(np.round(a, 5)), tuple(np.round(b, 5)))))
-                    edge_map.setdefault(key, []).append(nrm)
-        if tri_rows:
-            arr_ = np.array(tri_rows, np.float32)
+                    a, b = keys[i], keys[(i + 1) % n]
+                    edge_map.setdefault((a, b) if a <= b else (b, a), []).append(nrm)
+        if vs:
+            V = np.concatenate(vs)
+            arr_ = np.empty((len(V), FLOATS), np.float32)
+            arr_[:, 0:3] = V
+            arr_[:, 3:6] = np.concatenate(ns_)
+            arr_[:, 6:10] = col
             (self.trans if alpha < 0.999 else self.opaque).append(arr_)
             self.tagged.append((self.group, "t" if alpha < 0.999 else "o", arr_))
         if edges and edge_map:
@@ -105,10 +128,12 @@ class Scene:
                            *(([0.3, 0.35, 0.4, 0.55] if alpha < 0.999 else [0.05, 0.07, 0.1, 0.75]))], float)
             seg = []
             for (a, b), ns in edge_map.items():
-                sharp = all_edges or len(ns) == 1 or min(float(ns[0] @ n_) for n_ in ns[1:]) < 0.88
+                # arista viva: de borde, o con un diedro de mas de ~28 grados.  Se compara |cos| para que una cara con la normal invertida (poligonos mal
+                # orientados de otros modulos) coplanar con su vecina no dibuje la diagonal de la triangulacion
+                sharp = all_edges or len(ns) == 1 or min(abs(float(ns[0] @ n_)) for n_ in ns[1:]) < 0.88
                 if sharp:
-                    for q in (a, b):
-                        seg.append(np.concatenate([q, ec[3:]]))
+                    seg.append((*a, *ec[3:]))
+                    seg.append((*b, *ec[3:]))
             if seg:
                 arr_ = np.array(seg, np.float32)
                 self.lines.append(arr_)

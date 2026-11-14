@@ -15,26 +15,26 @@ def _rgb(hexcol):
 
 
 def _bolt_faces(b):
-    """Caras del perno: cabeza y tuerca (prismas hexagonales) y vastago."""
+    """Caras del perno: vastago (cilindro entre la cabeza y la tuerca) y cabeza / tuerca (prismas hexagonales apoyados en `head_s` y `nut_s`, hacia afuera
+    del agarre: si head_s < nut_s la cabeza sale hacia −eje y la tuerca hacia +eje; si es al reves, al reves)."""
     ax = unit(b.axis)
     p = np.asarray(b.p, float)
     out = {"shank": [], "head": []}
+    hs, ns = float(b.head_s), float(b.nut_s)
     r = 0.5 * b.db
-    sh = cyl_prism(p + ax * 0.5 * (b.head_s + b.nut_s), ax, r, abs(b.nut_s - b.head_s) + 0.0)
-    out["shank"] += sh.faces(16)
+    ref = [0.0, 0.0, 1.0] if abs(ax[2]) < 0.9 else [1.0, 0.0, 0.0]
+    U = unit(np.cross(ax, ref))
+    V = np.cross(ax, U)                                                   # U × V = eje
+    if abs(ns - hs) > 1e-9:
+        sh = Prism(o=tuple(p), U=tuple(U), V=tuple(V), w0=min(hs, ns), w1=max(hs, ns), circle=(r, 0.0))
+        out["shank"] += sh.faces(16)
     th = 0.65 * b.db
     hexr = 0.5 * 1.5 * b.db / math.cos(math.radians(30))
-    for s0, sgn in ((b.head_s, -1.0), (b.nut_s, 1.0)):
-        c = p + ax * (s0 + sgn * th / 2.0 * (1.0 if sgn > 0 else -1.0) * -1.0)
-    # cabeza: sobresale hacia fuera desde head_s (sentido -axis); tuerca desde nut_s (sentido +axis)
-    for s0, sg in ((b.head_s, -1.0), (b.nut_s, 1.0)):
-        c = p + ax * (s0 + sg * th / 2.0)
-        h = cyl_prism(c, ax, hexr, th)
-        h.circle = None
-        U = unit(np.cross(ax, [0.0, 0.0, 1.0] if abs(ax[2]) < 0.9 else [1.0, 0.0, 0.0]))
-        V = np.cross(ax, U)
-        h.U, h.V = tuple(U), tuple(V)
-        h.poly = [(hexr * math.cos(math.radians(60 * k)), hexr * math.sin(math.radians(60 * k))) for k in range(6)]
+    hexa = [(hexr * math.cos(math.radians(60 * k)), hexr * math.sin(math.radians(60 * k))) for k in range(6)]
+    out_dir = -1.0 if hs <= ns else 1.0                                   # sentido en que la cabeza sale del agarre
+    for s0, sg in ((hs, out_dir), (ns, -out_dir)):
+        s1 = s0 + sg * th
+        h = Prism(poly=hexa, o=tuple(p), U=tuple(U), V=tuple(V), w0=min(s0, s1), w1=max(s0, s1))
         out["head"] += h.faces()
     return out
 
