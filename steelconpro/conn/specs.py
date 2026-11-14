@@ -79,12 +79,14 @@ HOLE_SHAPES = ["Circular", "Ranura", "Rectangular"]
 WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcial)"]
 TAB_MODES = ["Sobre la cara del soporte", "Hasta el interior de las alas del principal"]
 BEAM_CONNS = ["Atornillada", "Soldada"]
-TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro"]
+TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro", "Contra el volumen de otro elemento"]
+# «Contra el volumen»: la placa o el ángulo (targets[0]) pierde la parte que queda dentro del elemento `parent` (miembro, placa o ángulo) más la holgura `trim_gap`
 WELD_SIDES = ["Ambos lados", "Solo lado 1", "Solo lado 2"]     # filete: 1 = cara + de la pieza (normal local +), 2 = cara −; en las alas de una viga, 1 = exterior y 2 = interior
 WELD_MODES = ["Bordes de la placa", "Contorno del miembro"]
-ATTACHES = ["Soldada", "Atornillada"]
+ATTACHES = ["Soldada", "Atornillada", "Sin unión propia"]       # «Sin unión propia»: la placa no lleva soldadura ni pernos propios; la unen otras operaciones (pernos entre elementos, soldadura entre elementos)
 FACES_END = ["Extremo inicio", "Extremo fin"]
-FACES_I = ["Ala superior", "Ala inferior", "Alma +", "Alma −"] + FACES_END
+FACES_INNER = ["Ala superior (interior)", "Ala inferior (interior)"]     # caras interiores de las alas de un perfil I (hacia el alma)
+FACES_I = ["Ala superior", "Ala inferior", "Alma +", "Alma −"] + FACES_END + FACES_INNER
 FACES_BOX = ["Cara +X", "Cara −X", "Cara +Y", "Cara −Y"] + FACES_END
 FACES_PLATE = ["Cara +", "Cara −"]
 FACES_ANGLE = ["Pierna sobre la cara", "Pierna saliente +", "Pierna saliente −"]
@@ -364,6 +366,29 @@ class Nodo:
             if x.member == old:
                 x.member = new
         self.main_name = new
+
+    def rename_element(self, old, new) -> bool:
+        """Cambia el nombre de un elemento cualquiera (principal, miembro, placa, ángulo o plano de trabajo) y de todas las operaciones que lo nombran.
+        False si `old` no existe o `new` ya está en uso."""
+        if old == new or new in self.element_names() or old not in self.element_names():
+            return False
+        if old == self.main_name:
+            self.rename_main(new)
+        elif self.member_named(old) is not None:
+            self.member_named(old).name = new
+            self.rename_member(old, new)
+        else:
+            for o in self.operations:
+                if o.makes_element and o.name == old:
+                    o.name = new
+            for o in self.operations:
+                if o.parent == old:
+                    o.parent = new
+                o.targets = [new if x == old else x for x in (o.targets or [])]
+                o.weld_main = new if o.weld_main == old else o.weld_main
+                o.weld_to = [[new if t[0] == old else t[0], t[1]] for t in (o.weld_to or [])]
+                o.op_member = new if o.op_member == old else o.op_member
+        return True
 
     def rename_member(self, old, new):
         for o in self.operations:

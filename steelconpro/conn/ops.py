@@ -75,6 +75,8 @@ def member_faces(shape, start, end, A, sx, sy) -> dict:
         out["Ala inferior"] = FaceFrame(start - sy * d / 2.0, A, -sy, L, bf / 2.0, tf)
         out["Alma +"] = FaceFrame(start + sx * tw / 2.0, A, sx, L, (d - 2 * tf) / 2.0, tw)
         out["Alma −"] = FaceFrame(start - sx * tw / 2.0, A, -sx, L, (d - 2 * tf) / 2.0, tw)
+        out["Ala superior (interior)"] = FaceFrame(start + sy * (d / 2.0 - tf), A, -sy, L, bf / 2.0, tf)       # cara de adentro de cada ala, mirando al alma
+        out["Ala inferior (interior)"] = FaceFrame(start - sy * (d / 2.0 - tf), A, sy, L, bf / 2.0, tf)
     else:
         t = float(shape.tw if shape.tw > 0 else 0.5)
         uh_x = (d / 2.0) if not shape.is_round else 0.35 * d
@@ -292,13 +294,87 @@ def member_contour_lines(frame, ff, edges=None):
     return out
 
 
+def _bisect_in(part, p, ax, s_out, s_in, n=12):
+    """Punto entre `s_out` (fuera de la pieza) y `s_in` (dentro) donde el eje p + ax·s entra en ella."""
+    from . import geocheck as GC
+    for _ in range(n):
+        mid = 0.5 * (s_out + s_in)
+        if bool(GC.part_mask(part, (p + ax * mid)[None, :], holes_extra=False)[0]):
+            s_in = mid
+        else:
+            s_out = mid
+    return 0.5 * (s_out + s_in)
+
+
+def bolt_grip(mdl, reg, names, p, axis, notes=None, tag="", max_len=60.0, **_unused):
+    """Agarre real de un perno: [(pieza, s0, s1)] de los tramos del eje (punto `p`, dirección `axis`) que están dentro de las piezas de los elementos `names`,
+    en el orden en que el eje las cruza (la cabeza está en s = 0).  El perno termina donde acaba el primer tramo del elemento que llega más lejos: así un
+    tubo con una placa a cada lado se atraviesa por sus dos paredes, un tubo con una sola placa lleva el perno ciego en la pared, y un perfil I atornillado a
+    una placa solo se atraviesa por el ala (o el alma) y no por todo el perfil.  Un elemento que el eje no cruza queda con su espesor nominal después de los
+    demás y se avisa.  None si algún elemento no tiene pieza dibujada (no se dibujan los herrajes)."""
+    from . import geocheck as GC
+    parts = []
+    for nm in names:
+        e = reg.get(nm)
+        part = next((x for x in mdl.parts if x.name == e["part"]), None) if e is not None else None
+        if part is None or not part.prisms:
+            return None
+        parts.append((nm, part, float(e.get("t", 0.375) or 0.375)))
+    p = np.asarray(p, float)
+    ax = np.asarray(axis, float)
+    ax = ax / max(float(np.linalg.norm(ax)), 1e-12)
+    s = np.arange(-0.06, max_len, 0.05)
+    P = p + np.outer(s, ax)
+    ivs, miss = [], []
+    for nm, part, t_nom in parts:
+        m = GC.part_mask(part, P, holes_extra=False)
+        found, i, n = [], 0, len(s)
+        while i < n:
+            if m[i]:
+                j = i
+                while j + 1 < n and m[j + 1]:
+                    j += 1
+                a = s[i] if i == 0 else _bisect_in(part, p, ax, s[i - 1], s[i])
+                b = s[j] if j == n - 1 else _bisect_in(part, p, ax, s[j + 1], s[j])
+                found.append((max(a, 0.0), b))
+                i = j + 1
+            else:
+                i += 1
+        found = [(a, b) for a, b in found if b - a > 0.01]
+        if not found:
+            miss.append((nm, part, t_nom))
+        ivs.append((nm, part.name, found))
+    end = max([f[0][1] for _nm, _pn, f in ivs if f] or [0.0])
+    grip = sorted((float(a), float(b), pn) for _nm, pn, f in ivs for a, b in f if a < end - 1e-6)
+    grip = [(pn, a, b) for a, b, pn in grip]
+    end = max([g[2] for g in grip] or [0.0])
+    for nm, part, t_nom in miss:                                   # el eje no cruza la pieza: se deja constancia para que el revisor lo marque
+        grip.append((part.name, end, end + t_nom))
+        end += t_nom
+        if notes is not None:
+            msg = f"Los pernos «{tag.rsplit('-B', 1)[0]}» no atraviesan «{nm}»: revise la posición del grupo."
+            if msg not in notes:
+                notes.append(msg)
+    return grip
+
+
+def _layers_of_grip(grip, reg, layers):
+    """Capas [(elemento, espesor)] con el espesor que de verdad atraviesa el perno (el menor de sus tramos)."""
+    out = []
+    for nm, t in layers:
+        pn = (reg.get(nm) or {}).get("part")
+        ts = [g[2] - g[1] for g in grip if g[0] == pn]
+        out.append((nm, float(min(ts)) if ts else float(t)))
+    return out
+
+
 def _punch_all(mdl):
     """Agujeros de todos los pernos en las piezas que atraviesan."""
     from . import plates as PL
     parts = {p.name: p for p in mdl.parts}
     for b in mdl.bolts:
         ax = np.asarray(b.axis, float)
-        for (pn, s0, s1) in b.grip:
+        for pn in dict.fromkeys(g[0] for g in b.grip):            # una vez por pieza (un tubo aparece con dos tramos)
             part = parts.get(pn)
             if part is not None:
                 PL.punch(part, np.asarray(b.p, float), ax, PL.circle_fn(float(b.dh), 20))
@@ -375,13 +451,14 @@ def _weld_pair(main, tgt, face_name, o, PL):
     if ff is None and main.get("parent_face") in tgt["faces"] and main.get("parent_part") == tgt.get("part"):
         ff = tgt["faces"][main["parent_face"]]                       # la pieza está unida a ese elemento: se suelda por la cara donde se apoya
     if ff is None:
-        return [], None
+        return [], None, {}
     edges = None if o.weld_all else set(o.weld_edges)
+    info = {}
     if main.get("geo") is not None:
-        return PL.weld_lines(main["geo"], ff, edges, o.weld_a, o.weld_len), ff
+        return PL.weld_lines(main["geo"], ff, edges, o.weld_a, o.weld_len, region=PL.face_region(tgt, ff), info=info), ff, info
     if main.get("frame_full") is not None:
-        return member_contour_lines(main["frame_full"], ff, edges), ff
-    return list(main.get("lines") or []), ff
+        return member_contour_lines(main["frame_full"], ff, edges), ff, info
+    return list(main.get("lines") or []), ff, info
 
 
 def _t_element(e, ff=None) -> float:
@@ -407,8 +484,13 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
     from . import plates as PL
     entries = []
     order, orphans = ordered(nd)
+    all_names = set(nd.element_names()) | ({"Placa base"} if nd.base_op() is not None else set())
     for i, o in orphans:
-        mdl.notes.append(f"Operación {i + 1} «{o.kind}»: depende de un elemento que no existe ({o.parent or ', '.join(o.targets) or ', '.join([o.weld_main] + [t[0] for t in (o.weld_to or [])] if o.weld_main else [])}).")
+        refs = [x for x in ([o.parent] + list(o.targets or []) + ([o.weld_main] + [t[0] for t in (o.weld_to or [])] if o.weld_main else [])) if x]
+        if refs and all(x in all_names for x in refs):
+            mdl.notes.append(f"Operación {i + 1} «{o.kind}»: dependencia circular entre elementos ({', '.join(refs)}): una placa no puede cortarse ni apoyarse en algo que depende de ella; se ignora esta operación.")
+        else:
+            mdl.notes.append(f"Operación {i + 1} «{o.kind}»: depende de un elemento que no existe ({', '.join(x for x in refs if x not in all_names) or ', '.join(refs)}).")
     for i, o in order:
         ent = {"op": o, "index": i, "ok": False}
         entries.append(ent)
@@ -434,9 +516,9 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
         if o.kind == OP_PLATE:
             ff = parent["faces"][o.face]
             geo = PL.make_geo(o, ff)
-            for t_ in nd.operations:                              # recortes que cortan esta placa
-                if t_.kind == OP_TRIM and t_.targets and t_.targets[0] == o.name:
-                    mdl.notes += [f"Operación {i + 1}: {n_}" for n_ in PL.apply_trims(geo, [t_], reg)]
+            trims_ = [t_ for t_ in nd.operations if t_.kind == OP_TRIM and t_.targets and t_.targets[0] == o.name]
+            if trims_:                                            # recortes que cortan esta placa (planos de caras o volúmenes de otros elementos)
+                mdl.notes += [f"Operación {i + 1}: {n_}" for n_ in PL.apply_trims(geo, trims_, reg, mdl, o.name)]
             PL.add_opening(geo, o, reg)
             pr, e1, e2, e3, centre = geo["prism"], geo["e1"], geo["e2"], geo["e3"], geo["centre"]
             spec = {"L1": o.pl_L, "L2": (o.pl_L if o.shape == PLATE_SHAPES[3] else o.pl_W), "t": geo["t"], "perp": geo["perp"]}
@@ -448,91 +530,125 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             ent.update(ok=True, ff=ff, spec=spec, parent=parent, plate_name=nm, e=(e1, e2, e3), centre=centre, geo=geo)
             reg[nm] = {"type": "plate", "faces": plate_faces(centre, e1, e2, e3, spec["L1"], spec["L2"], spec["t"]), "part": nm, "t": spec["t"], "Fy": Fy, "Fu": Fu,
                        "geo": geo, "parent": o.parent, "parent_face": o.face, "parent_part": parent["part"]}
+            attach = o.attach
+            end_face = (not geo["perp"]) and o.face in FACES_END and parent.get("frame_full") is not None
+            if end_face and attach == ATTACHES[1]:
+                mdl.notes.append(f"Operación {i + 1}: el extremo de un miembro no se atornilla (los pernos irían a lo largo de su eje); la placa «{nm}» se suelda al contorno del miembro.")
+                attach = ATTACHES[0]
             edges = None if o.weld_all else set(o.weld_edges)
-            lines = PL.weld_lines(geo, ff, edges, o.weld_a, o.weld_len)
+            info = {}
+            if end_face and attach == ATTACHES[0]:                  # placa sobre el extremo de un miembro: el cordón sigue el contorno de la sección, no los bordes de la placa
+                lines = PL.clip_to_region(member_contour_lines(parent["frame_full"], ff, None), ff, PL.face_region(reg[nm], ff))      # solo donde la placa cubre el contorno
+                reg[nm]["lines_swap"] = True                        # (A = el miembro, B = la placa)
+                wA, wB = parent["part"], nm
+            elif attach == ATTACHES[0] or geo["perp"]:
+                lines = PL.weld_lines(geo, ff, edges, o.weld_a, o.weld_len, region=PL.face_region(parent, ff), info=info)
+                wA, wB = nm, parent["part"]
+            else:
+                lines, wA, wB = [], nm, parent["part"]                # unión atornillada o sin unión propia: no hay cordón de la placa
             reg[nm]["lines"] = lines
             ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], geo["e3"]))
-            if (o.attach == ATTACHES[0] or spec["perp"]) and hw:
+            if info.get("clipped", 0.0) > 1.0:
+                mdl.notes.append(f"Operación {i + 1}: la placa «{nm}» sobresale de la cara «{o.face}» de «{o.parent}»; el cordón solo se dibuja donde hay apoyo "
+                                 f"({info['clipped']:.1f} in de borde quedan sin soldar).")
+            if (attach == ATTACHES[0] or spec["perp"]) and not lines:
+                mdl.notes.append(f"Operación {i + 1}: la placa «{nm}» no tiene borde sobre la cara «{o.face}» de «{o.parent}» (revise la forma, la orientación o los bordes soldados).")
+            if (attach == ATTACHES[0] or spec["perp"]) and hw:
                 for k, ln in enumerate(lines):
-                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, geo["e3"]))
-            if o.attach == ATTACHES[1] and not spec["perp"] and hw:
+                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", wA, wB, ln, o.weld_size, nm, wtype, o, geo["e3"]))
+            if attach == ATTACHES[1] and not spec["perp"] and hw:
                 pts = bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g)
                 t = spec["t"]
                 wall = parent["faces"][o.face].wall
                 grade = o.bolt_grade
                 for k, (a, b) in enumerate(pts):
                     p = ff.point(o.pl_s, o.pl_u) + e1 * a + e2 * b + ff.N * t
-                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, t + wall, [(nm, 0.0, t), (parent["part"], t, t + wall)], grade))
+                    grip = bolt_grip(mdl, reg, [nm, o.parent], p, -ff.N, notes=mdl.notes, tag=f"{nm}-B{k + 1}")
+                    if grip is None:
+                        grip = [(nm, 0.0, t), (parent["part"], t, t + wall)]
+                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, max(g_[2] for g_ in grip), grip, grade))
                 ent["bolts"] = len(pts)
-            elif o.attach == ATTACHES[1] and spec["perp"]:
+            elif attach == ATTACHES[1] and spec["perp"]:
                 mdl.notes.append(f"Operación {i + 1}: una placa perpendicular a la cara (rigidizador) se suelda; se dibuja la soldadura.")
         elif o.kind == OP_ANGLE:
             ff = parent["faces"][o.face]
             t = max(float(o.plate_t), 0.0625)
             a_, b_, L = float(o.leg_a), float(o.leg_b), float(o.pl_L)
             side = 1.0 if o.leg_side >= 0 else -1.0
-            s0 = o.pl_s - L / 2.0
+            rot = math.radians(o.pl_rot)                              # giro del ángulo en el plano de la cara: 0 = su eje va a lo largo del elemento; 90 = a lo ancho
+            fA = math.cos(rot) * ff.A + math.sin(rot) * ff.U
+            fU = np.cross(ff.N, fA)
+            c0 = ff.O + ff.A * o.pl_s + ff.U * o.pl_u                  # centro del ángulo sobre la cara
+            s0 = -L / 2.0                                              # inicio del ángulo medido desde el centro a lo largo de su eje
             if side > 0:
                 poly = [(-a_ / 2, 0.0), (a_ / 2, 0.0), (a_ / 2, b_), (a_ / 2 - t, b_), (a_ / 2 - t, t), (-a_ / 2, t)]
             else:
                 poly = [(a_ / 2, 0.0), (-a_ / 2, 0.0), (-a_ / 2, b_), (-a_ / 2 + t, b_), (-a_ / 2 + t, t), (a_ / 2, t)]
-            o3 = ff.O + ff.A * s0 + ff.U * o.pl_u
             from .assembly import _plate_prism
-            pr = _plate_prism(poly, o3, ff.U, ff.N, 0.0, L)
+            pr = _plate_prism(poly, c0 + fA * s0, fU, ff.N, 0.0, L)
             Fy, Fu = _steel(o.plate_steel, True)
             nm = o.name
+            halfs = []                                                # semiespacios (punto, normal) que dejan los recortes: se conserva n·(x − punto) ≤ 0
+            trims_ = [t_ for t_ in nd.operations if t_.kind == OP_TRIM and t_.targets and t_.targets[0] == o.name]
+            if trims_:
+                nts, halfs, w0_, w1_ = PL.trim_angle(pr, trims_, reg, mdl, nm)
+                mdl.notes += [f"Operación {i + 1}: {n_}" for n_ in nts]
+                s0, L = s0 + w0_, w1_ - w0_                           # el recorte (recto) acorta el ángulo: sus caras y cordones siguen al largo que queda
             if hw:
                 mdl.parts.append(Part(nm, "angle", f"Ángulo L{a_:g}×{b_:g}×{t:g} × {L:g}", Fy, Fu, [pr], t=t))
                 mdl.parts[-1].owner = f"op:{i}"
-            Op = o3 - ff.A * s0 * 0
-            fA = ff.A
-            top = FaceFrame(ff.O + ff.U * o.pl_u + ff.N * t, fA, ff.N, L, a_ / 2.0, t)
-            top.O = ff.O + ff.A * s0 + ff.U * o.pl_u + ff.N * t
-            Nin, Nout = -side * ff.U, side * ff.U
-            inner = FaceFrame(ff.O + ff.A * s0 + ff.U * (o.pl_u + side * (a_ / 2 - t)) + ff.N * ((t + b_) / 2.0), fA, Nin, L, (b_ - t) / 2.0, t)
-            outer = FaceFrame(ff.O + ff.A * s0 + ff.U * (o.pl_u + side * a_ / 2) + ff.N * (b_ / 2.0), fA, Nout, L, b_ / 2.0, t)
+            top = FaceFrame(c0 + fA * s0 + fU * 0.0 + ff.N * t, fA, ff.N, L, a_ / 2.0, t)
+            Nin, Nout = -side * fU, side * fU
+            inner = FaceFrame(c0 + fA * s0 + fU * (side * (a_ / 2 - t)) + ff.N * ((t + b_) / 2.0), fA, Nin, L, (b_ - t) / 2.0, t)
+            outer = FaceFrame(c0 + fA * s0 + fU * (side * a_ / 2) + ff.N * (b_ / 2.0), fA, Nout, L, b_ / 2.0, t)
             reg[nm] = {"type": "angulo", "faces": {FACES_ANGLE[0]: top, FACES_ANGLE[1]: inner, FACES_ANGLE[2]: outer}, "part": nm, "t": t, "Fy": Fy, "Fu": Fu,
                        "parent": o.parent, "parent_face": o.face, "parent_part": parent["part"], "lines": None}
             spec = {"L1": L, "L2": a_, "t": t, "perp": False}
-            ent.update(ok=True, ff=ff, spec=spec, parent=parent, plate_name=nm, e=(fA, ff.U, ff.N), centre=o3)
+            ent.update(ok=True, ff=ff, spec=spec, parent=parent, plate_name=nm, e=(fA, fU, ff.N), centre=c0)
             # unión: soldada (todo el contorno de la pierna sobre la cara) o atornillada (pernos a traves de la pierna)
+            P = lambda s_, u_, n_: c0 + fA * s_ + fU * u_ + ff.N * n_     # noqa: E731
+            base = [(P(s0, -a_ / 2, 0), P(s0 + L, -a_ / 2, 0), -fU, ff.N), (P(s0, a_ / 2, 0), P(s0 + L, a_ / 2, 0), fU, ff.N),
+                    (P(s0, -a_ / 2, 0), P(s0, a_ / 2, 0), -fA, ff.N), (P(s0 + L, -a_ / 2, 0), P(s0 + L, a_ / 2, 0), fA, ff.N)]
             lines = []
-            xs = [(-a_ / 2.0, 1), (a_ / 2.0, 2)]
-            for u_edge, nu in ((-a_ / 2.0, -1.0), (a_ / 2.0, 1.0)):
-                for sA, sgnA in ((s0, -1.0), (s0 + L, 1.0)):
-                    pass
-            P = lambda s_, u_, n_: ff.O + ff.A * s_ + ff.U * (o.pl_u + u_) + ff.N * n_     # noqa: E731
-            lines = [(P(s0, -a_ / 2, 0), P(s0 + L, -a_ / 2, 0), -ff.U, ff.N), (P(s0, a_ / 2, 0), P(s0 + L, a_ / 2, 0), ff.U, ff.N),
-                     (P(s0, -a_ / 2, 0), P(s0, a_ / 2, 0), -ff.A, ff.N), (P(s0 + L, -a_ / 2, 0), P(s0 + L, a_ / 2, 0), ff.A, ff.N)]
-            reg[nm]["lines"] = [(l[0], l[1], l[2], l[3], k) for k, l in enumerate(lines)]
-            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], ff.U))
+            for k, l in enumerate(base):
+                seg = PL.clip_segment_halfspaces(l[0], l[1], halfs)
+                if seg is not None:
+                    lines.append((seg[0], seg[1], l[2], l[3], k))
+            lines = PL.clip_to_region(lines, ff, PL.face_region(parent, ff))
+            reg[nm]["lines"] = lines
+            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], fU))
             if o.attach == ATTACHES[0] and hw:
                 for k, ln in enumerate(lines):
-                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, ff.U))
-            elif hw:
+                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, fU))
+            elif o.attach == ATTACHES[1] and hw:
                 pts = bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g)
                 wall = parent["faces"][o.face].wall
                 for k, (aa, bb) in enumerate(pts):
-                    p = ff.O + ff.A * (o.pl_s + aa) + ff.U * (o.pl_u + bb) + ff.N * t
-                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, t + wall, [(nm, 0.0, t), (parent["part"], t, t + wall)], o.bolt_grade))
+                    p = c0 + fA * aa + fU * bb + ff.N * t
+                    grip = bolt_grip(mdl, reg, [nm, o.parent], p, -ff.N, notes=mdl.notes, tag=f"{nm}-B{k + 1}")
+                    if grip is None:
+                        grip = [(nm, 0.0, t), (parent["part"], t, t + wall)]
+                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, max(g_[2] for g_ in grip), grip, o.bolt_grade))
                 ent["bolts"] = len(pts)
         elif o.kind == OP_BOLTS:
             ff = parent["faces"][o.face]
-            names = [o.parent] + [x for x in (o.targets or []) if x in reg]
+            names = [o.parent] + [x for x in (o.targets or []) if x in reg and x != o.parent]
             layers = _bolt_layers(reg, names, ff.wall)
             layers[0] = (layers[0][0], ff.wall) if reg[o.parent]["type"] == "miembro" else layers[0]
-            total = sum(t for _n, t in layers)
             pts = rot_pts(bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g), o.pl_rot)
-            grip, s0 = [], 0.0
-            for nm_, t_ in layers:
-                grip.append((reg[nm_]["part"], s0, s0 + t_))
-                s0 += t_
             pts3 = [ff.point(o.pl_s, o.pl_u) + ff.A * a + ff.U * b for a, b in pts]
             ent["edge"] = bolt_edge_distance(reg, names, ff, pts3)
             if hw:
-                for k, (a, b) in enumerate(pts):
-                    p = ff.point(o.pl_s, o.pl_u) + ff.A * a + ff.U * b
-                    mdl.bolts.append(_bolt(f"{o.name or 'B' + str(i + 1)}-B{k + 1}", p, -ff.N, db, 0.0, total, grip, o.bolt_grade))
+                for k, p in enumerate(pts3):
+                    grip = bolt_grip(mdl, reg, names, p, -ff.N, notes=mdl.notes, tag=f"{o.name or 'B' + str(i + 1)}-B{k + 1}")
+                    if grip is None:                                  # sin piezas (no se dibujan los herrajes): espesores de las capas
+                        grip, s0_ = [], 0.0
+                        for nm_, t_ in layers:
+                            grip.append((reg[nm_]["part"], s0_, s0_ + t_))
+                            s0_ += t_
+                    elif k == 0:                                      # espesores reales de las capas que atraviesa el primer perno (para las verificaciones)
+                        layers = _layers_of_grip(grip, reg, layers)
+                    mdl.bolts.append(_bolt(f"{o.name or 'B' + str(i + 1)}-B{k + 1}", p, -ff.N, db, 0.0, max(g_[2] for g_ in grip), grip, o.bolt_grade))
             ent.update(ok=True, ff=ff, layers=layers, bolts=len(pts), parent=parent)
         elif o.kind == OP_HOLE:
             ff = parent["faces"][o.face]
@@ -562,7 +678,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 tgt = reg.get(tn)
                 if tgt is None or tn == o.weld_main:
                     continue
-                lines, ffp = _weld_pair(main, tgt, tf, o, PL)
+                lines, ffp, winfo = _weld_pair(main, tgt, tf, o, PL)
                 if lines:
                     pairs.append({"to": tn, "L": sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], main["geo"]["e3"] if main.get("geo") is not None else None)),
                                   "t_main": _t_element(main), "t_to": _t_element(tgt, ffp), "face": getattr(ffp, "name", "")})
@@ -600,16 +716,18 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                     other = reg.get(o.parent) if o.parent else None
                     if other is not None and o.face in other["faces"] and e.get("geo") is not None:
                         ffx = other["faces"][o.face]
-                        lines = PL.weld_lines(e["geo"], ffx, None if o.weld_all else set(o.weld_edges), o.weld_a, o.weld_len)
-                        partB = other["part"]
+                        lines = PL.weld_lines(e["geo"], ffx, None if o.weld_all else set(o.weld_edges), o.weld_a, o.weld_len, region=PL.face_region(other, ffx))
+                        partB, stored = other["part"], False
                     else:
+                        stored = True
                         lines = e["lines"] or []
                         if not o.weld_all:
                             lines = [l for l in lines if (len(l) < 5 or l[4] in set(o.weld_edges))]
                         partB = e["parent_part"]
                     for k, ln in enumerate(lines):
                         if hw:
-                            _addw(mdl, _mkweld(Weld, f"{tg}-S{i + 1}.{k + 1}", tg, partB, ln, o.weld_size, f"S{i + 1}", wtype, o, (e["geo"]["e3"] if e.get("geo") is not None else None)))
+                            wa_, wb_ = (partB, e["part"]) if e.get("lines_swap") and stored else (e["part"], partB)
+                            _addw(mdl, _mkweld(Weld, f"{tg}-S{i + 1}.{k + 1}", wa_, wb_, ln, o.weld_size, f"S{i + 1}", wtype, o, (e["geo"]["e3"] if e.get("geo") is not None else None)))
                         ents.append(float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0]))))
                 ent.update(ok=bool(ents), weld_len=sum(ents), plates=[t for t in (o.targets or []) if t in reg])
     if hw:
@@ -711,7 +829,9 @@ def add_checks(prj, nd, R, rec, mdl):
                 lim = 0.56 * math.sqrt(29000.0 / Fy)
                 _chk(R.checks, grp, f"{key}_slend", "Rigidizador — esbeltez del borde libre  h/t ≤ 0.56·√(E/Fy)", spec["L2"] / t, lim, "-", "AISC Tabla B4.1a, caso 1")
             ent_weld = o.attach == ATTACHES[0] or spec["perp"]
-            if ent_weld:
+            if o.attach == ATTACHES[2] and not spec["perp"]:
+                pass                                                   # sin unión propia: la verifican las operaciones de pernos y soldaduras que la unen
+            elif ent_weld:
                 _weld_checks(R.checks, grp, key, float(o.weld_size), ent.get("weld_len", 0.0), V, T, t, parent["faces"][o.face].wall if o.face in parent["faces"] else t, wtype=o.weld_type)
             else:
                 ff = ent["ff"]
@@ -733,7 +853,9 @@ def add_checks(prj, nd, R, rec, mdl):
             _chk(R.checks, grp, f"{key}_ty", "Ángulo — fluencia en tracción (sección bruta)", T, 0.90 * Fy * Ag, "kip", "AISC J4.1(a)", "φ = 0.90")
             _chk(R.checks, grp, f"{key}_tr", "Ángulo — rotura en tracción (sección neta)", T, 0.75 * Fu * Ae, "kip", "AISC J4.1(b)", "φ = 0.75")
             _chk(R.checks, grp, f"{key}_vy", "Ángulo — fluencia por cortante", V, 1.00 * 0.60 * Fy * o.pl_L * t, "kip", "AISC J4.2(a)", "φ = 1.00")
-            if o.attach == ATTACHES[0]:
+            if o.attach == ATTACHES[2]:
+                pass
+            elif o.attach == ATTACHES[0]:
                 _weld_checks(R.checks, grp, key, float(o.weld_size), ent.get("weld_len", 0.0), V, T, t, parent["faces"][o.face].wall if o.face in parent["faces"] else t, wtype=o.weld_type)
             else:
                 ff = ent["ff"]
@@ -741,7 +863,7 @@ def add_checks(prj, nd, R, rec, mdl):
                 _bolt_checks(R.checks, grp, key, o, o.rows * o.cols, [(o.name, t, Fu), (o.parent, ff.wall, parent.get("Fu", Fu))], edge, True, V, T, None)
         elif o.kind == OP_BOLTS:
             ff = ent["ff"]
-            layers = [(nm, t, ent["parent"].get("Fu", 65.0) if k == 0 else 65.0) for k, (nm, t) in enumerate(ent["layers"])]
+            layers = [(nm, t, (mdl.elems.get(nm) or {}).get("Fu", 65.0) or 65.0) for nm, t in ent["layers"]]
             edge_a = min(o.pl_s - (o.rows - 1) * o.bolt_s / 2.0, ff.L - o.pl_s - (o.rows - 1) * o.bolt_s / 2.0)
             edge_b = ff.uh - abs(o.pl_u) - (o.cols - 1) * o.bolt_g / 2.0
             if rec is not None:

@@ -159,7 +159,14 @@ def plate_edges(args) -> dict:
     """Bordes elegibles de la placa de una operacion (para elegir donde se suelda): [{index, length}]."""
     from .conn import plates as PL
     p = _prj(args["connection"])
-    return {"edges": PL.edge_lengths(p.node.operations[int(args["index"])])}
+    op = p.node.operations[int(args["index"])]
+    try:                                                              # contorno ya recortado y con sus aberturas (los bordes que usan las soldaduras)
+        geo = ((AS.build_model(p).elems or {}).get(op.name) or {}).get("geo")
+        if geo is not None:
+            return {"edges": PL.edge_lengths_geo(geo)}
+    except Exception:
+        pass
+    return {"edges": PL.edge_lengths(op)}
 
 
 def convert_connection(args) -> dict:
