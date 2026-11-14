@@ -45,7 +45,7 @@ def _load_cases(nd: Nodo):
     """[(caso, {miembro: Load})] en orden de aparicion."""
     cases = {}
     for x in nd.loads:
-        cases.setdefault(x.case, {})[x.member] = x
+        cases.setdefault(x.case, {})[x.member] = nd.effective_load(x)
     return list(cases.items())
 
 

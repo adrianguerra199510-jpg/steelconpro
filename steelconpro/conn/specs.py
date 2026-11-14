@@ -97,6 +97,7 @@ CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_
 MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD)
 SHEAR_OPS = (OP_TAB, OP_DANG, OP_SEAT)
 GUSSET_OPS = (OP_GUSSET, OP_GUSSET_W)
+RELEASE_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_GUSSET, OP_GUSSET_W)      # conexiones que articulan el extremo del miembro (sin momento) cuando la liberación es automática
 # nombres antiguos (version anterior de los archivos: la conexion era un campo del miembro)
 CK_BLANK = "En blanco (sin conexión)"
 _LEGACY_CONN = {"Corte — placa simple": OP_TAB, "Corte — doble ángulo": OP_DANG, "Corte — asiento (ángulo)": OP_SEAT,
@@ -126,6 +127,10 @@ class Member:
     L: float = 48.0              # largo libre dibujado del miembro, in
     roll: float = 0.0            # giro del miembro sobre su eje, grados
     gap: float = 0.0             # desplazamiento del miembro sobre su propio eje, in (+ lo aleja del principal, − lo acerca)
+    rel_auto: bool = True        # rotaciones liberadas en el extremo del nudo: automáticas según la conexión (corte y diagonales articuladas, momento empotradas)
+    rel_T: bool = False          # (si rel_auto es falso) giro alrededor del eje del miembro liberado: el miembro no transmite torsión al nudo
+    rel_My: bool = False         # giro alrededor de su eje local y liberado (flexión por cortante vertical Vz)
+    rel_Mz: bool = False         # giro alrededor de su eje local z liberado (flexión por Vy)
 
 
 @dataclass
@@ -332,6 +337,27 @@ class Nodo:
 
     def member_named(self, name):
         return next((m for m in self.members if m.name == name), None)
+
+    def releases(self, name):
+        """Rotaciones liberadas (T, My, Mz) del extremo del miembro `name` en el nudo.  Automático: las conexiones de corte (placa simple, doble ángulo, asiento) y las de diagonal
+        (cartela) no transmiten momentos; la placa extrema y las alas soldadas sí."""
+        m = self.member_named(name)
+        if m is None:
+            return (False, False, False)
+        if not getattr(m, "rel_auto", True):
+            return (bool(m.rel_T), bool(m.rel_My), bool(m.rel_Mz))
+        for o in self.operations:
+            if o.member == name and o.kind in RELEASE_OPS:
+                return (True, True, True)
+        return (False, False, False)
+
+    def effective_load(self, x):
+        """La carga `x` sin las componentes de momento liberadas en el extremo de su miembro."""
+        import dataclasses
+        t, my, mz = self.releases(x.member)
+        if not (t or my or mz):
+            return x
+        return dataclasses.replace(x, T=0.0 if t else x.T, My=0.0 if my else x.My, Mz=0.0 if mz else x.Mz)
 
     def ops_of(self, name):
         """Operaciones aplicadas al miembro `name`, en orden."""

@@ -29,7 +29,7 @@ def cases_of(nd: Nodo):
     for x in nd.loads:
         if intermediate and x.member == nd.main_name:
             continue
-        out.setdefault(x.case, []).append(x)
+        out.setdefault(x.case, []).append(nd.effective_load(x))          # las rotaciones liberadas en el extremo del nudo no transmiten momento
     return list(out.items())
 
 
@@ -210,13 +210,8 @@ def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, 
 
 
 def _draw_items(nd: Nodo, loads: list, bal: dict, ends: dict) -> list:
-    """Cargas del caso para dibujarlas en el visor, cada una en el EXTREMO de su elemento (fuerza y momento globales, trasladados al extremo):
-    [{pos, F, M, kind, name}].  `ends` = {miembro: punto del extremo libre}."""
-    A = AS.main_frame(nd)[0]
-    lneg, lpos = nd.lengths()
-    if lneg + lpos < 1.0:
-        lneg = lpos = 24.0
-    Eside = lambda side: A * side * (lpos if side > 0 else lneg)                  # noqa: E731
+    """Cargas del caso para dibujarlas en el visor, cada una en el extremo de su elemento QUE LLEGA AL NUDO, tal como se escriben (sin trasladarlas por el largo del miembro):
+    [{pos, F, M, kind, name}].  Los miembros conectados se dibujan en su punto de apoyo sobre el principal; el principal y su reacción, en el cruce de ejes."""
     O = np.zeros(3)
     items = []
     for l in loads:
@@ -228,18 +223,20 @@ def _draw_items(nd: Nodo, loads: list, bal: dict, ends: dict) -> list:
             if side == bal["side"]:
                 continue
             F, M = _vec(l, local_axes(nd, nd.main_name, side))
-            E = Eside(side)
-            items.append({"pos": E.tolist(), "F": F.tolist(), "M": (M + np.cross(O - E, F)).tolist(), "name": nd.main_name, "kind": "main"})
+            items.append({"pos": O.tolist(), "F": F.tolist(), "M": M.tolist(), "name": nd.main_name, "kind": "main"})
             continue
         ax = local_axes(nd, l.member)
-        if ax is None or l.member not in ends:
+        m = nd.member_named(l.member)
+        if ax is None or m is None:
             continue
         F, M = _vec(l, ax)
-        E = np.asarray(ends[l.member], float)
-        items.append({"pos": E.tolist(), "F": F.tolist(), "M": (M + np.cross(_node_point(nd, l.member) - E, F)).tolist(), "name": l.member, "kind": "member"})
-    Eb = Eside(bal["side"])
+        try:
+            Q = np.asarray(AS.attach_info(nd, m)["Q"], float)
+        except Exception:
+            Q = _node_point(nd, l.member)
+        items.append({"pos": Q.tolist(), "F": F.tolist(), "M": M.tolist(), "name": l.member, "kind": "member"})
     R, MR = np.array(bal["R"]), np.array(bal["M"])
-    items.append({"pos": Eb.tolist(), "F": R.tolist(), "M": (MR + np.cross(O - Eb, R)).tolist(), "name": nd.main_name + " (reacción)", "kind": "reaction"})
+    items.append({"pos": O.tolist(), "F": R.tolist(), "M": MR.tolist(), "name": nd.main_name + " (reacción)", "kind": "reaction"})
     return items
 
 

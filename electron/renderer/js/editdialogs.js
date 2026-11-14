@@ -12,6 +12,16 @@ function formCtx(E, obj, onChange) {
 }
 
 // Sustituye un nombre de elemento en todas las referencias del nudo (miembros, operaciones, cargas).
+// rotaciones liberadas (T, My, Mz) del extremo de un miembro en el nudo: automáticas según su conexión (corte y diagonales articuladas) o las marcadas a mano
+export function releasesOf(nd, name) {
+  const m = nd.members.find((x) => x.name === name);
+  if (!m) return { T: false, My: false, Mz: false };
+  if (m.rel_auto === false) return { T: !!m.rel_T, My: !!m.rel_My, Mz: !!m.rel_Mz };
+  const K = S.C.op;
+  const art = nd.operations.some((o) => o.member === name && [K.TAB, K.DANG, K.SEAT, K.GUSSET, K.GUSSET_W].includes(o.kind));
+  return { T: art, My: art, Mz: art };
+}
+
 export function renameRefs(nd, old, nw) {
   const K = S.C.op;
   if (nd.main_name === old) nd.main_name = nw;
@@ -61,6 +71,22 @@ export async function openMember(E, name) {
   body.append(h('div', { class: 'card-sec' }, h('h4', { text: isMain ? 'Miembro principal' : 'Miembro conectado' }), h('div', { class: 'form-grid' }, field('Nombre', nameInp)),
     h('div', { style: { height: '10px' } }), renderItems(items, ctx)));
   if (!isMain) {
+    const relBox = h('div');
+    const buildRel = () => {
+      relBox.replaceChildren();
+      const auto = m.rel_auto !== false;
+      const cur = releasesOf(nd, name);
+      const rf = [{ path: 'rel_auto', label: 'Liberación automática según la conexión', type: 'check', wide: true, help: 'Las conexiones de corte (placa simple, doble ángulo, asiento) y las cartelas de diagonal no transmiten momento; la placa extrema y las alas soldadas sí.' }];
+      if (!auto) rf.push({ path: 'rel_T', label: 'Liberar el giro alrededor del eje del miembro (T)', type: 'check', wide: true }, { path: 'rel_My', label: 'Liberar el giro My (flexión por Vz)', type: 'check', wide: true }, { path: 'rel_Mz', label: 'Liberar el giro Mz (flexión por Vy)', type: 'check', wide: true });
+      const rctx = formCtx(E, m, () => { E.changed({ geometry: false }); });
+      rctx.onChange = (path) => { E.changed({ geometry: false }); if (path === 'rel_auto') buildRel(); };
+      relBox.append(h('h4', { text: 'Rotaciones en el extremo del nudo' }), renderItems(rf, rctx),
+        h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: `Liberado ahora: ${['T', 'My', 'Mz'].filter((k) => cur[k]).join(', ') || 'ninguna (extremo empotrado)'}. Un giro liberado no transmite momento: queda en 0 en «Cargas» y no entra al equilibrio ni a las verificaciones. Se conserva el momento de la excentricidad del miembro respecto del eje del principal.` }));
+    };
+    buildRel();
+    body.append(h('div', { class: 'card-sec' }, relBox));
+  }
+  if (!isMain) {
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Miembro principal' }),
       h('p', { class: 'muted', style: { margin: '0 0 8px' }, text: `El miembro principal es «${nd.main_name}». Puede designar este miembro como principal: el eje del nudo pasa a ser el suyo y los demás llegan a él.` }),
       btn('Designar como miembro principal', { icon: 'star', onClick: async () => {
@@ -109,8 +135,10 @@ export function openLoads(E) {
       tr.append(h('td', null, textInput({ value: l.case, onChange: (v) => { l.case = v; E.changed({ loads: true }); } })),
         h('td', null, selectInput({ value: l.member, options: names(), onChange: (v) => { l.member = v; if (v !== nd.main_name) l.side = 0; draw(); E.changed({ loads: true }); } })),
         h('td', null, isMain ? selectInput({ value: String(l.side || 0), options: [{ value: '0', label: 'Auto (el opuesto)' }, { value: '-1', label: 'Lado −' }, { value: '1', label: 'Lado +' }], onChange: (v) => { l.side = parseInt(v, 10); E.changed({ loads: true }); } }) : null));
+      const rel = l.member !== NODE && !isMain ? releasesOf(nd, l.member) : { T: false, My: false, Mz: false };
       for (const [k, u] of cols) {
-        const inp = numInput({ value: us.out(u, l[k]), dec: us.dec(u === 'M' ? 'F' : u), onChange: (v) => { l[k] = us.inn(u, v); E.changed({ loads: true }); } });
+        const inp = numInput({ value: us.out(u, rel[k] ? 0 : l[k]), dec: us.dec(u === 'M' ? 'F' : u), onChange: (v) => { l[k] = us.inn(u, v); E.changed({ loads: true }); } });
+        if (rel[k]) { const i_ = inp.querySelector('input'); if (i_) { i_.disabled = true; i_.title = 'Giro liberado en el extremo del nudo: no transmite momento (se cambia en el miembro)'; } inp.style.opacity = '0.45'; }
         if (off) { const i_ = inp.querySelector('input'); if (i_) { i_.disabled = true; i_.title = 'Nudo intermedio: el miembro principal no lleva cargas'; } inp.style.opacity = '0.45'; }
         tr.append(h('td', { class: 'num' }, inp));
       }

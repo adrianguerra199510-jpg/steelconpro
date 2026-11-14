@@ -12,7 +12,7 @@ const path = require('path'), fs = require('fs'), os = require('os');
   await page.waitForSelector('.home', { timeout: 120000 });
   await page.click(`text=${label}`); await page.waitForSelector('.editor', { timeout: 30000 });
   for (let i = 0; i < 80; i++) { if (await page.evaluate(() => !!(window.__E && window.__E.viewer && window.__E.viewer.parts.length > 1))) break; await wait(500); }
-  await page.evaluate(() => { const E = window.__E; E.showLoadsOn = false; E.showReactionsOn = false; E.viewer.setLoadsVisible(false); });
+  await page.evaluate(() => { const E = window.__E; E.showLoadsOn = true; E.showReactionsOn = true; });
   await wait(1500);
   await page.screenshot({ path: path.join(shots, 'placa_0.png') });
   if (view) { await page.evaluate((v) => window.__E.viewer.setView(v), view); await wait(1200); await page.screenshot({ path: path.join(shots, 'placa_1.png') }); }
