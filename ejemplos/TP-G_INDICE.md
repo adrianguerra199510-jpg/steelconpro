@@ -21,6 +21,8 @@ Se generan con `python3 tools/ejemplos_generales.py` (con `--revisa` imprime el 
 | TP-G15_modos_soldadura | Rigidizadores con filete, un lado, CJP, PJP e intermitente | PLACA ×5, SOLDADURA ×5 | 0 / 0 | |
 | TP-G16_angulo_asiento | Ángulo de asiento soldado a la columna y atornillado a la viga + ángulo de unión | ÁNGULO ×2 (con giro), PERNOS | 0 / 0 | |
 | TP-G17_tubo_redondo_con_nervios | Tubo redondo con dos nervios perpendiculares soldados sobre la generatriz y placa de cabeza circular | PLACA ×3 | 0 / 0 | Una placa paralela sobre un redondo solo toca la generatriz (nota) |
+| TP-G18_placa_base_cordones_modelados | Placa base con rigidizadores del bloque de la placa base y todos los cordones modelados (columna-placa, rigidizador-placa, rigidizador-columna) | PLACA BASE (col_weld «Modelar aquí»), rigidizadores 4 × filete 3/8 | 0 / 0 | Cordones visibles en el visor y en el FEM de la placa base |
+| TP-G19_placa_base_soldadura_por_operacion | Placa base con «No modelar» el cordón de la columna: se suelda con la operación de soldadura (filete 3/8) y los rigidizadores siguen modelados | PLACA BASE (col_weld «No modelar»), SOLDADURA, rigidizadores | 0 / 0 | Sin verificación de soldadura de la columna en la placa base (la hace la operación) |
 
 ## No soportado
 - Placas PARALELAS sobre perfiles redondos (silla cilíndrica): solo se admite el nervio perpendicular sobre la generatriz (franja de contacto de ±0.5 in); la paralela deja nota.

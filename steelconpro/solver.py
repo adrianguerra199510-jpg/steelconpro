@@ -194,7 +194,8 @@ def solve(prj: Project, detail: bool = True, fem=None) -> Results:
         rec.check("Espesor de la placa", R.treq, p.tp, "L",
                   R.treq / max(p.tp, 1e-9), R.treq <= p.tp, "DG1 §3.1")
     ck += A.anchor_checks(prj, br, rec, fem)
-    ck += D.welds(prj, br, rec)
+    if not getattr(prj, "colweld_off", False):                    # «No modelar»: la soldadura de la columna la verifica la operación de soldadura
+        ck += D.welds(prj, br, rec)
     ck += D.shear_lug(prj, rec)
     ck += D.stiffeners(prj, br, rec)
     ck += D.column_base(prj)

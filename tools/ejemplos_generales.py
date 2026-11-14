@@ -352,6 +352,50 @@ def g17_tubo_redondo_con_nervios() -> Project:
     return project("TP-G17", "tubo redondo con nervios soldados sobre la generatriz y placa de cabeza circular", nd)
 
 
+def _base_ref():
+    ref = load_book(str(OUT / "PB-01_W14X90.scp"))[0]
+    nd = column(end=2)
+    nd.main_len_pos = 72.0
+    nd.operations = [Operation(kind=OP_BASE, member=nd.main_name, end=-1)]
+    nd.loads = [Load("Caso 1", nd.main_name, N=-150.0, Vy=10.0, side=1)]
+    return ref, nd
+
+
+def _base_project(code, title, ref, nd):
+    p = project(code, title, nd)
+    for kk in ("plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea", "combos"):
+        setattr(p, kk, getattr(ref, kk))
+    p.u_len, p.u_force, p.u_stress, p.u_moment = ref.u_len, ref.u_force, ref.u_stress, ref.u_moment
+    return p
+
+
+def g18_placa_base_cordones_modelados() -> Project:
+    """Placa base con los rigidizadores del bloque de la placa base y TODOS sus cordones modelados: columna-placa (alas y alma) y rigidizador-placa / rigidizador-columna."""
+    import copy
+    ref, nd = _base_ref()
+    p = _base_project("TP-G18", "placa base con rigidizadores y cordones modelados (columna-placa y rigidizadores)", ref, nd)
+    p.stiff = copy.deepcopy(ref.stiff)
+    p.stiff.enabled, p.stiff.count, p.stiff.weld_size = True, 4, 0.375
+    p.combo_list()
+    p.apply_combo(0)
+    return p
+
+
+def g19_placa_base_soldadura_por_operacion() -> Project:
+    """Placa base con la opción «No modelar» (col_weld) del cordón de la columna: la columna se suelda a la placa base con la operación de soldadura (filete 3/8) y los rigidizadores siguen modelados."""
+    import copy
+    from steelconpro.conn.specs import BASE_COLWELD
+    ref, nd = _base_ref()
+    nd.operations[0].col_weld = BASE_COLWELD[1]
+    gen(nd, OP_FILLET, weld_main=nd.main_name, weld_to=[["Placa base", "Cara superior"]], weld_all=True, weld_size=0.375)
+    p = _base_project("TP-G19", "placa base con la soldadura de la columna definida por la operación de soldadura (No modelar)", ref, nd)
+    p.stiff = copy.deepcopy(ref.stiff)
+    p.stiff.enabled, p.stiff.count, p.stiff.weld_size = True, 4, 0.375
+    p.combo_list()
+    p.apply_combo(0)
+    return p
+
+
 EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atornillado),
             ("TP-G02_empalme_viga_atornillado.scp", g02_empalme_viga_atornillado),
             ("TP-G03_empalme_columna_hss.scp", g03_empalme_columna_hss),
@@ -368,7 +412,9 @@ EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atorn
             ("TP-G14_placas_recortadas.scp", g14_placas_recortadas),
             ("TP-G15_modos_soldadura.scp", g15_modos_soldadura),
             ("TP-G16_angulo_asiento.scp", g16_angulo_asiento),
-            ("TP-G17_tubo_redondo_con_nervios.scp", g17_tubo_redondo_con_nervios)]
+            ("TP-G17_tubo_redondo_con_nervios.scp", g17_tubo_redondo_con_nervios),
+            ("TP-G18_placa_base_cordones_modelados.scp", g18_placa_base_cordones_modelados),
+            ("TP-G19_placa_base_soldadura_por_operacion.scp", g19_placa_base_soldadura_por_operacion)]
 
 
 def main(revisa=False):

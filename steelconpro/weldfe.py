@@ -142,7 +142,7 @@ def _walls(prj):
     s = prj.section.shape()
     periodic = bool(s.is_round) and not prj.section.generic
     out = []
-    for (name, p1, p2, t, spec) in _w(prj):
+    for (name, p1, p2, t, spec) in ([] if getattr(prj, "colweld_off", False) else _w(prj)):       # «No modelar»: sin cordón de la columna (quedan los rigidizadores)
         key = "flange" if spec is W.flange else ("web" if spec is W.web else "perimeter")
         out.append(dict(zone=name, p1=p1, p2=p2, t=t, spec=spec, key=key, periodic=periodic))
     st = prj.stiff

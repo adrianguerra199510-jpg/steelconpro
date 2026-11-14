@@ -2129,6 +2129,12 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     if bpd is not None:
         E, A_in, bsx, bsy = bp_place
         mdl.extra += BP.plate_faces(bpd, E, A_in, bsx, bsy)
+        _col_part = BP.base_member(nd, bop)[0]
+        for (wn, wa, wb, wp0, wp1, wnA, wnB, wsz, wkind, wgrp) in BP.weld_lines(bpd, E, A_in, bsx, bsy, (reg.get(_col_part) or {}).get("part", _col_part),
+                                                                                  not str(getattr(bop, "col_weld", "")).startswith("No modelar")):
+            w_ = Weld(wn, wa, wb, wp0, wp1, wnA, wnB, float(wsz), 70.0, wgrp)
+            w_.kind = wkind
+            mdl.welds.append(w_)
         Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
         tpb = float(bpd.plate.tp)
         Bw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.B)

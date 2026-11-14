@@ -35,7 +35,11 @@
       "off2": 0.0,
       "L": 48.0,
       "roll": 0.0,
-      "gap": 0.0
+      "gap": 0.0,
+      "rel_auto": true,
+      "rel_T": false,
+      "rel_My": false,
+      "rel_Mz": false
      }
     ],
     "operations": [
@@ -55,6 +59,7 @@
       "cope_len": 4.5,
       "cont_t": 0.5,
       "end": -1,
+      "col_weld": "Modelar aquí",
       "name": "PR",
       "parent": "Columna",
       "face": "Ala superior",
@@ -106,6 +111,8 @@
       "seat_Lh": 5.0,
       "seat_Lv": 6.0,
       "seat_W": 0.0,
+      "seat_stiff": false,
+      "seat_stiff_t": 0.0,
       "wf_top": "CJP (penetración completa)",
       "wf_bot": "CJP (penetración completa)",
       "wf_web": "Filete",
@@ -165,6 +172,7 @@
       "cope_len": 4.5,
       "cont_t": 0.5,
       "end": -1,
+      "col_weld": "Modelar aquí",
       "name": "",
       "parent": "",
       "face": "",
@@ -216,6 +224,8 @@
       "seat_Lh": 5.0,
       "seat_Lv": 6.0,
       "seat_W": 0.0,
+      "seat_stiff": false,
+      "seat_stiff_t": 0.0,
       "wf_top": "CJP (penetración completa)",
       "wf_bot": "CJP (penetración completa)",
       "wf_web": "Filete",
