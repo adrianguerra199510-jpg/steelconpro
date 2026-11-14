@@ -261,7 +261,7 @@ def _bolts(mdl, parts, boxes, out):
                 add("fuera", "error", b, pn, mid)
                 prev = (pn, s0, s1)
                 continue
-            if prev is not None and min(s0, s1) - max(prev[1], prev[2]) > 0.07 and not any(parts[q].kind in ("brace", "column") for q in (prev[0], pn) if q in parts):      # el aire dentro de un tubo (cartela en ranura) es normal
+            if prev is not None and min(s0, s1) - max(prev[1], prev[2]) > 0.07 and prev[0] != pn and not any(parts[q].kind in ("brace", "column") for q in (prev[0], pn) if q in parts):      # el aire dentro de un tubo (cartela en ranura) es normal
                 add("hueco", "aviso", b, f"{prev[0]}» y «{pn}", mid, -(min(s0, s1) - max(prev[1], prev[2])), [prev[0], pn])
             prev = (pn, s0, s1)
             # distancia del eje al borde de la pieza
@@ -346,6 +346,10 @@ def _bolts(mdl, parts, boxes, out):
                 continue
             dv = np.asarray(c.p, float) - np.asarray(a.p, float)
             lat = float(np.linalg.norm(dv - axa * float(dv @ axa)))
+            ia = [float(np.asarray(a.p, float) @ axa) + x for g in a.grip for x in (g[1], g[2])] + [float(np.asarray(a.p, float) @ axa) + a.head_s, float(np.asarray(a.p, float) @ axa) + a.nut_s]
+            ic = [float(np.asarray(c.p, float) @ axa) + x for g in c.grip for x in (g[1], g[2])] + [float(np.asarray(c.p, float) @ axa) + c.head_s, float(np.asarray(c.p, float) @ axa) + c.nut_s]
+            if min(ia) > max(ic) + 0.1 or min(ic) > max(ia) + 0.1:
+                continue                                                           # en tramos distintos del mismo eje (p. ej. un perno en cada ala): no se estorban
             db = max(a.db, c.db)
             if lat < 2.0 * db * 4.0 / 3.0 - 0.02:                              # 2⅔·d
                 grp = (a.tag.rsplit("-", 1)[0], c.tag.rsplit("-", 1)[0])

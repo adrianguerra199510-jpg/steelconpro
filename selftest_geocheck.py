@@ -134,6 +134,18 @@ for ri in (0.0, 1.5):
         fail(f"cilindro recortado (ri={ri}) no queda cerrado: {Counter(cnt.values())}")
 print(f"{'tapa de cilindros recortados':34} cilindro y tubo redondo con recorte oblicuo quedan cerrados: OK")
 
+# 6f) pernos coaxiales en tramos distintos del mismo eje no se marcan como superpuestos
+import copy as _copy                                                       # noqa: E402
+from steelconpro.conn.fem.model3d import Bolt                              # noqa: E402
+mb = _copy.deepcopy(base)
+b0 = mb.bolts[0]
+ax0 = np.asarray(b0.axis, float)
+far = Bolt(tag="X-B1", p=tuple(np.asarray(b0.p, float) + ax0 * 40.0), axis=b0.axis, db=b0.db, dh=b0.dh, rw=b0.rw, grip=list(b0.grip), head_s=b0.head_s, nut_s=b0.nut_s, grade=b0.grade)
+mb.bolts.append(far)
+if any("superponen" in e["text"] or "2⅔" in e["text"] for e in GC.check(mb) if e["code"] == "perno"):
+    fail("dos pernos coaxiales separados 40 in a lo largo del eje se marcan como superpuestos")
+print(f"{'pernos coaxiales':34} pernos en tramos distintos del mismo eje no se marcan: OK")
+
 # 7) API
 g = api.geometry_check({"connection": api._dump(prj)})
 v = api.verify({"connection": api._dump(prj)})
