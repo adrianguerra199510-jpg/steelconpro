@@ -125,6 +125,13 @@ def casos_agujeros():
     prism_ok(mk(BOX, holes_extra=bh, cut_planes=[((1.1, 2, 13), (1, 0.3, 0))]), "placa con agujeros y plano vertical que atraviesa agujeros")
     prism_ok(mk(BOX, holes_extra=[circle_poly(3, 0, 0.8, 24)]), "agujero que cruza el borde")
     prism_ok(mk(BOX, holes_extra=[circle_poly(-0.3, 0, 0.8, 24), circle_poly(0.3, 0, 0.8, 24)]), "dos agujeros que se superponen")
+    grid = [circle_poly(-2.4 + 1.6 * i, -1.6 + 1.6 * j, 0.5, 20) for i in range(4) for j in range(3)]
+    prism_ok(mk(BOX, holes_extra=grid), "rejilla de agujeros con vértices alineados (triángulos planos del triangulador)")
+    prism_ok(mk(BOX, holes_extra=grid, cut_planes=[((1, 2, 13), (0.5, 0.3, 1))]), "rejilla de agujeros alineados con plano oblicuo")
+    stub = [(0, 0.05), (0.25, 0.05), (0.25, -7.51), (60, -7.51), (60, 7.51), (0.25, 7.51), (0.25, -0.05), (0, -0.05)]      # alma con talón estrecho (el triangulador falla)
+    hh = [circle_poly(2.5, y, 0.406, 20) for y in (-3.0, 0.0, 3.0)]
+    prism_ok(mk(stub, holes_extra=hh), "contorno con talón estrecho y agujeros (respaldo por franjas)")
+    prism_ok(mk(stub, holes_extra=hh, cut_planes=[((30, 2, 3.1), (0.5, 0.3, 1))]), "idem con plano oblicuo")
     prism_ok(mk(BOX, holes_extra=[circle_poly(10, 0, 0.8, 24)]), "agujero fuera de la placa", 480)
     prism_ok(mk(BOX, holes_extra=[circle_poly(3, 2, 0.8, 24)]), "agujero en una esquina")
     prism_ok(mk(BOX, holes_extra=[[(2, -0.5), (4, -0.5), (4, 0.5), (2, 0.5)]]), "ranura abierta al borde", 460)

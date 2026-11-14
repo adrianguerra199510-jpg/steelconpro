@@ -462,6 +462,104 @@ def decompose(O, Hs, merge=False, ring=None):
         hi = lambda k: n + (n - 1 - (k % n))                              # noqa: E731
         bnd = {(k, (k + 1) % n) for k in range(n)} | {(n + j, n + (j + 1) % n) for j in range(n)}
         return pts, [[k, (k + 1) % n, hi(k + 1), hi(k)] for k in range(n)], bnd
+    nO = len(O)
+    for amp in (0.0, 2e-6, 2e-5, 2e-4):
+        if amp:                                                           # vertices de agujeros alineados dan triangulos planos: se perturban apenas (invisible)
+            rng = np.random.default_rng(int(amp * 1e7))
+            jit = rng.uniform(-amp, amp, (len(pts) - nO, 2))
+            pts = list(pts[:nO]) + [(q[0] + jit[k][0], q[1] + jit[k][1]) for k, q in enumerate(pts[nO:])]
+            O2, Hs2, off = pts[:nO], [], nO
+            for h in Hs:
+                Hs2.append(pts[off:off + len(h)])
+                off += len(h)
+        else:
+            O2, Hs2 = O, Hs
+        polys = _triangles(pts, O2, Hs2, triangulate, bnd)
+        if _conforming(polys, bnd) and abs(sum(abs(area([pts[i] for i in p])) for p in polys) - (area(O) + sum(area(h) for h in Hs))) < 1e-6 * max(1.0, abs(area(O))):
+            break
+    else:                                                                  # el triangulador no logra una malla conforme: franjas verticales (exacto)
+        return _slab_decompose(O, Hs, merge)
+    if merge:
+        polys = _merge_convex(pts, polys, bnd)
+    return pts, polys, bnd
+
+
+def _slab_decompose(O, Hs, merge):
+    """Descomposicion por franjas verticales entre abscisas consecutivas de vertices: en cada franja la region son trapecios entre aristas consecutivas
+    (par-impar).  Se insertan en los lados verticales los puntos de las franjas vecinas para que la malla sea conforme."""
+    loops = [O] + list(Hs)
+    edges = []
+    for L in loops:
+        n = len(L)
+        for i in range(n):
+            a, b = L[i], L[(i + 1) % n]
+            if abs(a[0] - b[0]) > 1e-9:
+                edges.append((a, b) if a[0] < b[0] else (b, a))
+    xs = sorted({round(q[0] / Q_KEY) * Q_KEY for L in loops for q in L})
+    reg, pts = {}, []
+
+    def vid(x, y):
+        k = (round(x / Q_KEY), round(y / Q_KEY))
+        if k not in reg:
+            reg[k] = len(pts)
+            pts.append((x, y))
+        return reg[k]
+    traps = []
+    for x0, x1 in zip(xs[:-1], xs[1:]):
+        if x1 - x0 < 1e-9:
+            continue
+        xm = 0.5 * (x0 + x1)
+        cut = []
+        for (a, b) in edges:
+            if a[0] <= x0 + 1e-9 and b[0] >= x1 - 1e-9:
+                t0, t1, tm = (x0 - a[0]) / (b[0] - a[0]), (x1 - a[0]) / (b[0] - a[0]), (xm - a[0]) / (b[0] - a[0])
+                cut.append((a[1] + tm * (b[1] - a[1]), a[1] + t0 * (b[1] - a[1]), a[1] + t1 * (b[1] - a[1])))
+        cut.sort()
+        for k in range(0, len(cut) - 1, 2):
+            lo, hi = cut[k], cut[k + 1]
+            traps.append((x0, x1, lo[1], lo[2], hi[1], hi[2]))
+    ys = {}
+    for (x0, x1, l0, l1, h0, h1) in traps:
+        for x, ya in ((x0, (l0, h0)), (x1, (l1, h1))):
+            ys.setdefault(round(x / Q_KEY), set()).update(round(y / Q_KEY) for y in ya)
+    ysl = {k: sorted(v) for k, v in ys.items()}
+    pieces = []
+    for (x0, x1, l0, l1, h0, h1) in traps:
+        ring = [vid(x0, l0), vid(x1, l1)]
+        for yk in ysl[round(x1 / Q_KEY)]:
+            y = yk * Q_KEY
+            if l1 + 1e-9 < y < h1 - 1e-9:
+                ring.append(vid(x1, y))
+        ring += [vid(x1, h1), vid(x0, h0)]
+        for yk in reversed(ysl[round(x0 / Q_KEY)]):
+            y = yk * Q_KEY
+            if l0 + 1e-9 < y < h0 - 1e-9:
+                ring.append(vid(x0, y))
+        ring = [v for k, v in enumerate(ring) if v != ring[k - 1]]
+        if len(ring) >= 3 and abs(area([pts[i] for i in ring])) > 1e-12:
+            pieces.append(ring)
+    ed = {(p[k], p[(k + 1) % len(p)]) for p in pieces for k in range(len(p))}
+    bnd = {e for e in ed if (e[1], e[0]) not in ed}
+    if merge:
+        pieces = _merge_convex(pts, pieces, bnd)
+    return pts, pieces, bnd
+
+
+def _conforming(polys, bnd):
+    """Cada arista del contorno aparece una vez y cada arista interna tiene su pareja en sentido contrario."""
+    ed = {}
+    for p in polys:
+        for k in range(len(p)):
+            e = (p[k], p[(k + 1) % len(p)])
+            ed[e] = ed.get(e, 0) + 1
+    if any(c != 1 for c in ed.values()):
+        return False
+    if any(e not in ed for e in bnd):
+        return False
+    return all(e in bnd or (e[1], e[0]) in ed for e in ed)
+
+
+def _triangles(pts, O, Hs, triangulate, bnd):
     tris = [t for t in (_tri_ccw(pts, t) for t in triangulate(O, Hs)) if t]
     polys = [list(t) for t in tris]
     used = {i for t in polys for i in t}
@@ -484,9 +582,7 @@ def decompose(O, Hs, merge=False, ring=None):
                     pos = t.index(a)
                     polys[eix[(a, b)]] = t[:pos + 1] + run + t[pos + 1:]
             off += n
-    if merge:
-        polys = _merge_convex(pts, polys, bnd)
-    return pts, polys, bnd
+    return polys
 
 
 # ================================================================================================ prisma -> caras

@@ -173,7 +173,7 @@ def _tris_of(faces):
             for i in range(1, n - 1):
                 out.append(np.array([P[0], P[i], P[i + 1]]))
         else:
-            from ...scene3d import tri_poly
+            from ..scene3d import tri_poly
             for (i, j, k) in tri_poly(P):
                 out.append(np.array([P[i], P[j], P[k]]))
     return np.array(out).reshape(-1, 3, 3)

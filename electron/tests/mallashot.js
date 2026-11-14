@@ -10,7 +10,7 @@ const path = require('path'), fs = require('fs'), os = require('os');
   fs.mkdirSync(shots, { recursive: true });
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'scp-ws-'));
   fs.copyFileSync(file, path.join(ws, path.basename(file)));
-  const app = await electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, '..'), '--no-sandbox', '--disable-gpu-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader'], env: { ...process.env, SCP_WORKSPACE: ws } });
+  const app = await electron.launch({ executablePath: require('electron'), args: [path.join(__dirname, '..'), '--user-data-dir=' + fs.mkdtempSync(path.join(os.tmpdir(), 'scp-ud-')), '--no-sandbox', '--disable-gpu-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader'], env: { ...process.env, SCP_WORKSPACE: ws } });
   const page = await app.firstWindow();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
