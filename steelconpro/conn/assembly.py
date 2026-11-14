@@ -752,11 +752,19 @@ def auto_cope_for(nd, m, op=None):
 def _clear_of_main(shp, start, dirv, sx, sy, ext, msx, msy) -> float:
     """Cuánto hay que retrasar un miembro (a lo largo de su eje) para que las esquinas de su sección no queden dentro de la sección del principal."""
     rects = outer_extent(shp)
-    if isinstance(rects, tuple):                                  # redondo o libre: se usan los cuatro puntos del círculo / caja
-        R = shp.d / 2.0
-        pts = [(R, 0.0), (-R, 0.0), (0.0, R), (0.0, -R), (0.7 * R, 0.7 * R), (-0.7 * R, 0.7 * R), (0.7 * R, -0.7 * R), (-0.7 * R, -0.7 * R)]
-    else:
-        pts = [(x, y) for (x0, y0, x1, y1) in rects for x in (x0, x1) for y in (y0, y1)]
+    if isinstance(rects, tuple):                                  # redondo o libre: puntos del círculo / de la caja
+        R = shp.d / 2.0 if rects[0] == "circle" else max(shp.d, shp.bf) / 2.0
+        pts = [(R * math.cos(a), R * math.sin(a)) for a in np.linspace(0.0, 2.0 * math.pi, 24, endpoint=False)]
+    else:                                                         # el contorno de cada rectángulo muestreado: el máximo no siempre está en una esquina
+        pts = []
+        for (x0, y0, x1, y1) in rects:
+            nx, ny = max(int(math.ceil((x1 - x0) / 0.5)), 1), max(int(math.ceil((y1 - y0) / 0.5)), 1)
+            for i in range(nx + 1):
+                x = x0 + (x1 - x0) * i / nx
+                pts += [(x, y0), (x, y1)]
+            for j in range(1, ny):
+                y = y0 + (y1 - y0) * j / ny
+                pts += [(x0, y), (x1, y)]
     d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
     best = 0.0
     for (a, b) in pts:
@@ -800,7 +808,7 @@ def _gusset_outline(ctx):
     s = max(op.bolt_s, 2.5)
     ov = (rows - 1) * s + 3.0 + 1.0
     push = float(getattr(ctx, "push", 0.0))                      # el miembro inclinado se aleja del principal hasta que su sección no lo toque
-    gl = (2.0 if op.kind == OP_GUSSET else 6.0) + push
+    gl = max((2.0 if op.kind == OP_GUSSET else 6.0) + float(m.gap), 0.5) + push        # el desplazamiento del miembro sobre su eje (gap) mueve también sus pernos / su traslape
     tip = gl + (ov if op.kind == OP_GUSSET else 4.0)             # la cartela entra en el miembro (traslape): pernos o cordones
     if op.gus_L > 0:
         tip = max(op.gus_L, gl + 1.0)                            # largo de la cartela desde el apoyo; el miembro queda donde estaba
@@ -826,7 +834,35 @@ def _gusset_members(ctxs, nd):
                 break
         else:
             groups.append({"n": n, "P0": c.P0, "items": [c]})
-    return groups
+    out = []
+    for g in groups:                                               # en un mismo plano, solo comparten cartela los miembros cuyos contornos se tocan (no los de lados opuestos del principal)
+        if len(g["items"]) < 2:
+            out.append(g)
+            continue
+        n = g["n"]
+        ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+        e1 = unit(np.cross(ref, n))
+        e2 = np.cross(n, e1)
+        polys = []
+        for c in g["items"]:
+            pts = [(float(np.dot(np.asarray(q) - g["P0"], e1)), float(np.dot(np.asarray(q) - g["P0"], e2))) for q in _gusset_outline(c)[0]]
+            polys.append(PCLIP.ccw(_hull(pts)))
+        comp = list(range(len(polys)))
+        def find(i):
+            while comp[i] != i:
+                i = comp[i]
+            return i
+        for i in range(len(polys)):
+            for j in range(i + 1, len(polys)):
+                if len(polys[i]) >= 3 and len(polys[j]) >= 3 and (PCLIP.intersect_convex(polys[i], polys[j]) or
+                                                                  min(_dist_poly(q, polys[j]) for q in polys[i]) < 0.5):
+                    comp[find(j)] = find(i)
+        roots = {}
+        for i, c in enumerate(g["items"]):
+            roots.setdefault(find(i), []).append(c)
+        for items in roots.values():
+            out.append({"n": unit(items[0].sx), "P0": items[0].P0, "items": items})
+    return out
 
 
 def _slot_tube(part, c, u0, width, w_tip_s):
@@ -875,44 +911,161 @@ def _slot_tube(part, c, u0, width, w_tip_s):
     return done
 
 
-def _main_cut_polys(part, P0, n, e1, e2, lat, t):
-    """Polígonos convexos (en el plano de la cartela: e1, e2 desde P0) que ocupa el miembro principal dentro del espesor de la cartela [lat − t/2, lat + t/2]."""
-    out = []
+def _prism_solid(pr):
+    """(vértices, aristas) de un prisma como sólido (tubos y cilindros: anillos de 24 puntos en cada tapa)."""
+    if pr.circle is not None:
+        ro = pr.circle[0]
+        V = [np.asarray(pr.to_global(ro * math.cos(a), ro * math.sin(a), w), float) for w in (pr.w0, pr.w1) for a in np.linspace(0, 2 * math.pi, 24, endpoint=False)]
+        E = [(k, (k + 1) % 24) for k in range(24)] + [(24 + k, 24 + (k + 1) % 24) for k in range(24)] + [(k, 24 + k) for k in range(24)]
+        return V, E
+    if len(pr.poly) < 3:
+        return [], []
+    m = len(pr.poly)
+    V = [np.asarray(pr.to_global(u, v, w), float) for w in (pr.w0, pr.w1) for (u, v) in pr.poly]
+    return V, [(k, (k + 1) % m) for k in range(m)] + [(m + k, m + (k + 1) % m) for k in range(m)] + [(k, m + k) for k in range(m)]
+
+
+def _slab_sections(prisms, P0, n, e1, e2, lat, t, back=None):
+    """Sección de un sólido (unión convexa de `prisms`) con la losa de la cartela [lat − t/2, lat + t/2]: {union, lo, hi} = polígonos convexos CCW en el plano
+    de la cartela (e1, e2 desde P0): la envolvente de lo que cae dentro de la losa y las secciones con cada cara de la cartela (None si no la cruza).
+    `back` = (dirección 2D, largo): el sólido se prolonga hacia atrás (una viga cuyo extremo queda separado del soporte)."""
     lo, hi = lat - t / 2.0, lat + t / 2.0
-    for pr in part.prisms:
-        if pr.circle is not None:
-            ro = pr.circle[0]
-            ring = [np.asarray(pr.to_global(ro * math.cos(a), ro * math.sin(a), w), float) for w in (pr.w0, pr.w1) for a in np.linspace(0, 2 * math.pi, 24, endpoint=False)]
-            edges = [(k, (k + 1) % 24) for k in range(24)] + [(24 + k, 24 + (k + 1) % 24) for k in range(24)] + [(k, 24 + k) for k in range(24)]
-            V = ring
-        else:
-            if len(pr.poly) < 3:
-                continue
-            m = len(pr.poly)
-            V = [np.asarray(pr.to_global(u, v, w), float) for w in (pr.w0, pr.w1) for (u, v) in pr.poly]
-            edges = [(k, (k + 1) % m) for k in range(m)] + [(m + k, m + (k + 1) % m) for k in range(m)] + [(k, m + k) for k in range(m)]
+    pts = {"union": [], "lo": [], "hi": []}
+    for pr in prisms:
+        V, E = _prism_solid(pr)
+        if not V:
+            continue
         d = [float(np.dot(q - P0, n)) for q in V]
-        pts = [V[k] for k in range(len(V)) if lo - 1e-9 <= d[k] <= hi + 1e-9]
-        for (a, b) in edges:
+        for k, q in enumerate(V):
+            if lo - 1e-9 <= d[k] <= hi + 1e-9:
+                pts["union"].append(q)
+            if abs(d[k] - lo) < 1e-9:
+                pts["lo"].append(q)
+            if abs(d[k] - hi) < 1e-9:
+                pts["hi"].append(q)
+        for (a, b) in E:
             da, db = d[a], d[b]
             if abs(db - da) < 1e-12:
                 continue
-            for plane in (lo, hi):
+            for plane, key in ((lo, "lo"), (hi, "hi")):
                 tt = (plane - da) / (db - da)
                 if 0.0 < tt < 1.0:
-                    pts.append(V[a] + tt * (V[b] - V[a]))
-        if len(pts) < 3:
-            continue
-        poly = PCLIP.hull([(float(np.dot(q - P0, e1)), float(np.dot(q - P0, e2))) for q in pts])
-        if len(poly) >= 3 and abs(PCLIP.area(poly)) > 1e-6:
-            out.append(PCLIP.ccw(poly))
+                    q = V[a] + tt * (V[b] - V[a])
+                    pts[key].append(q)
+                    pts["union"].append(q)
+    out = {}
+    for key, lst in pts.items():
+        xy = [(float(np.dot(q - P0, e1)), float(np.dot(q - P0, e2))) for q in lst]
+        if back is not None and xy:
+            (bx, by), L = back
+            xy += [(x + bx * L, y + by * L) for (x, y) in xy]
+        poly = PCLIP.hull(xy) if len(xy) >= 3 else []
+        out[key] = PCLIP.ccw(poly) if len(poly) >= 3 and abs(PCLIP.area(poly)) > 1e-6 else None
     return out
 
 
-def _contact_on_outline(contact, outlines, step=0.25, tol=2e-3):
-    """Tramos de los segmentos de contacto que quedan sobre el contorno final de la cartela (otro recorte pudo quitar parte de ellos)."""
+def _main_cut_polys(part, P0, n, e1, e2, lat, t):
+    """Polígonos convexos (en el plano de la cartela: e1, e2 desde P0) que ocupa el miembro principal dentro del espesor de la cartela [lat − t/2, lat + t/2]."""
     out = []
-    for a, b in contact:
+    for pr in part.prisms:
+        u = _slab_sections([pr], P0, n, e1, e2, lat, t)["union"]
+        if u is not None:
+            out.append(u)
+    return out
+
+
+def _gusset_supports(nd, mdl, group_names, P0, n, e1, e2, lat, t, floors=()):
+    """Sólidos contra los que se recorta y se suelda la cartela: [{name, union, lo, hi, cut}].  El miembro principal (cada prisma por separado) y las vigas
+    del nudo que cruzan la losa de la cartela (envolvente de la viga, prolongada hacia el principal si está en el plano de la cartela).
+    `cut` = polígono con el que se resta: la intersección de las secciones en las dos caras de la cartela (la placa apoya sin hueco en la cara con la que
+    queda oblicua); si no existe, la envolvente de la losa."""
+    sup = []
+    main_part = next((q for q in mdl.parts if q.name == nd.main_name), None)
+    groups = [(nd.main_name, [pr]) for pr in main_part.prisms] if main_part is not None else []
+    for q in mdl.parts:
+        if q.kind == "beam" and q.name not in group_names and q.name != nd.main_name:
+            m = nd.member_named(q.name)
+            back = None
+            if m is not None:
+                dv = member_dir(m)
+                ax = (float(np.dot(dv, e1)), float(np.dot(dv, e2)))
+                if abs(float(np.dot(dv, n))) < 0.2 and math.hypot(*ax) > 0.9:
+                    back = ((-ax[0] / math.hypot(*ax), -ax[1] / math.hypot(*ax)), 40.0)
+            groups.append((q.name, q.prisms, back))
+    for (fname, fpt, fnrm) in floors:                              # semiespacios (cara superior de la placa base): la cartela apoya en ellos
+        secs = {}
+        for key, plane in (("lo", lat - t / 2.0), ("hi", lat + t / 2.0)):
+            a, b = float(np.dot(fnrm, e1)), float(np.dot(fnrm, e2))
+            c0 = float(np.dot(fnrm, P0 + n * plane - np.asarray(fpt, float)))
+            if math.hypot(a, b) < 1e-6:
+                secs[key] = None
+                continue
+            p0 = (-c0 * a / (a * a + b * b), -c0 * b / (a * a + b * b))
+            sq = [(-400.0, -400.0), (400.0, -400.0), (400.0, 400.0), (-400.0, 400.0)]
+            poly = PCLIP._clip_halfplane(sq, p0, (p0[0] - b, p0[1] + a), True)
+            secs[key] = PCLIP.ccw(poly) if len(poly) >= 3 else None
+        if secs["lo"] is None or secs["hi"] is None:
+            continue
+        inter = PCLIP.intersect_convex(secs["lo"], secs["hi"])
+        secs["union"] = secs["real"] = secs["lo"]
+        secs["cut"] = PCLIP.ccw(inter) if inter else secs["lo"]
+        secs["name"] = fname
+        sup.append(secs)
+    for item in groups:
+        name, prs = item[0], item[1]
+        back = item[2] if len(item) > 2 else None
+        sec = _slab_sections(prs, P0, n, e1, e2, lat, t, back)
+        if sec["union"] is None:
+            continue
+        sec["real"] = _slab_sections(prs, P0, n, e1, e2, lat, t)["union"] if back is not None else sec["union"]       # sin la prolongación hacia atrás
+        inter = PCLIP.intersect_convex(sec["lo"], sec["hi"]) if sec["lo"] and sec["hi"] else []
+        sec["cut"] = PCLIP.ccw(inter) if inter else sec["union"]
+        sec["name"] = name
+        sup.append(sec)
+    return sup
+
+
+def _clip_to_poly(a, b, poly, tol=0.02, step=0.05):
+    """Tramo del segmento a–b que queda dentro (o a menos de `tol`) del polígono `poly`; None si ninguno."""
+    L = math.dist(a, b)
+    n = max(int(math.ceil(L / step)), 1)
+    ts = [i / n for i in range(n + 1)
+          if PCLIP._point_in_poly((a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n), poly)
+          or _dist_poly((a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n), poly) <= tol]
+    if not ts or (ts[-1] - ts[0]) * L < 0.2:
+        return None
+    return ((a[0] + (b[0] - a[0]) * ts[0], a[1] + (b[1] - a[1]) * ts[0]), (a[0] + (b[0] - a[0]) * ts[-1], a[1] + (b[1] - a[1]) * ts[-1]))
+
+
+def _edge_offset(poly, a, b, nrm):
+    """Distancia (con signo, en el sentido `nrm`) de la recta a–b a la arista paralela de `poly` más cercana que se solapa con ella; None si no hay."""
+    d = (b[0] - a[0], b[1] - a[1])
+    L = math.hypot(*d)
+    if L < 1e-9:
+        return None
+    d = (d[0] / L, d[1] / L)
+    best = None
+    for i in range(len(poly)):
+        p_, q_ = poly[i], poly[(i + 1) % len(poly)]
+        e = (q_[0] - p_[0], q_[1] - p_[1])
+        Le = math.hypot(*e)
+        if Le < 1e-9 or abs(e[0] * d[1] - e[1] * d[0]) / Le > 1e-4:
+            continue
+        if (e[1] * nrm[0] - e[0] * nrm[1]) / Le < 0.5:                    # la arista debe mirar hacia `nrm` (polígono CCW: afuera = a la derecha)
+            continue
+        ta, tb = sorted(((p_[0] - a[0]) * d[0] + (p_[1] - a[1]) * d[1], (q_[0] - a[0]) * d[0] + (q_[1] - a[1]) * d[1]))
+        if tb < -1e-6 or ta > L + 1e-6:
+            continue
+        s_ = (p_[0] - a[0]) * nrm[0] + (p_[1] - a[1]) * nrm[1]
+        if best is None or abs(s_) < abs(best):
+            best = s_
+    return best
+
+
+def _contact_on_outline(contact, outlines, step=0.25, tol=2e-3):
+    """Tramos de los segmentos de contacto [(a, b, etiqueta)] que quedan sobre el contorno final de la cartela (otro recorte pudo quitar parte de ellos)."""
+    out = []
+    for a, b, tag in contact:
         L = math.dist(a, b)
         n = max(int(math.ceil(L / step)), 1)
         run = None
@@ -924,7 +1077,7 @@ def _contact_on_outline(contact, outlines, step=0.25, tol=2e-3):
                 run = t0
             if (not on or i == n - 1) and run is not None:
                 te = t1 if on else t0
-                out.append(((a[0] + (b[0] - a[0]) * run, a[1] + (b[1] - a[1]) * run), (a[0] + (b[0] - a[0]) * te, a[1] + (b[1] - a[1]) * te)))
+                out.append(((a[0] + (b[0] - a[0]) * run, a[1] + (b[1] - a[1]) * run), (a[0] + (b[0] - a[0]) * te, a[1] + (b[1] - a[1]) * te), tag))
                 run = None
     return out
 
@@ -1015,7 +1168,7 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull):
         mdl.notes.append(f"{c.m.name}: la soldadura de la cartela a un miembro de esa sección no se dibuja.")
 
 
-def _build_gussets(ctxs, nd, mdl):
+def _build_gussets(ctxs, nd, mdl, floors=()):
     for gi, g in enumerate(_gusset_members(ctxs, nd)):
         n = g["n"]
         ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
@@ -1039,44 +1192,93 @@ def _build_gussets(ctxs, nd, mdl):
         if len(hull) < 3:
             continue
         o = g["P0"] + n * (lat - t / 2.0)
-        # la cartela no puede ocupar el espacio del miembro principal: se le resta su sección (en el espesor de la cartela) y el borde de contacto se suelda
+        # la cartela no puede ocupar el espacio del miembro principal ni el de las vigas que cruzan su plano: se les resta su sección (en el espesor de la
+        # cartela) y el borde de contacto se suelda al sólido
         pieces, contact = [(hull, [])], []
-        main_part = next((q for q in mdl.parts if q.name == nd.main_name), None)
-        for cpoly in (_main_cut_polys(main_part, g["P0"], n, e1, e2, lat, t) if main_part is not None else []):
+        sups = _gusset_supports(nd, mdl, {c.partname for c in g["items"]}, g["P0"], n, e1, e2, lat, t, floors)
+        for si, sp in enumerate(sups):
             nxt = []
             for (outer, holes) in pieces:
                 try:
-                    res = PCLIP.subtract(outer, cpoly)
+                    res = PCLIP.subtract(outer, sp["cut"])
                 except Exception:                                    # polígonos degenerados: se deja la pieza como está
                     res = [(outer, holes, [])]
                 for (o2, h2, ct) in res:
                     nxt.append((o2, list(holes) + list(h2)))
-                    contact += ct
+                    contact += [(a_, b_, si) for (a_, b_) in ct]
             pieces = nxt
+        # trozos sueltos que quedan del otro lado del soporte (la base de la cartela atraviesa el ala): no son cartela; se conservan solo los que alcanzan la punta
+        tips = []
+        for c in g["items"]:
+            outline, *_ = _gusset_outline(c)
+            tp = (np.asarray(outline[-1]) + np.asarray(outline[-2])) / 2.0 - c.dir * 0.5 - g["P0"]
+            tips.append((float(np.dot(tp, e1)), float(np.dot(tp, e2))))
+        kept = [pc for pc in pieces if any(PCLIP._point_in_poly(tp, pc[0]) for tp in tips)]
+        if kept:
+            pieces = kept
         contact = _contact_on_outline(contact, [o_ for o_, _h in pieces])        # solo los tramos que siguen siendo borde de la cartela
         if not pieces:
             mdl.notes.append(f"Cartela {gi + 1}: queda toda dentro del miembro principal; revise su posición.")
             continue
+        # cordones: por cada sólido, los tramos de contacto unidos; en cada cara de la cartela el cordón va sobre la arista de la sección de esa cara (si la
+        # cartela llega oblicua a la cara del soporte, la placa se corta en bisel contra el plano de esa cara)
+        welds_g, bevels = [], []
+        for si, sp in enumerate(sups):
+            cen = np.mean(np.asarray(sp["cut"], float), axis=0)
+            for (a2, b2) in _merge_segments([(a_, b_) for (a_, b_, s_) in contact if s_ == si]):
+                if sp["real"] is not sp["union"]:                     # solo donde el sólido existe de verdad (no en su prolongación hacia el soporte)
+                    cl = _clip_to_poly(a2, b2, sp["real"])
+                    if cl is None:
+                        continue
+                    a2, b2 = cl
+                ed = np.asarray(b2, float) - np.asarray(a2, float)
+                Le = float(np.linalg.norm(ed))
+                if Le < 0.2:
+                    continue
+                nrm2 = np.array([ed[1], -ed[0]]) / Le
+                if float(np.dot(nrm2, (np.asarray(a2, float) + np.asarray(b2, float)) / 2.0 - cen)) < 0:
+                    nrm2 = -nrm2                                     # hacia afuera del sólido = hacia la cartela
+                offs = {}
+                for sg, key in ((1.0, "hi"), (-1.0, "lo")):
+                    off = _edge_offset(sp[key], a2, b2, nrm2) if sp.get(key) else None
+                    offs[sg] = off if (off is not None and abs(off) < t * 4.0) else 0.0
+                N3 = None
+                if abs(offs[1.0] - offs[-1.0]) > 2e-3:               # cara oblicua: plano que contiene las dos aristas
+                    qa = [g["P0"] + e1 * (a2[0] + nrm2[0] * offs[sg]) + e2 * (a2[1] + nrm2[1] * offs[sg]) + n * (lat + sg * t / 2.0) for sg in (1.0, -1.0)]
+                    d3 = unit(e1 * ed[0] + e2 * ed[1])
+                    N3 = np.cross(d3, qa[0] - qa[1])
+                    if float(np.linalg.norm(N3)) > 1e-9:
+                        N3 = unit(N3)
+                        if float(np.dot(N3, e1 * nrm2[0] + e2 * nrm2[1])) < 0:
+                            N3 = -N3
+                        bevels.append(((a2, b2), qa[1], N3))
+                    else:
+                        N3 = None
+                for sg in (1.0, -1.0):
+                    A2 = (a2[0] + nrm2[0] * offs[sg], a2[1] + nrm2[1] * offs[sg])
+                    B2 = (b2[0] + nrm2[0] * offs[sg], b2[1] + nrm2[1] * offs[sg])
+                    welds_g.append((si, sg, A2, B2, N3 if N3 is not None else unit(e1 * nrm2[0] + e2 * nrm2[1])))
         prisms = []
         for (outer, holes) in pieces:
             pr = Prism(poly=[tuple(map(float, q)) for q in outer], o=tuple(map(float, o)), U=tuple(map(float, e1)), V=tuple(map(float, e2)), w0=0.0, w1=t)
             pr.holes_extra = [list(map(tuple, hh)) for hh in holes]
+            for ((a2, b2), pt, N3) in bevels:                        # bisel de las piezas que apoyan en esa arista (y quedan del lado exterior del plano)
+                mid = ((a2[0] + b2[0]) / 2.0, (a2[1] + b2[1]) / 2.0)
+                if _dist_poly(mid, outer) > 2e-3:
+                    continue
+                if all(float(np.dot(g["P0"] + e1 * q[0] + e2 * q[1] + n * (lat + w * t / 2.0) - pt, N3)) > -(t * 4.0) for q in outer for w in (1.0, -1.0)):
+                    pr.cut_planes = list(pr.cut_planes) + [(tuple(map(float, pt)), tuple(map(float, -N3)))]
             prisms.append(pr)
         Fy, Fu = _steel(g["items"][0].op.plate_steel, True)
         names = "+".join(c.m.name for c in g["items"])
         mdl.parts.append(Part(f"Cartela {gi + 1}", "gusset", f"Cartela PL {t:g} ({names})", Fy, Fu, prisms, t=t))
         wsz = float(g["items"][0].op.weld_size)
-        for k, (a2, b2) in enumerate(_merge_segments(contact)):           # cordones de la cartela contra el principal, por sus dos caras
-            for sg in (1.0, -1.0):
-                P0 = g["P0"] + e1 * a2[0] + e2 * a2[1] + n * (lat + sg * t / 2.0)
-                P1 = g["P0"] + e1 * b2[0] + e2 * b2[1] + n * (lat + sg * t / 2.0)
-                if float(np.linalg.norm(P1 - P0)) < 0.2:
-                    continue
-                ed = np.asarray(b2, float) - np.asarray(a2, float)
-                nrm2 = np.array([ed[1], -ed[0]]) / max(float(np.linalg.norm(ed)), 1e-12)          # normal de la arista de C, hacia afuera de C = hacia la cartela
-                nB = unit(e1 * nrm2[0] + e2 * nrm2[1])
-                mdl.welds.append(Weld(f"Cartela {gi + 1}-W{k + 1}{'a' if sg > 0 else 'b'}", f"Cartela {gi + 1}", nd.main_name, tuple(map(float, P0)), tuple(map(float, P1)),
-                                      tuple(map(float, n * sg)), tuple(map(float, nB)), wsz, 70.0, f"G{gi + 1}"))
+        for k, (si, sg, A2, B2, nB) in enumerate(welds_g):
+            P0_ = g["P0"] + e1 * A2[0] + e2 * A2[1] + n * (lat + sg * t / 2.0)
+            P1_ = g["P0"] + e1 * B2[0] + e2 * B2[1] + n * (lat + sg * t / 2.0)
+            mdl.welds.append(Weld(f"Cartela {gi + 1}-W{k // 2 + 1}{'a' if sg > 0 else 'b'}" + ("" if sups[si]["name"] == nd.main_name else f"-{sups[si]['name']}"),
+                                  f"Cartela {gi + 1}", sups[si]["name"], tuple(map(float, P0_)), tuple(map(float, P1_)), tuple(map(float, n * sg)),
+                                  tuple(map(float, nB)), wsz, 70.0, f"G{gi + 1}" + ("" if sups[si]["name"] == nd.main_name else f"-{sups[si]['name']}")))
         for c in g["items"]:
             if c.op.kind != OP_GUSSET:
                 _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull)
@@ -1087,9 +1289,10 @@ def _build_gussets(ctxs, nd, mdl):
             s = max(c.op.bolt_s, 2.5)
             gauge = max(min(hm * 0.5, 6.0), 2.5)
             slotted = False
+            sgn_c = 1.0 if float(np.dot(c.sx, n)) >= 0 else -1.0                 # el eje lateral del miembro puede mirar al revés que la normal de la cartela
             if _is_open(shp):
                 grip = [(f"Cartela {gi + 1}", 0.0, t), (c.partname, t, t + shp.tw)]
-                p0, nut = lat + t / 2.0, t + shp.tw
+                p0, nut = sgn_c * (lat + t / 2.0), t + shp.tw
             else:
                 p0, nut = shp.bf / 2.0, shp.bf
                 u0 = float(np.dot(g["P0"] + n * lat - c.Q, c.sx))
@@ -1104,7 +1307,7 @@ def _build_gussets(ctxs, nd, mdl):
                     grip = [(c.partname, 0.0, shp.bf)]
             for i in range(rows):
                 for k, sg in enumerate((1, -1)):
-                    mdl.bolts.append(_bolt(f"{m.name}-B{i + 1}{k + 1}", c.at(gl + 1.5 + i * s, p0, sg * gauge / 2.0), -c.sx, c.db, 0.0, nut, grip, c.op.bolt_grade))
+                    mdl.bolts.append(_bolt(f"{m.name}-B{i + 1}{k + 1}", c.at(gl + 1.5 + i * s, p0, sg * gauge / 2.0), -c.sx * (sgn_c if _is_open(shp) else 1.0), c.db, 0.0, nut, grip, c.op.bolt_grade))
 
 
 # ================================================================================================== modelo completo
@@ -1403,7 +1606,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 ms_k = _weld_geometry(c, tag)
             elif kind in GUSSET_OPS:
                 _, gl, ov, hm = _gusset_outline(c)
-                ms_k = gl
+                ms_k = gl - float(m.gap)                          # la separación gap ya está en gl (la cartela se alarga con ella); más abajo se vuelve a sumar
             if ms_k is not None:
                 mss.append(ms_k)
             ctxs_m.append(c)
@@ -1476,25 +1679,32 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         shapes_by_name[m.name] = shp
         reg[m.name] = {"type": "miembro", "part": m.name, "t": shp.tw, "Fy": Fy_m, "Fu": Fu_m, "faces": member_faces(shp, Q + dirv * ms, end, dirv, sx, sy)}
         ctxs.extend(ctxs_m)
-    _build_gussets(ctxs, nd, mdl)
     bop = nd.base_op()
+    bp_place, bpd = None, None
     if bop is not None and prj is not None and hw and fem is None:
         from . import baseplate as BP
-        place = BP.end_of_member(nd, bop, free_ends, frames)
-        if place is None:
+        bp_place = BP.end_of_member(nd, bop, free_ends, frames)
+        if bp_place is None:
             mdl.notes.append(f"Placa base: el miembro «{bop.member}» no existe o no tiene extremo libre de ese lado.")
         else:
-            E, A_in, bsx, bsy = place
             bpd = BP.derive(prj, nd)
-            mdl.extra += BP.plate_faces(bpd, E, A_in, bsx, bsy)
-            Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
-            tpb = float(bpd.plate.tp)
-            Bw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.B)
-            Nw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.N)
-            Fy_b, Fu_b = _steel(bpd.plate.steel, True)
-            reg["Placa base"] = {"type": "placa base", "part": "Placa base", "t": tpb, "Fy": Fy_b, "Fu": Fu_b, "faces": {
-                "Cara superior": FaceFrame(Ob + Fb @ np.array([0.0, 0.0, tpb]) - Fb[:, 0] * Bw / 2.0, Fb[:, 0], Fb[:, 2], Bw, Nw / 2.0, tpb),
-                "Cara inferior": FaceFrame(Ob - Fb[:, 0] * Bw / 2.0, Fb[:, 0], -Fb[:, 2], Bw, Nw / 2.0, tpb)}}
+    floors = []                                                  # caras superiores de la placa base: las cartelas apoyan en ellas (no se hunden en la placa)
+    if bpd is not None:
+        E, A_in, bsx, bsy = bp_place
+        Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
+        floors.append(("Placa base", Ob + Fb @ np.array([0.0, 0.0, float(bpd.plate.tp)]), Fb[:, 2].copy()))
+    _build_gussets(ctxs, nd, mdl, floors)
+    if bpd is not None:
+        E, A_in, bsx, bsy = bp_place
+        mdl.extra += BP.plate_faces(bpd, E, A_in, bsx, bsy)
+        Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
+        tpb = float(bpd.plate.tp)
+        Bw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.B)
+        Nw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.N)
+        Fy_b, Fu_b = _steel(bpd.plate.steel, True)
+        reg["Placa base"] = {"type": "placa base", "part": "Placa base", "t": tpb, "Fy": Fy_b, "Fu": Fu_b, "faces": {
+            "Cara superior": FaceFrame(Ob + Fb @ np.array([0.0, 0.0, tpb]) - Fb[:, 0] * Bw / 2.0, Fb[:, 0], Fb[:, 2], Bw, Nw / 2.0, tpb),
+            "Cara inferior": FaceFrame(Ob - Fb[:, 0] * Bw / 2.0, Fb[:, 0], -Fb[:, 2], Bw, Nw / 2.0, tpb)}}
     for nm_, (s_, e_, d_) in free_ends.items():
         reg[nm_]["ends"] = (s_, e_, d_)
         _d, _sx, _sy = frames[nm_]
