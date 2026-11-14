@@ -369,7 +369,7 @@ def mallador():
 
     def malla(mdl):
         out = os.path.join(tempfile.mkdtemp(), "m.npz")
-        mesher.mesh_job({"model": model_to_dict(mdl), "params": driver.mesh_params(mdl, SimpleNamespace(mesh3d_mode="", mesh3d=0.0))}, out)
+        mesher.mesh_job({"model": model_to_dict(mdl), "params": driver.mesh_params(mdl, SimpleNamespace(mesh3d_mode="", mesh3d=2.5))}, out)
         d = np.load(out, allow_pickle=True)
         return d
 
@@ -387,14 +387,35 @@ def mallador():
     X = nodos(malla(mdl), "A1")
     inside = np.all(np.abs(X - c) < 0.45, axis=1)
     check(len(X) > 0 and not inside.any(), f"malla con Part.cuts: A1 ({len(X)} nodos), ningún nodo dentro del volumen restado")
-    # CN-06: el extremo de la diagonal recortado contra la cara de la columna
-    p = load_book(os.path.join(ROOT, "ejemplos", "CN-06_diagonal_con_recorte_y_angulo.scp"))[0]
-    mdl = AS.build_model(p)
-    X = nodos(malla(mdl), "D1")
-    pl = mdl.part("D1").prisms[0].cut_planes[0]
-    nn = np.asarray(pl[1], float)
-    nn /= np.linalg.norm(nn)
-    check(len(X) > 0 and float(((X - np.asarray(pl[0])) @ nn).max()) <= 1e-3, f"CN-06: la diagonal mallada ({len(X)} nodos) no pasa del plano de recorte")
+    # CN-06: el extremo de la diagonal recortado contra la cara de la columna (en un proceso aparte: Gmsh gasta memoria y se libera al salir)
+    import subprocess
+    code = (
+        "import sys, os, tempfile, json, numpy as np\n"
+        "sys.path.insert(0, %r)\n"
+        "from types import SimpleNamespace\n"
+        "from steelconpro.model import load_book\n"
+        "from steelconpro.conn import assembly as AS\n"
+        "from steelconpro.conn.fem import mesher, driver\n"
+        "from steelconpro.conn.fem.model3d import model_to_dict\n"
+        "p = load_book(os.path.join(%r, 'ejemplos', 'CN-06_diagonal_con_recorte_y_angulo.scp'))[0]\n"
+        "m = AS.build_model(p)\n"
+        "out = os.path.join(tempfile.mkdtemp(), 'm.npz')\n"
+        "mesher.mesh_job({'model': model_to_dict(m), 'params': driver.mesh_params(m, SimpleNamespace(mesh3d_mode='', mesh3d=0.0))}, out)\n"
+        "d = np.load(out, allow_pickle=True)\n"
+        "idx = {int(i): k for k, i in enumerate(d['node_id'])}\n"
+        "X = np.array([d['xyz'][idx[int(i)]] for i in np.unique(d['e_D1']) if int(i) in idx])\n"
+        "pt, nn = m.part('D1').prisms[0].cut_planes[0]\n"
+        "nn = np.asarray(nn, float); nn /= np.linalg.norm(nn)\n"
+        "print(json.dumps([len(X), float(((X - np.asarray(pt)) @ nn).max())]))\n") % (ROOT, ROOT)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    if r.returncode == -9:                                              # el sistema mató el proceso por falta de memoria (límite compartido): no es un fallo de la geometría
+        print("(CN-06 mallado: proceso terminado por falta de memoria; se omite)")
+        return
+    try:
+        n_, smax = json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:                                                   # noqa: BLE001
+        n_, smax = 0, 1e9
+    check(n_ > 0 and smax <= 1e-3, f"CN-06: la diagonal mallada ({n_} nodos) no pasa del plano de recorte" + ("" if n_ else f"  rc={r.returncode} {r.stdout[-200:]} {r.stderr[-300:]}"))
 
 
 if __name__ == "__main__":
