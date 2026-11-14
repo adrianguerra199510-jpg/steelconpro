@@ -16,21 +16,26 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def capturar(files, out, intentos=4):
-    pendientes = list(files)
-    for _ in range(intentos):
-        if not pendientes:
-            break
-        cmd = ["node", "tests/tablero.js", out] + pendientes
-        if sys.platform.startswith("linux"):
-            cmd = ["xvfb-run", "-a"] + cmd
-        try:
-            r = subprocess.run(cmd, cwd=os.path.join(ROOT, "electron"), capture_output=True, text=True, timeout=120 + 40 * len(pendientes))
-            print(r.stdout.strip())
-        except subprocess.TimeoutExpired:
-            print("tiempo agotado; se reintenta")
-        pendientes = [f for f in pendientes if not os.path.exists(os.path.join(out, os.path.splitext(os.path.basename(f))[0] + ".png"))]
-    return pendientes
+def capturar(files, out, intentos=4, lote=6):
+    """Abre los ejemplos en Electron por lotes (un arranque por lote; si la aplicación se cae se reintentan los que faltan)."""
+    def falta(fs):
+        return [f for f in fs if not os.path.exists(os.path.join(out, os.path.splitext(os.path.basename(f))[0] + ".png"))]
+    files = list({os.path.basename(f): f for f in files}.values())
+    for i in range(0, len(files), lote):
+        grupo = files[i:i + lote]
+        for _ in range(intentos):
+            pend = falta(grupo)
+            if not pend:
+                break
+            cmd = ["node", "tests/tablero.js", out] + pend
+            if sys.platform.startswith("linux"):
+                cmd = ["xvfb-run", "-a"] + cmd
+            try:
+                r = subprocess.run(cmd, cwd=os.path.join(ROOT, "electron"), capture_output=True, text=True, timeout=120 + 40 * len(pend))
+                print(r.stdout.strip())
+            except subprocess.TimeoutExpired:
+                print("tiempo agotado; se reintenta")
+    return falta(files)
 
 
 def tablero(out, nombres, cols=4, w=520):
