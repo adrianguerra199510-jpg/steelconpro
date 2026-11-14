@@ -219,15 +219,17 @@ def run():
         print(f"{'placa simple hasta las alas':34} la viga queda fuera de las alas y la placa llena el espacio entre ellas, con 4 filetes a las alas: OK")
 
         # ---- placa simple en dos placas (arriba y abajo): separacion y espesor controlables, soldadas al principal
-        op1.tab_split = True
-        op1.tp_sep = 6.0; op1.tp_t = 0.75
-        mm1b = AS1.build_model(pr1)
-        ps = [mm1b.part("Placa S2-S"), mm1b.part("Placa S2-I")]
+        prc = _lb("ejemplos/CN-01_columna_con_vigas.scp")[0]                        # las dos placas horizontales solo tienen sentido en una columna
+        opc = next(o for o in prc.node.operations if o.kind == SP.OP_TAB)
+        opc.tab_mode = SP.TAB_MODES[1]; opc.tab_split = True
+        opc.tp_sep = 6.0; opc.tp_t = 0.75
+        mm1b = AS1.build_model(prc)
+        nm_s, nm_i = f"Placa {opc.member}-S", f"Placa {opc.member}-I"
+        ps = [mm1b.part(nm_s), mm1b.part(nm_i)]
         zs_ = [_np.vstack([q.corners() for q in p_.prisms]) for p_ in ps]
-        wm_ = AS1.shape_of(pr1.node.main_shape)
         ext = [(c_[:, 2].min(), c_[:, 2].max()) for c_ in zs_]
         gap_ = abs(max(e_[0] for e_ in ext) - min(e_[1] for e_ in ext))
-        if abs(gap_ - 6.0) > 0.05 or abs(ps[0].t - 0.75) > 1e-9 or sum(1 for w_ in mm1b.welds if w_.name.startswith("Placa S2-S") or w_.name.startswith("Placa S2-I")) < 12:
+        if abs(gap_ - 6.0) > 0.05 or abs(ps[0].t - 0.75) > 1e-9 or sum(1 for w_ in mm1b.welds if w_.name.startswith(nm_s) or w_.name.startswith(nm_i)) < 12:
             fail(f"dos placas: separacion {gap_:.2f}, t {ps[0].t}")
         print(f"{'placa simple en dos placas':34} placas arriba y abajo con separacion y espesor propios, soldadas al principal: OK")
 
