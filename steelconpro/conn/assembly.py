@@ -1411,6 +1411,47 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
         mdl.notes.append(f"{c.m.name}: la soldadura de la cartela a un miembro de esa sección no se dibuja.")
 
 
+def _clean_poly(poly, tol=0.03):
+    """Contorno simple: sin vértices repetidos, colineales ni picos de ancho casi nulo (esquirlas de la resta de polígonos)."""
+    pts = [(float(a), float(b)) for a, b in poly]
+    changed = True
+    while changed and len(pts) >= 3:
+        changed = False
+        out = []
+        for q in pts:
+            if not out or math.dist(q, out[-1]) > 0.05:
+                out.append(q)
+        if len(out) > 1 and math.dist(out[0], out[-1]) <= 0.05:
+            out.pop()
+        pts = out
+        n = len(pts)
+        for i in range(n):
+            a, b, c = pts[i - 1], pts[i], pts[(i + 1) % n]
+            ar = abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2.0
+            v1, v2 = (a[0] - b[0], a[1] - b[1]), (c[0] - b[0], c[1] - b[1])
+            l1, l2 = math.hypot(*v1), math.hypot(*v2)
+            ang = math.degrees(math.acos(max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / max(l1 * l2, 1e-12)))))
+            if ar < tol or (ang < 25.0 and max(l1, l2) < 6.0) or (ang < 70.0 and max(l1, l2) < 1.2):                         # colineal, o pico agudo (esquirla)
+                del pts[i]
+                changed = True
+                break
+    return pts
+
+
+def _segs_cross(p, q, r, s_):
+    d = (q[0] - p[0]) * (s_[1] - r[1]) - (q[1] - p[1]) * (s_[0] - r[0])
+    if abs(d) < 1e-12:
+        return False
+    t = ((r[0] - p[0]) * (s_[1] - r[1]) - (r[1] - p[1]) * (s_[0] - r[0])) / d
+    u = ((r[0] - p[0]) * (q[1] - p[1]) - (r[1] - p[1]) * (q[0] - p[0])) / d
+    return 1e-6 < t < 1 - 1e-6 and 1e-6 < u < 1 - 1e-6
+
+
+def _is_simple(poly):
+    n = len(poly)
+    return all(not _segs_cross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n]) for i in range(n) for j in range(i + 2, n) if not (i == 0 and j == n - 1))
+
+
 def _build_gussets(ctxs, nd, mdl, floors=()):
     for gi, g in enumerate(_gusset_members(ctxs, nd, mdl)):
         n = g["n"]
@@ -1435,7 +1476,8 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
             fnrm = np.asarray(fnrm, float)
             for c in g["items"]:
                 h = float(np.dot(c.Q - np.asarray(fpt, float), fnrm))
-                if -0.01 < h < 40.0 and abs(float(np.dot(fnrm, n))) < 0.2:
+                low = min(float(np.dot(np.asarray(q_) - np.asarray(fpt, float), fnrm)) for q_ in _gusset_outline(c)[0])
+                if -0.01 < h < 40.0 and low < 2.0 and abs(float(np.dot(fnrm, n))) < 0.2:       # solo si la cartela llega a la placa
                     hor = c.dir - fnrm * float(np.dot(c.dir, fnrm))
                     if float(np.linalg.norm(hor)) < 1e-6:
                         continue
@@ -1462,6 +1504,15 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
                     nxt.append((o2, list(holes) + list(h2)))
                     contact += [(a_, b_, si) for (a_, b_) in ct]
             pieces = nxt
+        clean = []
+        for (outer, holes) in pieces:                           # contornos simples: sin esquirlas, picos ni vértices repetidos o colineales
+            oc = _clean_poly(outer)
+            if len(oc) < 3 or abs(PCLIP.area(oc)) < 0.5 or not _is_simple(oc):
+                continue
+            hc = [h_ for h_ in (_clean_poly(h) for h in holes) if len(h_) >= 3 and abs(PCLIP.area(h_)) >= 0.05 and _is_simple(h_)]
+            clean.append((PCLIP.ccw(oc), hc))
+        if clean:
+            pieces = clean
         # trozos sueltos que quedan del otro lado del soporte (la base de la cartela atraviesa el ala): no son cartela; se conservan solo los que alcanzan la punta
         tips = []
         for c in g["items"]:
@@ -1516,6 +1567,8 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
                     B2 = (b2[0] + nrm2[0] * offs[sg], b2[1] + nrm2[1] * offs[sg])
                     welds_g.append((si, sg, A2, B2, N3 if N3 is not None else unit(e1 * nrm2[0] + e2 * nrm2[1])))
         prisms = []
+        if len(pieces) > 1:
+            mdl.notes.append(f"Cartela {gi + 1}: queda en {len(pieces)} trozos separados por el miembro principal.")
         for (outer, holes) in pieces:
             pr = Prism(poly=[tuple(map(float, q)) for q in outer], o=tuple(map(float, o)), U=tuple(map(float, e1)), V=tuple(map(float, e2)), w0=0.0, w1=t)
             pr.holes_extra = [list(map(tuple, hh)) for hh in holes]
