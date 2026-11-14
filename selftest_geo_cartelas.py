@@ -164,6 +164,38 @@ for kind in ("base", "col", "vigas"):
                 fail(f"tipología {kind} {key}={v}: {e[0]['text'][:120]}")
 print(f"{'tipologías en sus límites':34} {'OK' if len(fails) == f0 else 'con fallas'}")
 
+# 9) diagonales de ángulo y de canal contra la cartela
+f0 = len(fails)
+for dsh, kind, csh, az, el in itertools.product(("L4X4X1/4", "C8X11.5", "L6X6X3/8"), (OP_GUSSET, OP_GUSSET_W), ("W14X90", "HSS12X12X1/2"), (0, 90, 30), (-45.0, 45.0)):
+    nd = col(csh)
+    nd.members = [Member(name="D1", shape=dsh, steel="ASTM A992", az=float(az), el=el, L=60.0)]
+    nd.operations = [Operation(kind=kind, member="D1", plate_t=0.5)]
+    e = errs(prj(nd))
+    if e:
+        fail(f"ángulo/canal {dsh} {kind[:12]} {csh} az {az} el {el}: {e[0]['text'][:110]}")
+print(f"{'diagonales de ángulo y canal':34} {'OK' if len(fails) == f0 else 'con fallas'}")
+
+# 10) cruce de una X: diagonal continua (principal) y la otra en dos tramos con cartela común
+f0 = len(fails)
+for msh, dsh, kind in itertools.product(("HSS6X6X3/8", "W10X33"), ("HSS4X4X1/4", "W6X15"), (OP_GUSSET, OP_GUSSET_W)):
+    nd = Nodo(main_name="Diagonal 1", main_shape=msh, main_steel=steel(msh), main_az=0.0, main_el=45.0, main_end=END_LABELS[0], main_len_neg=60.0, main_len_pos=60.0)
+    nd.members = [Member(name="D2", shape=dsh, steel=steel(dsh), az=0.0, el=-45.0, L=48.0), Member(name="D3", shape=dsh, steel=steel(dsh), az=180.0, el=45.0, L=48.0)]
+    nd.operations = [Operation(kind=kind, member=m.name, plate_t=0.5) for m in nd.members]
+    e = errs(prj(nd))
+    if e:
+        fail(f"cruce de X {msh} {dsh} {kind[:12]}: {e[0]['text'][:110]}")
+print(f"{'cruce de X':34} {'OK' if len(fails) == f0 else 'con fallas'}")
+
+# 11) aviso cuando la cartela sobresale de la placa base
+f0 = len(fails)
+p = EA.ex_a08()
+if any("sobresale" in x for x in AS.build_model(p).notes):
+    fail("TP-A08 no debe avisar de borde de placa base")
+p.plate.N, p.conc.N2 = 16.0, 40.0
+if not any("sobresale" in x and "placa base" in x for x in AS.build_model(p).notes):
+    fail("falta el aviso de cartela que sobresale de la placa base")
+print(f"{'aviso de borde de placa base':34} {'OK' if len(fails) == f0 else 'con fallas'}")
+
 # 8) ejemplos TP-A*
 f0 = len(fails)
 files = sorted(glob.glob(os.path.join(ROOT, "ejemplos", "TP-A*.scp")))

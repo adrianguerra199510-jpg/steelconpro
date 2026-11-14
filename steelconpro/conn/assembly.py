@@ -15,7 +15,7 @@ import math
 import numpy as np
 
 from .. import materials as M
-from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN
+from ..shapes import CATALOG, HSS_RECT, W_SHAPE, GEN, ANGLE, CHANNEL
 from .common import hole_std, bolt_db
 from .fem.model3d import Model3D, Part, Bolt, Prism, Weld, unit
 from . import ops as OPS
@@ -1040,6 +1040,10 @@ def _gusset_outline(ctx):
     dm = max(min(shp.d if not shp.is_round else shp.d, 16.0), 4.0)
     hb = op.gus_hb if op.gus_hb > 0 else max(dm * 1.05, 7.0)
     hm = op.gus_hm if op.gus_hm > 0 else max(dm * 0.9, 5.0)
+    if shp.kind == W_SHAPE and op.gus_hm <= 0:                    # la cartela va entre las alas del perfil I
+        hm = min(hm, max(float(shp.d) - 2.0 * float(shp.tf) - 0.2, 2.0))
+        if op.gus_hb <= 0:
+            hb = min(hb, hm)                                          # sin ensanche: el traslape con el miembro queda entre sus alas
     if shp.kind == HSS_RECT and op.gus_hm <= 0:                  # un tubo con ranura: la cartela atraviesa sus paredes
         hm = max(hm, float(shp.d) + 1.0)
         hb = max(hb, hm)
@@ -1375,7 +1379,7 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
             lo, hi = min(sa, sb), max(sa, sb)
             if hi < gl - 1e-6 or lo > tip + 1e-6:
                 continue
-            if min(_ya, _yb) < _open_plate(c, t)[3] - 0.3 or max(_ya, _yb) > _open_plate(c, t)[4] + 0.3:          # solo los bordes de la cartela que quedan sobre el miembro (no los de contacto con el soporte)
+            if (_ya + _yb) / 2.0 < _open_plate(c, t)[3] - 0.3 or (_ya + _yb) / 2.0 > _open_plate(c, t)[4] + 0.3:          # solo los bordes de la cartela que quedan sobre el miembro (no los de contacto con el soporte)
                 continue
             if abs(sb - sa) < 1e-6:
                 if abs(sa - tip) > 0.05 or abs(sa - gl) < 1e-6:      # solo el borde de la punta
@@ -1386,6 +1390,12 @@ def _weld_member_to_gusset(c, gi, mdl, g, lat, t, n, e1, e2, hull, pi=0):
                 ta, tb = max(0.0, min(1.0, ta)), max(0.0, min(1.0, tb))
                 if ta > tb:
                     ta, tb = tb, ta
+            _yo0, _yo1 = _open_plate(c, t)[3], _open_plate(c, t)[4]
+            if abs(_yb - _ya) > 1e-9:                                # solo el tramo que cae sobre la pared del miembro (ángulo / canal: la cartela puede ser más ancha)
+                tl, th = sorted(((_yo0 - _ya) / (_yb - _ya), (_yo1 - _ya) / (_yb - _ya)))
+                ta, tb = max(ta, tl), min(tb, th)
+                if ta >= tb:
+                    continue
             pa, pb = hull[a], hull[b]
             qa = (pa[0] + (pb[0] - pa[0]) * ta, pa[1] + (pb[1] - pa[1]) * ta)
             qb = (pa[0] + (pb[0] - pa[0]) * tb, pa[1] + (pb[1] - pa[1]) * tb)
@@ -1482,6 +1492,9 @@ def _build_gussets(ctxs, nd, mdl, floors=()):
         # desplazamiento lateral comun: junto al alma de los miembros abiertos; centrada si todos son huecos
         lats = [(1.0 if float(np.dot(c.sx, n)) >= 0 else -1.0) * _open_plate(c, t)[0] for c in g["items"] if _is_open(c.shape)]
         lat = max(lats, key=abs) if lats else 0.0
+        for c in g["items"]:
+            if _is_open(c.shape) and c.shape.kind != W_SHAPE and lat * (1.0 if float(np.dot(c.sx, n)) >= 0 else -1.0) * _open_plate(c, t)[0] < 0:
+                mdl.notes.append(f"{c.m.name}: su ángulo / canal queda con la cartela del lado contrario del alma; gire el miembro 180° (giro del miembro) para que la cartela quede contra su cara exterior.")
         _A, msx, _msy = main_frame(nd)
         mshape = g["items"][0].mshape
         if _is_open(mshape) and abs(float(np.dot(n, msx))) > 0.99:       # el plano de la cartela coincide con el del alma del principal: se coloca a un lado
