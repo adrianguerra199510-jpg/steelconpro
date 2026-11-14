@@ -368,6 +368,14 @@ def fix_weld_normals(welds):
         w.nB = tuple(map(float, unit(b - c * a)))
 
 
+def member_ret(nd, m, op=None) -> float:
+    """Retroceso del extremo de la viga `m` por llegar esviada o inclinada a la cara plana del principal (solo placa simple, doble ángulo y asiento; 0 en los demás casos)."""
+    if op is None or op.kind not in (OP_TAB, OP_DANG, OP_SEAT):
+        return 0.0
+    _, sx, sy = member_frame(m)
+    return skew_retreat(shape_of(m.shape), flat_support_normal(nd, m), member_dir(m), sx, sy)
+
+
 def tab_extra(nd, m, op) -> float:
     """Placa simple «hasta el interior de las alas»: cuánto se saca la viga del principal (del alma al borde de las alas) para que no choque con ellas.
     0 si no aplica (el principal no es un perfil I o la viga no llega por el alma)."""
