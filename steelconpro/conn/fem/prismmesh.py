@@ -779,3 +779,117 @@ def _clip_convex(faces, n, D):
         if a2 > 1e-9:
             out.append((Qs, 0))
     return out
+
+
+# ================================================================================================ sopa de caras heredada -> superficie cerrada
+def heal_soup(faces, groups=None, tol=1e-6):
+    """Arregla una «sopa» de polígonos que debería ser un sólido (caras de la placa base heredada): une vértices iguales, parte las aristas por los
+    vértices que caen a mitad de ellas (uniones en T), quita caras degeneradas y duplicadas y orienta todas las caras hacia afuera (las componentes
+    cerradas con volumen positivo).  `groups`: etiqueta por cara (se conserva).  -> (caras, etiquetas)"""
+    from scipy.spatial import cKDTree
+    if not faces:
+        return [], []
+    groups = list(groups) if groups is not None else [0] * len(faces)
+    pts = np.array([q for f in faces for q in f], float).reshape(-1, 3)
+    tree = cKDTree(pts)
+    pairs = tree.query_pairs(tol, output_type="ndarray")
+    parent = np.arange(len(pts))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    for a, b in pairs:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)
+    lab = np.array([find(i) for i in range(len(pts))])
+    uniq, inv = np.unique(lab, return_inverse=True)
+    P = np.array([pts[np.nonzero(lab == u)[0][0]] for u in uniq])
+    loops, k = [], 0
+    for f in faces:
+        loops.append([int(inv[k + i]) for i in range(len(f))])
+        k += len(f)
+    tree = cKDTree(P)
+    ext = {}                                                   # arista (a, b) ordenada -> vértices interiores ordenados desde a
+
+    def inner(a, b):
+        key = (a, b) if a < b else (b, a)
+        if key not in ext:
+            pa, pb = P[key[0]], P[key[1]]
+            d = pb - pa
+            L2 = float(d @ d)
+            res = []
+            if L2 > 1e-18:
+                for i in tree.query_ball_point(0.5 * (pa + pb), 0.5 * np.sqrt(L2) + tol):
+                    if i in key:
+                        continue
+                    t = float((P[i] - pa) @ d) / L2
+                    if 0 < t < 1 and np.linalg.norm(pa + t * d - P[i]) < 10 * tol:
+                        res.append((t, i))
+            ext[key] = [i for _t, i in sorted(res)]
+        r = ext[key]
+        return r if a < b else r[::-1]
+    out, og, seen = [], [], set()
+    for lp, g in zip(loops, groups):
+        lp = [lp[i] for i in range(len(lp)) if lp[i] != lp[i - 1]]
+        new = []
+        for i in range(len(lp)):
+            a, b = lp[i], lp[(i + 1) % len(lp)]
+            new.append(a)
+            new += inner(a, b)
+        if len(new) < 3:
+            continue
+        nv = sum(np.cross(P[new[i]], P[new[(i + 1) % len(new)]]) for i in range(len(new)))
+        if np.linalg.norm(nv) < 1e-9:
+            continue
+        key = tuple(sorted(new))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(new)
+        og.append(g)
+    # orientación coherente: se recorre por aristas compartidas (solo las de exactamente dos caras)
+    ed = {}
+    for fi, lp in enumerate(out):
+        for i in range(len(lp)):
+            a, b = lp[i], lp[(i + 1) % len(lp)]
+            ed.setdefault((min(a, b), max(a, b)), []).append((fi, a, b))
+    flip = [None] * len(out)
+    comps = []
+    for s in range(len(out)):
+        if flip[s] is not None:
+            continue
+        flip[s] = False
+        comp, stack = [s], [s]
+        while stack:
+            f = stack.pop()
+            lp = out[f]
+            for i in range(len(lp)):
+                a, b = lp[i], lp[(i + 1) % len(lp)]
+                if flip[f]:
+                    a, b = b, a                                # sentido efectivo de esta cara
+                lst = ed[(min(a, b), max(a, b))]
+                if len(lst) != 2:
+                    continue
+                for (g, ga, gb) in lst:
+                    if g == f or flip[g] is not None:
+                        continue
+                    same = (ga == a and gb == b)               # la vecina recorre la arista en el mismo sentido: hay que invertirla
+                    flip[g] = same
+                    comp.append(g)
+                    stack.append(g)
+        comps.append(comp)
+    for comp in comps:                                         # cada componente: volumen con signo positivo
+        vol = 0.0
+        for f in comp:
+            lp = out[f][::-1] if flip[f] else out[f]
+            Q = P[lp]
+            for i in range(1, len(lp) - 1):
+                vol += float(Q[0] @ np.cross(Q[i], Q[i + 1])) / 6.0
+        if vol < 0:
+            for f in comp:
+                flip[f] = not flip[f]
+    res = [[tuple(P[i]) for i in (lp[::-1] if fl else lp)] for lp, fl in zip(out, flip)]
+    return res, og

@@ -275,6 +275,15 @@ def mallas_modelo(mdl, etiqueta, n_pts=300):
             if g and not MC.check_faces(g)["ok"]:
                 bad.append((etiqueta, b.tag, "perno", MC.check_faces(g)["errors"][:1]))
                 break
+    by_tag = {}
+    for tag, faces, _c, _a in mdl.extra:                                   # placa base heredada: por etiqueta forma una superficie cerrada y orientada
+        if not tag.startswith("plane:"):
+            by_tag.setdefault(tag, []).extend(faces)
+    for tag, faces in by_tag.items():
+        r = MC.check_faces(faces)
+        errs = [e for e in r["errors"] if "compartida por" not in e]          # sólidos que se tocan (cabeza y vástago) comparten aristas: no es defecto
+        if errs:
+            bad.append((etiqueta, "extra:" + tag, "", errs[:2]))
     return bad
 
 

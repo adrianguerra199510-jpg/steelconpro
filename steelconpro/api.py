@@ -358,7 +358,7 @@ def mesh(args) -> dict:
         if tag.startswith("plane:"):
             parts.append(_scene_to_json(sc, tag.split(":", 1)[1], "plane", {"label": "Plano de trabajo " + tag.split(":", 1)[1], "owner": ""}))
         else:
-            parts.append(_scene_to_json(sc, f"Placa base · {tag}", "base_" + tag, {"label": "Placa base", "owner": "op:base"}))
+            parts.append(_scene_to_json(sc, f"Placa base · {tag}", "base_" + tag, {"label": "Placa base", "owner": "op:base", "closed": True}))
     P = np.asarray(pts, float).reshape(-1, 3)
     lo, hi = (P.min(axis=0).tolist(), P.max(axis=0).tolist()) if len(P) else ([0, 0, 0], [1, 1, 1])
     dims = [{"a": list(map(float, a)), "b": list(map(float, b)), "off": list(map(float, off)),

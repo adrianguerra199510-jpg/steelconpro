@@ -91,7 +91,31 @@ def plate_faces(prj, E, A_in, sx, sy):
             continue
         faces = [[tuple(O + F @ np.asarray(q, float)) for q in f] for f in part[1]]
         out.append((tag, faces, part[2], part[3]))
-    return out
+    return _heal_parts(out)
+
+
+def _heal_parts(out):
+    """Las caras heredadas (view3d) no forman una superficie cerrada ni estan orientadas (la placa viene en tapas, borde y paredes de agujeros por
+    separado): se unen por etiqueta, se cierran las uniones en T y se orientan hacia afuera, y se devuelven con su color por parte."""
+    from .fem.prismmesh import heal_soup
+    res, by_tag = [], {}
+    for i, (tag, faces, color, alpha) in enumerate(out):
+        by_tag.setdefault(tag, []).append(i)
+    done = {}
+    for tag, idxs in by_tag.items():
+        soup, grp = [], []
+        for i in idxs:
+            soup += out[i][1]
+            grp += [i] * len(out[i][1])
+        try:
+            fs, gs = heal_soup(soup, grp)
+        except Exception:                                   # nunca debe impedir armar el modelo
+            fs, gs = soup, grp
+        for i in idxs:
+            done[i] = [f for f, g in zip(fs, gs) if g == i]
+    for i, (tag, faces, color, alpha) in enumerate(out):
+        res.append((tag, done.get(i, faces), color, alpha))
+    return res
 
 
 def end_of_member(nd: Nodo, op: Operation, axes: dict, frames: dict):
