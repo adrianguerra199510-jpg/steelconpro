@@ -80,120 +80,10 @@ class Prism:
         return np.array(pts)
 
     def faces(self, nseg: int = 36):
-        """Caras (poligonos 3D) para dibujar; con `cut_planes` se recortan contra esos planos y se cierra la sección con una tapa."""
-        out = self._faces_base(nseg)
-        for (pt, nrm) in self.cut_planes:
-            pt, nrm = np.asarray(pt, float), np.asarray(nrm, float)
-            out = [c for c in (_clip_poly(f, pt, nrm) for f in out) if len(c) >= 3]
-            cap = self._cap(pt, nrm)
-            if cap:
-                out.append(cap)
-        return out
-
-    def _cap(self, pt, nrm):
-        if self.circle is None and not self.poly:
-            return None
-        o, U, V, W = (np.asarray(x, float) for x in (self.o, self.U, self.V, self.W))
-        den = float(np.dot(nrm, W))
-        if abs(den) < 1e-9:
-            return None
-        if self.circle is not None:                                   # cilindro o tubo redondo: tapa elíptica (o anillo unido por un puente)
-            ro, ri = self.circle
-            n = 36
-            ang = [2 * math.pi * k / n for k in range(n)]
-
-            def ring(r):
-                out, ws = [], []
-                for a in ang:
-                    u, v = r * math.cos(a), r * math.sin(a)
-                    w = float(np.dot(nrm, pt - o - u * U - v * V)) / den
-                    ws.append(w)
-                    out.append(min(max(w, self.w0), self.w1))
-                return [self.to_global(r * math.cos(a), r * math.sin(a), w) for a, w in zip(ang, out)], ws
-            outer, ws = ring(ro)
-            if max(ws) < self.w0 - 1e-6 or min(ws) > self.w1 + 1e-6:
-                return None
-            if ri <= 0:
-                return outer
-            inner, _ = ring(ri)
-            return outer + [outer[0], inner[0]] + list(reversed(inner[1:])) + [inner[0]]
-        ws = [float(np.dot(nrm, pt - o - u * U - v * V)) / den for (u, v) in self.poly]
-        if max(ws) < self.w0 - 1e-6 or min(ws) > self.w1 + 1e-6:
-            return None
-        ws = [min(max(w, self.w0), self.w1) for w in ws]
-        return [self.to_global(u, v, w) for (u, v), w in zip(self.poly, ws)]
-
-    def _faces_base(self, nseg: int = 36):
-        out = []
-        if self.circle is not None:
-            ro, ri = self.circle
-            ang = [2 * math.pi * k / nseg for k in range(nseg)]
-            ring = lambda r, w: [self.to_global(r * math.cos(a), r * math.sin(a), w) for a in ang]
-            outs = [ring(ro, self.w0), ring(ro, self.w1)]
-            for k in range(nseg):
-                k2 = (k + 1) % nseg
-                out.append([outs[0][k], outs[0][k2], outs[1][k2], outs[1][k]])
-            if ri > 0:
-                ins = [ring(ri, self.w0), ring(ri, self.w1)]
-                for k in range(nseg):
-                    k2 = (k + 1) % nseg
-                    out.append([ins[0][k], ins[0][k2], ins[1][k2], ins[1][k]])
-                for w, o_, i_ in ((0, outs[0], ins[0]), (1, outs[1], ins[1])):
-                    for k in range(nseg):
-                        k2 = (k + 1) % nseg
-                        out.append([o_[k], o_[k2], i_[k2], i_[k]])
-            else:
-                out.append(outs[0])
-                out.append(outs[1])
-            return out
-        if self.holes_extra:
-            return self._faces_with_holes()
-        P0 = [self.to_global(u, v, self.w0) for (u, v) in self.poly]
-        P1 = [self.to_global(u, v, self.w1) for (u, v) in self.poly]
-        n = len(P0)
-        for k in range(n):
-            k2 = (k + 1) % n
-            out.append([P0[k], P0[k2], P1[k2], P1[k]])
-        if self.holes and len(self.holes[0]) == n:
-            H0 = [self.to_global(u, v, self.w0) for (u, v) in self.holes[0]]
-            H1 = [self.to_global(u, v, self.w1) for (u, v) in self.holes[0]]
-            for k in range(n):
-                k2 = (k + 1) % n
-                out.append([H0[k], H0[k2], H1[k2], H1[k]])
-            for P, H in ((P0, H0), (P1, H1)):
-                for k in range(n):
-                    k2 = (k + 1) % n
-                    out.append([P[k], P[k2], H[k2], H[k]])
-        else:
-            out.append(P0)
-            out.append(P1)
-        return out
-
-
-def _prism_faces_with_holes(self):
-    """Caras de un prisma con agujeros de cualquier forma: tapas triangulizadas (con puentes) y paredes de contorno y de agujeros."""
-    from ..geom2d import triangulate, ccw, cw
-    outer = ccw(self.poly)
-    holes = [cw(h) for h in list(self.holes) + list(self.holes_extra)]
-    out = []
-    g = self.to_global
-    n = len(outer)
-    for k in range(n):
-        a, b = outer[k], outer[(k + 1) % n]
-        out.append([g(a[0], a[1], self.w0), g(b[0], b[1], self.w0), g(b[0], b[1], self.w1), g(a[0], a[1], self.w1)])
-    for h in holes:
-        m = len(h)
-        for k in range(m):
-            a, b = h[k], h[(k + 1) % m]
-            out.append([g(a[0], a[1], self.w0), g(b[0], b[1], self.w0), g(b[0], b[1], self.w1), g(a[0], a[1], self.w1)])
-    pts = list(outer) + [q for h in holes for q in h]
-    for (i, j, k) in triangulate(outer, holes):
-        for w in (self.w0, self.w1):
-            out.append([g(pts[i][0], pts[i][1], w), g(pts[j][0], pts[j][1], w), g(pts[k][0], pts[k][1], w)])
-    return out
-
-
-Prism._faces_with_holes = _prism_faces_with_holes
+        """Caras (poligonos 3D, con la normal hacia afuera) para dibujar: superficie CERRADA del prisma con sus huecos (`holes`, `holes_extra`) y sus
+        recortes planos (`cut_planes`); ver `prismmesh` (cada recorte cierra su seccion con la tapa correcta: anillo en un tubo, contorno concavo en un perfil I)."""
+        from .prismmesh import prism_faces
+        return prism_faces(self, nseg)
 
 
 def box_prism(c, size, axes=((1, 0, 0), (0, 1, 0), (0, 0, 1))):
@@ -387,13 +277,29 @@ class Model3D:
 
 
 def weld_prism(w: Weld) -> Prism:
-    """Prisma triangular del filete: vertice en el rincon, un cateto sobre cada superficie.  nA y nB deben ser perpendiculares."""
+    """Prisma triangular del filete: vertice en el rincon y un cateto `w` sobre la superficie de cada pieza, en el plano perpendicular al cordon.
+    nA y nB son las normales de las superficies de A y B hacia el lado del cordon; no hace falta que sean perpendiculares entre si ni al cordon
+    (miembros inclinados): se proyectan al plano de la seccion y cada cateto se apoya en la superficie de la otra pieza."""
     p0, p1 = np.asarray(w.p0, float), np.asarray(w.p1, float)
+    L = float(np.linalg.norm(p1 - p0))
     axis = unit(p1 - p0)
-    U, V = unit(w.nA), unit(w.nB)                     # cateto sobre B: a lo largo de nA; cateto sobre A: a lo largo de nB
-    sgn = 1.0 if float(np.dot(np.cross(U, V), axis)) > 0 else -1.0
-    return Prism(poly=[(0.0, 0.0), (w.w, 0.0), (0.0, w.w)], o=tuple(p0 if sgn > 0 else p1), U=tuple(U), V=tuple(V), w0=0.0,
-                 w1=float(np.linalg.norm(p1 - p0)))
+    nA = np.asarray(w.nA, float)
+    nB = np.asarray(w.nB, float)
+    nA = unit(nA - axis * float(nA @ axis))
+    nB = unit(nB - axis * float(nB @ axis))
+    c = float(nA @ nB)
+    if abs(c) > 0.995 or float(np.linalg.norm(nA)) < 0.5 or float(np.linalg.norm(nB)) < 0.5:          # normales paralelas: no hay rincon, se dibuja un triangulo recto
+        nB = unit(np.cross(axis, nA)) if float(np.linalg.norm(nA)) > 0.5 else unit(np.cross(axis, [0.0, 0.0, 1.0]))
+        c = 0.0
+        if float(np.linalg.norm(nA)) < 0.5:
+            nA = unit(np.cross(nB, axis))
+    tB = unit(nA - c * nB)                                  # sobre la superficie de B, hacia el lado de A
+    tA = unit(nB - c * nA)                                  # sobre la superficie de A, hacia el lado de B
+    e1 = tB
+    e2 = np.cross(axis, e1)                                 # e1 × e2 = eje
+    ww = float(w.w)
+    poly = [(0.0, 0.0), (ww, 0.0), (ww * float(tA @ e1), ww * float(tA @ e2))]
+    return Prism(poly=poly, o=tuple(p0), U=tuple(e1), V=tuple(e2), w0=0.0, w1=L)
 
 
 # ---------------------------------------------------------------------------------------------- serializacion (proceso hijo del mallador)

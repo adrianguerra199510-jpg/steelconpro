@@ -306,6 +306,16 @@ def _scene_to_json(sc, name, kind, extra=None):
     return d
 
 
+WELD_COLORS = {"filete": "#c00000", "cjp": "#7a1f1f", "pjp": "#e4572e"}
+WELD_LABELS = {"filete": "Soldadura", "cjp": "Soldadura CJP", "pjp": "Soldadura PJP"}
+
+
+def _weld_kind(w) -> str:
+    """'filete' | 'cjp' | 'pjp' (el tipo lo pone la operacion en `Weld.kind`, que no es un campo del dataclass)."""
+    k = str(getattr(w, "kind", "") or "")
+    return "cjp" if k.startswith("CJP") else "pjp" if k.startswith("PJP") else "filete"
+
+
 def mesh(args) -> dict:
     """Modelo 3D de la conexion: una malla por pieza (miembros, placas, angulos), los pernos, las soldaduras y la placa base, mas etiquetas y cotas."""
     p = _prj(args["connection"])
@@ -317,12 +327,13 @@ def mesh(args) -> dict:
             faces += [[tuple(map(float, q)) for q in f] for f in pr.faces()]
         pts += [q for f in faces for q in f]
         sc = _faces_scene(faces, _rgb(FS.COLORS.get(part.kind, FS.COLORS["other"])), 1.0 if part.kind != "support" else 0.55)
-        parts.append(_scene_to_json(sc, part.name, part.kind, {"label": part.label, "owner": getattr(part, "owner", "")}))
+        parts.append(_scene_to_json(sc, part.name, part.kind, {"label": part.label, "owner": getattr(part, "owner", ""), "closed": True}))
     for w in mdl.welds:
         pr = FS.weld_prism(w)
         faces = [[tuple(map(float, q)) for q in f] for f in pr.faces()]
-        sc = _faces_scene(faces, _rgb(FS.COLORS["weld"]), 1.0, edges=False)
-        parts.append(_scene_to_json(sc, w.name or "Soldadura", "weld", {"label": "Soldadura"}))
+        wk = _weld_kind(w)
+        sc = _faces_scene(faces, _rgb(WELD_COLORS[wk]), 1.0, edges=False)
+        parts.append(_scene_to_json(sc, w.name or "Soldadura", "weld", {"label": WELD_LABELS[wk], "closed": True, "wkind": wk}))
     shank, head = [], []
     for b in mdl.bolts:
         f = FS._bolt_faces(b)
@@ -332,7 +343,7 @@ def mesh(args) -> dict:
         sc = Scene()
         sc.add_faces(shank, _rgb("#2f4b7c"), 1.0, edges=False)
         sc.add_faces(head, _rgb("#44546a"), 1.0, edges=True)
-        parts.append(_scene_to_json(sc, "Pernos", "bolt", {"label": f"{len(mdl.bolts)} pernos"}))
+        parts.append(_scene_to_json(sc, "Pernos", "bolt", {"label": f"{len(mdl.bolts)} pernos", "closed": True}))
     for tag, faces, color, alpha in mdl.extra:
         fl = [[tuple(map(float, q)) for q in f] for f in faces]
         pts += [q for f in fl for q in f]

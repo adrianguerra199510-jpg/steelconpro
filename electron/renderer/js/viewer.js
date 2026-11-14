@@ -170,21 +170,27 @@ export class Viewer {
     this.overlay.replaceChildren(); this.loadEls = [];
   }
 
-  _mat(transparent) {
-    return new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent, depthWrite: !transparent, side: THREE.DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+  // closed: la malla de la pieza es una superficie cerrada con las normales hacia afuera (prismas del modelo): se dibuja solo la cara que mira a la cámara.
+  // Así, dos piezas en contacto (placa contra ala, cordón contra placa) no parpadean porque sus caras coincidentes se miran de espaldas y una de ellas
+  // nunca se dibuja; las demás mallas (placa base heredada, planos de trabajo) siguen a dos caras.  `idx` da a cada pieza un desfase de profundidad
+  // distinto para decidir sin parpadeo las caras coplanares del mismo sentido (piezas al ras).
+  _mat(transparent, closed = false, idx = 0) {
+    return new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent, depthWrite: !transparent, side: closed ? THREE.FrontSide : THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 + (idx % 7) * 0.5,
       uniforms: { uCam: this.uniforms.uCam, uL: this.uniforms.uL, uTint: { value: new THREE.Vector4(1, 0.45, 0.05, 0) }, uDim: { value: 1 } } });
   }
 
   // data = respuesta de api.mesh (o fem_scene): { parts: [{name, kind, label, o, t, l}], dims, labels, bounds }
   setModel(data, { keepView = true } = {}) {
     this.clear();
+    let partIdx = 0;
     for (const pd of data.parts) {
-      const part = { name: pd.name, kind: pd.kind, label: pd.label, owner: pd.owner || '', objs: [], mats: [] };
+      const part = { name: pd.name, kind: pd.kind, label: pd.label, owner: pd.owner || '', wkind: pd.wkind || '', closed: !!pd.closed, objs: [], mats: [] };
+      partIdx++;
       for (const [key, transparent] of [['o', false], ['t', true]]) {
         const arr = b64ToFloat32(pd[key]);
         if (!arr.length) continue;
-        const mesh = new THREE.Mesh(makeGeometry(arr), this._mat(transparent));
+        const mesh = new THREE.Mesh(makeGeometry(arr), this._mat(transparent, part.closed, partIdx));
         mesh.userData.part = part; mesh.renderOrder = transparent ? 2 : 0;
         if (transparent) mesh.raycast = () => {};            // el pedestal translucido no intercepta la seleccion
         this.root.add(mesh); part.objs.push(mesh); part.mats.push(mesh.material);
