@@ -182,5 +182,5 @@ table.t input.cell:hover { border-color: var(--border); } table.t input.cell:foc
 .pview .pedit { display: flex; align-items: center; gap: 10px; padding: 12px 10px 10px 14px; border-bottom: 1px solid var(--border); } .pview .pedit h3 { font-size: 14px; flex: 1; text-transform: none; letter-spacing: 0; color: var(--text); }
 .pview .pbody { padding: 12px 12px 18px; } .pview .pfoot { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface-2); justify-content: flex-end; }
 .tabbar .btn.calc { margin: 3px 6px; height: 28px; align-self: center; }
-.vtool .group select { height: 28px; border: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--text); }
+.vtool .group select { height: 28px; border: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--text); max-width: 190px; }
 .report-dock { display: flex; flex-direction: column; min-height: 0; height: 100%; }

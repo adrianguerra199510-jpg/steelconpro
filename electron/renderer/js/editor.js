@@ -99,7 +99,7 @@ function updateUndo() {
 
 // ---------------------------------------------------------------------------------------------------- cambios, guardado y recálculo
 const refreshMesh = latest(async () => {
-  const data = await call('mesh', { connection: E.conn() });
+  const data = await call('mesh', { connection: E.conn(), fem_cuts: !!E.femStarted });
   return data;
 });
 const runMesh = debounce(async () => {
@@ -153,7 +153,8 @@ async function saveNow(manual) {
 
 E.changed = (opts = {}) => {
   markDirty();
-  E.stale = true; E.res = null; E.calculating = false;                        // un cambio descarta los resultados: sin D/C hasta volver a calcular
+  E.stale = true; E.res = null; E.calculating = false;
+  if (E.femStarted || E.femDone) { E.femStarted = false; E.femDone = false; updateFemTools(); }                        // un cambio descarta los resultados: sin D/C hasta volver a calcular
   if (opts.structure) renderTree(); else renderTree();
   if (opts.geometry !== false) { runMesh(); E.geo = null; renderGeo(); runGeo(); }
   runNodal();
@@ -208,6 +209,13 @@ function build(app) {
   ui.reacBtn = iconBtn('arrow-left', 'Mostrar las reacciones en el nudo (resultantes)', () => { E.showReactionsOn = !E.showReactionsOn; syncLoads(); });
   ui.loadBtn.classList.add('on'); ui.reacBtn.classList.add('on'); E.showLoadsOn = true; E.showReactionsOn = true;
   vtool.append(h('div', { class: 'group' }, ui.loadBtn, ui.reacBtn, ui.loadSel));
+  // herramientas del análisis FEM: aparecen al pulsar «Ejecutar análisis» (malla y cortes del tramo modelado) y al terminar (resultados y deformada)
+  ui.femMeshBtn = iconBtn('layers', 'Ver la malla de elementos finitos (el tramo que se modela)', () => toggleFemMesh());
+  ui.femBackBtn = iconBtn('box', 'Volver al modelo', () => backToModel());
+  ui.femGroup = h('div', { class: 'group', style: { display: 'none' } }, ui.femMeshBtn, ui.femBackBtn);
+  ui.femCase = h('select', { title: 'Caso de carga' }); ui.femField = h('select', { title: 'Resultado' }); ui.femScale = h('select', { title: 'Deformada' }); ui.femPart = h('select', { title: 'Pieza' });
+  ui.femRes = h('div', { class: 'group', style: { display: 'none' } }, ui.femCase, ui.femField, ui.femScale, ui.femPart);
+  vtool.append(ui.femGroup, ui.femRes);
   ui.fembar = h('div', { class: 'vhud' });
   const center = h('div', { class: 'viewer-wrap' }, ui.vhost, vtool, ui.note, ui.fembar);
 
@@ -601,10 +609,9 @@ function buildRight() {
   const t = tabs(items, { active: E.ui.rtab && items.some((i) => i.id === E.ui.rtab) ? E.ui.rtab : 'res', cls: 'pill', onChange: (id) => { E.ui.rtab = id; } });
   E.ui.rtabs = t;
   const calc = btn('Calcular', { icon: 'play', kind: 'primary', onClick: () => runVerify.flush() });
-  calc.classList.add('calc');
-  const memTab = t.querySelector('.tab[data-id="mem"]');
-  if (memTab) memTab.before(calc); else t.querySelector('.tabbar').append(calc);
-  right.append(h('div', { style: { padding: '10px 12px 4px', display: 'flex', gap: '8px', alignItems: 'center' } }, E.ui.vbadge), t);
+  calc.classList.add('calc', 'calc-big');
+  calc.style.cssText = 'flex:1;height:44px;font-size:15px;font-weight:700;justify-content:center;border-radius:10px;';
+  right.append(h('div', { style: { padding: '10px 12px 6px', display: 'flex', gap: '10px', alignItems: 'center' } }, E.ui.vbadge, calc), t);
   t.style.padding = '0 8px';
   setVerdict();
 }
@@ -829,8 +836,9 @@ async function showMesh(kind, cfg, status) {
       await new Promise((ok) => setTimeout(ok, 800));
     }
     const d = await call(sceneFn, { connection: E.conn(), [key]: parseInt(st.combo, 10) || 0, part: st.meshPart || 'all' });
+    const keep = !!E.femView;
     E.femView = true;
-    E.viewer.setModel(d, { keepView: true });
+    E.viewer.setModel(d, { keepView: keep });
     E.viewer.setLoads([]);
     clear(E.ui.fembar);
     st.meshParts = d.parts_list;
@@ -844,8 +852,13 @@ function femSection(kind, cfg) {
   E.fems = E.fems || {}; E.jobs = E.jobs || {};
   const st = E.fems[kind] = E.fems[kind] || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
   const status = h('div', { class: 'muted', style: { fontSize: '12.5px', whiteSpace: 'pre-line' } });
+  E.femCfgs = E.femCfgs || {}; E.femCfgs[kind] = cfg;
   const run = btn('Ejecutar análisis', { icon: 'cpu', kind: 'primary', onClick: async () => {
-    try { const r = await cfg.start(st); E.jobs[kind] = r.job; pollJob(kind, status, run, stop, cfg); } catch (e) { errorBox(e); }
+    try {
+      const r = await cfg.start(st); E.jobs[kind] = r.job;
+      if (kind === 'node') { E.femStarted = true; E.femDone = false; updateFemTools(); runMesh.flush(); }
+      pollJob(kind, status, run, stop, cfg);
+    } catch (e) { errorBox(e); }
   } });
   const stop = btn('Cancelar', { icon: 'x', disabled: true, onClick: () => call('job_cancel', { job: E.jobs[kind] }) });
   const cases = cfg.cases();
@@ -866,8 +879,9 @@ function femSection(kind, cfg) {
       cases.length ? field2(cfg.caseLabel, selectInput({ value: st.combo, options: cases, onChange: (v) => { st.combo = v; } })) : null,
       field2('Pieza', h('div', { class: 'mesh-part-slot' }, selectInput({ value: st.meshPart || 'all', options: [{ value: 'all', label: 'Todo el conjunto' }, ...(st.meshParts || []).filter((x) => x.id !== 'all').map((x) => ({ value: x.id, label: x.label }))], onChange: (v) => { st.meshPart = v; if (E.femView) showMesh(kind, cfg, meshStatus); } }))),
       btn('Ver malla en el visor', { icon: 'layers', kind: 'primary', onClick: () => showMesh(kind, cfg, meshStatus) }), btn('Volver al modelo', { icon: 'box', onClick: backToModel })), meshStatus) : null;
+  const inViewer = kind === 'node';                                           // en el nudo, la malla y los resultados se manejan desde la barra superior del visor
   const card = h('div', { class: 'card-sec' }, h('h4', { text: cfg.title }), h('p', { class: 'hint-text', text: cfg.desc }),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null, meshBox, view);
+    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null, inViewer ? null : meshBox, inViewer ? h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'Al ejecutar el análisis aparecen en la barra superior del visor los botones de la malla y, al terminar, los resultados y la deformada.' }) : view);
   if (E.jobs[kind]) pollJob(kind, status, run, stop, cfg);
   return card;
 }
@@ -882,7 +896,7 @@ function pollJob(kind, status, run, stop, cfg) {
       status.textContent = j.message || (j.done ? '' : 'Trabajando…');
       if (j.done) {
         clearInterval(E.pollers[kind]); E.pollers[kind] = null; run.disabled = false; stop.disabled = true;
-        if (j.state === 'done') { status.textContent = 'Análisis terminado.'; toast('Análisis FEM terminado', 'ok'); E.jobs[kind] = null; runVerify.flush(); showFem(kind, cfg); }
+        if (j.state === 'done') { status.textContent = 'Análisis terminado.'; toast('Análisis FEM terminado', 'ok'); E.jobs[kind] = null; if (kind === 'node') { E.femDone = true; updateFemTools(); } runVerify.flush(); showFem(kind, cfg); }
         else { status.textContent = j.state === 'cancelled' ? 'Cancelado.' : `Error: ${j.error}`; if (j.state !== 'cancelled') errorBox(new Error(j.error)); E.jobs[kind] = null; }
       }
     } catch (e) { clearInterval(E.pollers[kind]); E.pollers[kind] = null; errorBox(e); }
@@ -894,18 +908,48 @@ async function showFem(kind, cfg) {
   const st = E.fems[kind];
   try {
     const d = await cfg.scene(st);
+    const keep = !!E.femView;                                                  // al entrar en la vista de resultados se encuadra; al cambiar de campo se conserva la cámara
     E.femView = true;
-    E.viewer.setModel(d, { keepView: true });
+    E.viewer.setModel(d, { keepView: keep });
     E.viewer.setLoads([]);
     clear(E.ui.fembar);
     if (d.cbar) E.ui.fembar.append(colorbar(d.cbar));
     if (d.parts_list) st.parts = d.parts_list;
     if (d.fields) st.fields = d.fields;
+    if (kind === 'node') updateFemTools();
     if (d.summary) setStatus(`FEM: ${d.summary.nodes.toLocaleString('es')} nodos · |U|máx = ${S.us.q('L', d.summary.umax, 3)} · von Mises máx = ${S.us.q('S', d.summary.vmmax, 1)}`);
     if (d.message) toast(Array.isArray(d.message) ? d.message[0] : String(d.message), 'info');
   } catch (e) { errorBox(e); }
 }
-function backToModel() { E.femView = false; clear(E.ui.fembar); runMesh.flush(); applyLoads(); }
+// herramientas FEM de la barra superior del visor
+function updateFemTools() {
+  const ui = E.ui; if (!ui || !ui.femGroup) return;
+  ui.femGroup.style.display = E.femStarted ? '' : 'none';
+  ui.femRes.style.display = E.femDone ? '' : 'none';
+  if (E.femStarted && !E.femDone) ui.femMeshBtn.title = 'Ver la malla de elementos finitos (el tramo que se modela)';
+  if (!E.femDone) return;
+  E.fems = E.fems || {};
+  const st = E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  const fill = (sel, opts, value, onch) => { sel.replaceChildren(...opts.map((o) => h('option', { value: o.value, text: o.label }))); sel.value = String(value); sel.onchange = () => onch(sel.value); };
+  const cases = E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : [];
+  const fields = st.fields.length ? st.fields : [{ id: 'vm', label: 'Esfuerzo de von Mises' }, { id: 'u', label: 'Desplazamiento |U|' }, { id: 'uz', label: 'Desplazamiento vertical' }];
+  const parts = [{ id: 'all', label: 'Todo el conjunto' }, ...st.parts.filter((p) => p.id !== 'all')];
+  const show = () => showFem('node', E.femCfgs.node);
+  fill(ui.femCase, cases, st.combo, (v) => { st.combo = v; show(); });
+  fill(ui.femField, fields.map((f) => ({ value: f.id, label: f.label })), st.field, (v) => { st.field = v; show(); });
+  fill(ui.femScale, [['0', 'Sin deformar'], ['10', 'Deformada ×10'], ['50', 'Deformada ×50'], ['200', 'Deformada ×200'], ['1000', 'Deformada ×1000']].map(([value, label]) => ({ value, label })), String(st.scale), (v) => { st.scale = parseFloat(v); show(); });
+  fill(ui.femPart, parts.map((p) => ({ value: p.id, label: p.label })), st.part, (v) => { st.part = v; show(); });
+}
+async function toggleFemMesh() {
+  if (E.femView && E.femMeshOn) { E.femMeshOn = false; backToModel(); return; }
+  const cfg = E.femCfgs && E.femCfgs.node; if (!cfg) return;
+  E.fems = E.fems || {};
+  const st = E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  const status = { textContent: '' };
+  await showMesh('node', cfg, status);
+  E.femMeshOn = !!E.femView;
+}
+function backToModel() { E.femView = false; E.femMeshOn = false; clear(E.ui.fembar); runMesh.flush(); applyLoads(); }
 
 function colorbar(cb) {
   const cv = h('canvas', { width: 14, height: 140, style: { borderRadius: '4px', border: '1px solid var(--border)' } });

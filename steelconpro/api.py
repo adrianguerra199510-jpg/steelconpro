@@ -323,6 +323,39 @@ def _weld_kind(w) -> str:
     return "cjp" if k.startswith("CJP") else "pjp" if k.startswith("PJP") else "filete"
 
 
+def _fem_cut_sections(p, full):
+    """[(nombre, rectángulo 3D, centro)] de las secciones donde el modelo FEM del nudo corta cada miembro (el tramo que se malla es el que queda del lado del nudo)."""
+    nd = p.node
+    L = float(getattr(p.fea, "fem_len", 30.0))
+    fm = AS.build_model(p, {"case": 0, "L": L})
+    ends_f = {t[1]: np.asarray(t[0], float) for t in fm.tags}
+    ends_0 = {t[1]: np.asarray(t[0], float) for t in full.tags}
+    out = []
+
+    def rect(c, sx, sy, w, h_):
+        pts_ = [c + sx * a + sy * b for a, b in ((-w, -h_), (w, -h_), (w, h_), (-w, h_))]
+        return [tuple(map(float, q)) for q in pts_]
+    for m in nd.members:
+        e1, e0 = ends_f.get(m.name), ends_0.get(m.name)
+        if e1 is None or e0 is None or float(np.linalg.norm(e1 - e0)) < 0.05:
+            continue
+        _a, sx, sy = AS.member_frame(m)
+        shp = AS.shape_of(m.shape)
+        out.append((m.name, rect(e1, np.asarray(sx, float), np.asarray(sy, float), max(shp.bf, shp.d) / 2.0 + 1.0, shp.d / 2.0 + 1.0), e1))
+    main = fm.part(nd.main_name)
+    if main is not None:
+        A, msx, msy = AS.main_frame(nd)
+        c_ = np.vstack([pr.corners() for pr in main.prisms])
+        z = c_ @ np.asarray(A, float)
+        lneg, lpos = nd.lengths()
+        ms = AS.shape_of(nd.main_shape)
+        for zz, full_len, sign in ((float(z.min()), lneg, -1.0), (float(z.max()), lpos, 1.0)):
+            if abs(zz) < full_len - 0.05 and full_len > 0:
+                c = np.asarray(A, float) * zz
+                out.append((f"{nd.main_name} (lado {'+' if sign > 0 else '−'})", rect(c, np.asarray(msx, float), np.asarray(msy, float), max(ms.bf, ms.d) / 2.0 + 1.0, ms.d / 2.0 + 1.0), c))
+    return out
+
+
 def mesh(args) -> dict:
     """Modelo 3D de la conexion: una malla por pieza (miembros, placas, angulos), los pernos, las soldaduras y la placa base, mas etiquetas y cotas."""
     p = _prj(args["connection"])
@@ -371,6 +404,15 @@ def mesh(args) -> dict:
             parts.append(_scene_to_json(sc, tag.split(":", 1)[1], "plane", {"label": "Plano de trabajo " + tag.split(":", 1)[1], "owner": ""}))
         else:
             parts.append(_scene_to_json(sc, f"Placa base · {tag}", "base_" + tag, {"label": "Placa base", "owner": "op:base", "closed": True}))
+    if args.get("fem_cuts"):
+        try:
+            for nm, rect, c in _fem_cut_sections(p, mdl):                    # secciones donde se corta cada miembro para el modelo FEM (tramo mallado)
+                sc = _faces_scene([rect], _rgb("#c2185b"), 0.22, edges=True)
+                sc.add_polyline(list(rect) + [rect[0]], (0.76, 0.09, 0.36), 1.0)
+                parts.append(_scene_to_json(sc, f"Corte FEM · {nm}", "femcut", {"label": f"Corte del tramo modelado en el FEM · {nm}", "owner": ""}))
+                plane_labels.append({"pos": list(map(float, c)), "text": f"Corte FEM · {nm}"})
+        except Exception:                                                   # el dibujo de los cortes no debe impedir ver el modelo
+            pass
     P = np.asarray(pts, float).reshape(-1, 3)
     lo, hi = (P.min(axis=0).tolist(), P.max(axis=0).tolist()) if len(P) else ([0, 0, 0], [1, 1, 1])
     dims = [{"a": list(map(float, a)), "b": list(map(float, b)), "off": list(map(float, off)),
