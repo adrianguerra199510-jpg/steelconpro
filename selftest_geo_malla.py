@@ -354,6 +354,49 @@ def barrido_conexiones():
     check(not bad, f"{n} modelos ({crashes} no armaron) con todas sus mallas cerradas, {time.time() - t0:.0f} s" + ("" if not bad else f"  {bad[:4]}"))
 
 
+def mallador():
+    """El mallador de Gmsh respeta los recortes planos (`cut_planes`) y los `Part.cuts`."""
+    print("\n== mallador del FEM: recortes ==")
+    import tempfile
+    from types import SimpleNamespace
+    try:
+        import gmsh                                                     # noqa: F401
+    except Exception:                                                   # noqa: BLE001
+        print("(gmsh no disponible: se omite)")
+        return
+    from steelconpro.conn.fem import mesher, driver
+    from steelconpro.conn.fem.model3d import Model3D, Part, model_to_dict
+
+    def malla(mdl):
+        out = os.path.join(tempfile.mkdtemp(), "m.npz")
+        mesher.mesh_job({"model": model_to_dict(mdl), "params": driver.mesh_params(mdl, SimpleNamespace(mesh3d_mode="", mesh3d=0.0))}, out)
+        d = np.load(out, allow_pickle=True)
+        return d
+
+    def nodos(d, nombre):
+        idx = {int(i): k for k, i in enumerate(d["node_id"])}
+        e = np.asarray(d["e_" + nombre])
+        return np.array([d["xyz"][idx[int(i)]] for i in np.unique(e) if int(i) in idx])
+    # Part.cuts: se resta un prisma del ángulo A1 de CN-06 y ningún nodo de A1 queda dentro
+    p = load_book(os.path.join(ROOT, "ejemplos", "CN-06_diagonal_con_recorte_y_angulo.scp"))[0]
+    mdl = AS.build_model(p)
+    a1 = mdl.part("A1")
+    lo, hi = a1.bbox()
+    c = 0.5 * (lo + hi)
+    a1.cuts = [box_prism(c, (1.0, 1.0, 1.0))]
+    X = nodos(malla(mdl), "A1")
+    inside = np.all(np.abs(X - c) < 0.45, axis=1)
+    check(len(X) > 0 and not inside.any(), f"malla con Part.cuts: A1 ({len(X)} nodos), ningún nodo dentro del volumen restado")
+    # CN-06: el extremo de la diagonal recortado contra la cara de la columna
+    p = load_book(os.path.join(ROOT, "ejemplos", "CN-06_diagonal_con_recorte_y_angulo.scp"))[0]
+    mdl = AS.build_model(p)
+    X = nodos(malla(mdl), "D1")
+    pl = mdl.part("D1").prisms[0].cut_planes[0]
+    nn = np.asarray(pl[1], float)
+    nn /= np.linalg.norm(nn)
+    check(len(X) > 0 and float(((X - np.asarray(pl[0])) @ nn).max()) <= 1e-3, f"CN-06: la diagonal mallada ({len(X)} nodos) no pasa del plano de recorte")
+
+
 if __name__ == "__main__":
     casos_recorte()
     casos_agujeros()
@@ -363,6 +406,7 @@ if __name__ == "__main__":
     ejemplos()
     api_mesh()
     if not RAPIDO:
+        mallador()
         barrido_conexiones()
     print("\n" + ("TODO BIEN" if not FAILS else f"FALLARON {len(FAILS)} pruebas:\n  " + "\n  ".join(FAILS)))
     sys.exit(1 if FAILS else 0)

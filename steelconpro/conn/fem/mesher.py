@@ -15,7 +15,38 @@ from .model3d import model_from_dict, weld_prism, unit, Prism
 
 
 def _prism_vol(occ, pr: Prism):
-    """Crea el volumen del prisma en coordenadas globales y devuelve su (3, tag)."""
+    """Crea el volumen del prisma en coordenadas globales (ya recortado por sus `cut_planes`) y devuelve su (3, tag), o None si el recorte se lo lleva."""
+    dt = _prism_vol0(occ, pr)
+    planes = [(np.asarray(pt, float), unit(nrm)) for pt, nrm in getattr(pr, "cut_planes", [])]
+    if not planes:
+        return dt
+    C = pr.corners()
+    S = 4.0 * float(np.linalg.norm(C.max(axis=0) - C.min(axis=0))) + 10.0
+    for pt, n in planes:
+        if float(np.linalg.norm(n)) < 0.5:
+            continue
+        ref = np.array([1.0, 0.0, 0.0]) if abs(n[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        e1 = unit(np.cross(n, ref))
+        e2 = np.cross(n, e1)
+        d = (C - pt) @ n
+        if d.max() <= 1e-7:
+            continue                                                   # el plano no toca la pieza
+        ctr = pt + e1 * 0.0
+        q = [ctr + (a * e1 + b * e2) * S for a, b in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        ps = [occ.addPoint(*x) for x in q]
+        ln = [occ.addLine(ps[i], ps[(i + 1) % 4]) for i in range(4)]
+        surf = occ.addPlaneSurface([occ.addCurveLoop(ln)])
+        out = occ.extrude([(2, surf)], *(n * S))                       # el lado que se quita: n·(x − pt) > 0
+        tool = next(x for x in out if x[0] == 3)
+        res, _ = occ.cut([dt], [tool])
+        res = [r for r in res if r[0] == 3]
+        if not res:
+            return None
+        dt = res[0]
+    return dt
+
+
+def _prism_vol0(occ, pr: Prism):
     W = np.asarray(pr.W, float)
     L = pr.w1 - pr.w0
     if pr.circle is not None:
@@ -50,12 +81,16 @@ def mesh_job(job: dict, out_npz: str) -> dict:
         occ = gmsh.model.occ
         vols = {}                                   # nombre -> [(3, tag)]
         for p in mdl.parts:
-            dts = [_prism_vol(occ, pr) for pr in p.prisms]
+            dts = [d for d in (_prism_vol(occ, pr) for pr in p.prisms) if d is not None]
+            if not dts:
+                vols[p.name] = []
+                continue
             if len(dts) > 1:
                 dts, _ = occ.fuse([dts[0]], dts[1:])
             for ct in p.cuts:
                 tool = [_prism_vol(occ, ct)]
-                dts, _ = occ.cut(dts, tool)
+                if tool[0] is not None:
+                    dts, _ = occ.cut(dts, tool)
             holes = mdl.bolt_hole_prisms(p.name)
             if holes:
                 tools = []
