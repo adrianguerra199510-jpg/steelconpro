@@ -152,11 +152,13 @@ def ex_a09():
 
 
 def ex_a10():
-    nd = TY.build_nodo("base", {"col_shape": "W14X90", "brace_shape": "HSS5X5X3/8", "angle": 50.0, "n_braces": 2, "h": 20.0})
+    nd = TY.build_nodo("base", {"col_shape": "W14X90", "brace_shape": "HSS5X5X3/8", "angle": 50.0, "n_braces": 2, "h": 8.0})
     nd.operations = [o for o in nd.operations if o.kind != OP_BASE] + [Operation(kind=OP_BASE, member=nd.main_name, end=-1)]
     for o in nd.operations:
         if o.kind == OP_GUSSET:
-            o.gus_hb = 24.0
+            o.gus_hb = 26.0
+    for m in nd.members:
+        m.pos = 1.0                                              # las diagonales llegan casi a la placa: las cartelas bajan hasta ella
     return _with_base_data(_prj("TP-A10", "placa base con dos diagonales en V (una a cada ala, cartelas apoyadas en la placa)", nd))
 
 
