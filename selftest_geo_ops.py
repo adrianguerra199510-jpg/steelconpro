@@ -227,6 +227,59 @@ def run():
         fail(f"eliminar una placa debe quitar sus dependientes ({len(removed)})")
     print(f"{'renombrar y eliminar':34} OK")
 
+    # ------------------------------------------------------------------ ronda 3: redondo recortado con soldadura, recorte de miembro por volumen, bloque de concreto, vacío de HSS, ángulo como weld_main, generatriz
+    p6 = load_book(os.path.join("ejemplos", "CN-06_diagonal_con_recorte_y_angulo.scp"))[0]
+    p6.node.members[0].shape = "HSS6.625X0.312"
+    for o in p6.node.operations:
+        if o.kind == OP_TRIM:
+            o.trim_weld = True
+    m, errs = build(p6, "redondo recortado con soldadura")
+    if errs:
+        fail(f"redondo recortado con soldadura de contorno: {errs[0]['text'][:120]}")
+    p = prj("W14X90", 90.0, [Member(name="D1", shape="HSS6.625X0.280", az=0.0, el=0.0, pos=0.0, L=40.0, gap=-3.0)])
+    gen(p, OP_PLATE, name="PX", parent=p.node.main_name, face=FACES_I[0], pl_L=10, pl_W=6, pl_s=60, plate_t=1.0)
+    gen(p, OP_TRIM, targets=["D1"], parent="PX", trim_mode=TRIM_MODES[2], trim_gap=0.25)
+    m, errs = build(p, "recorte de miembro por volumen", clashes=False)
+    if m is None or m.part("D1").prisms[0].w0 < 1.0:
+        fail("el recorte contra el volumen debe acortar el miembro")
+    # bloque de concreto con anclajes
+    p = prj("W16X31", 0.0)
+    nd = p.node
+    nd.main_end = END_LABELS[1]
+    zb = -(15.9 / 2.0) - 0.75
+    gen(p, OP_BLOCK, name="MU", wp_x=-6.0, wp_z=zb, blk_L=24.0, blk_W=16.0, blk_H=24.0)
+    gen(p, OP_PLATE, name="PB", parent=nd.main_name, face=FACES_I[1], pl_L=12.0, pl_W=12.0, pl_s=nd.main_len_neg - 6.0, plate_t=0.75)
+    gen(p, OP_BOLTS, parent="PB", face="Cara −", targets=["MU"], rows=2, cols=2, bolt_s=7.0, bolt_g=9.0, pl_s=6.0, pl_u=0.0)
+    m, errs = build(p, "bloque de concreto")
+    if errs or len(m.bolts) != 4 or any(not (b.nut_s > 0.75 + 4.0) for b in m.bolts):
+        fail(f"anclajes al bloque: {len(m.bolts)} pernos, errores {[e['text'][:80] for e in errs]}")
+    pl_ = next(o for o in p.node.operations if o.kind == OP_BOLTS)
+    pl_.pl_s = 60.0                                                         # fuera del bloque: se avisa
+    m, _ = build(p, "anclajes fuera del bloque")
+    if m is not None and not any("no entran al bloque" in n_ for n_ in m.notes):
+        fail("anclajes fuera del bloque deben avisarse")
+    # vacío de un HSS: una placa pequeña en el extremo no suelda en el aire
+    p = prj("HSS8X8X1/2", 90.0)
+    gen(p, OP_PLATE, name="CPL", parent=p.node.main_name, face=FACES_END[1], pl_L=3.0, pl_W=3.0, pl_s=4.0, plate_t=0.5)
+    m, _ = build(p, "placa en el vacío del HSS", clashes=False)
+    if m is not None and m.welds:
+        fail("una placa que cae dentro del vacío del HSS no debe llevar cordones")
+    # redondo: placa perpendicular sobre la generatriz
+    p = prj("HSS6.625X0.280", 90.0)
+    gen(p, OP_PLATE, name="RB", parent=p.node.main_name, face="Cara +X", orient=PLATE_ORIENTS[2], shape=PLATE_SHAPES[0], pl_L=8.0, pl_W=4.0, pl_s=60.0, plate_t=0.5)
+    m, errs = build(p, "nervio sobre la generatriz")
+    if errs:
+        fail(f"placa perpendicular sobre un tubo redondo: {errs[0]['text'][:120]}")
+    # ángulo como weld_main contra un elemento que no es su padre
+    p = prj("W14X90", 90.0)
+    gen(p, OP_PLATE, name="BP", parent=p.node.main_name, face=FACES_I[0], orient=PLATE_ORIENTS[1], pl_L=10.0, pl_W=6.0, pl_s=60.0, plate_t=0.5)
+    gen(p, OP_ANGLE, name="AN2", parent=p.node.main_name, face=FACES_I[0], attach=ATTACHES[2], leg_a=4.0, leg_b=3.0, pl_L=4.0, pl_s=70.0, plate_t=0.375)
+    gen(p, OP_FILLET, weld_main="AN2", weld_to=[["BP", "Cara +"]], weld_size=0.25)
+    m, errs = build(p, "ángulo como weld_main")
+    if m is not None and not any(w.A == "AN2" and w.B == "BP" for w in m.welds) and not m.notes:
+        fail("la soldadura de un ángulo contra otra placa debe calcularse o avisar")
+    print(f"{'ronda 3':34} redondo con soldadura, recorte por volumen de miembros, bloque de concreto, vacío HSS, generatriz, ángulo weld_main: OK" if not FAIL else "ronda 3: con fallas")
+
     # ------------------------------------------------------------------ triangulación con agujeros que tocan el borde o entre sí
     from steelconpro.conn import geom2d as G
     outer = [(0, 0), (10, 0), (10, 10), (0, 10)]

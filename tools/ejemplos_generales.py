@@ -340,6 +340,18 @@ def g16_angulo_asiento() -> Project:
     return project("TP-G16", "ángulo de asiento soldado a la columna y atornillado a la viga, y ángulo de unión", nd)
 
 
+def g17_tubo_redondo_con_nervios() -> Project:
+    """Tubo redondo HSS6.625X0.280 con dos placas-nervio perpendiculares soldadas sobre la generatriz de contacto y una placa de cabeza circular."""
+    nd = column("HSS6.625X0.280", end=1)
+    z = nd.main_len_neg
+    for k, face in enumerate(("Cara +X", "Cara −X")):
+        gen(nd, OP_PLATE, name=f"NR{k + 1}", parent=nd.main_name, face=face, orient=PERP_L, role="Rigidizador", shape=RECT, pl_L=10.0, pl_W=4.0, pl_s=z - 8.0, plate_t=0.5,
+            plate_steel=A36, weld_size=0.25)
+    gen(nd, OP_PLATE, name="CP", parent=nd.main_name, face=F_END1, shape=CIRC, pl_L=10.0, pl_W=10.0, pl_s=3.3125, plate_t=0.75, plate_steel=A36, weld_size=0.3125)
+    nd.loads = [Load("Caso 1", nd.main_name, N=-60.0, side=-1)]
+    return project("TP-G17", "tubo redondo con nervios soldados sobre la generatriz y placa de cabeza circular", nd)
+
+
 EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atornillado),
             ("TP-G02_empalme_viga_atornillado.scp", g02_empalme_viga_atornillado),
             ("TP-G03_empalme_columna_hss.scp", g03_empalme_columna_hss),
@@ -355,7 +367,8 @@ EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atorn
             ("TP-G13_placa_atravesada_por_tubo.scp", g13_placa_atravesada_por_tubo),
             ("TP-G14_placas_recortadas.scp", g14_placas_recortadas),
             ("TP-G15_modos_soldadura.scp", g15_modos_soldadura),
-            ("TP-G16_angulo_asiento.scp", g16_angulo_asiento)]
+            ("TP-G16_angulo_asiento.scp", g16_angulo_asiento),
+            ("TP-G17_tubo_redondo_con_nervios.scp", g17_tubo_redondo_con_nervios)]
 
 
 def main(revisa=False):
