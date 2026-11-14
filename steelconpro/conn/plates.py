@@ -310,7 +310,7 @@ def _poly_dist(p, poly):
     return best
 
 
-def _seg_polygon_intervals(a, b, poly, tol):
+def _seg_polygon_intervals(a, b, poly, tol, holes=()):
     """Intervalos (t0, t1) del segmento a-b (2D) que quedan dentro del polígono `poly` o a menos de `tol` de su borde."""
     a, b = np.asarray(a, float), np.asarray(b, float)
     d = b - a
@@ -334,7 +334,10 @@ def _seg_polygon_intervals(a, b, poly, tol):
             continue
         m = a + d * (0.5 * (t0 + t1))
         mm = (float(m[0]), float(m[1]))
-        if G.point_in_poly(mm, poly) or _poly_dist(mm, poly) <= tol:
+        inside = G.point_in_poly(mm, poly) or _poly_dist(mm, poly) <= tol
+        if inside and any(G.point_in_poly(mm, h) and _poly_dist(mm, h) > tol for h in holes):
+            inside = False                                      # dentro del vacío de un tubo: no hay material
+        if inside:
             if out and abs(out[-1][1] - t0) < 1e-9:
                 out[-1] = (out[-1][0], t1)
             else:
@@ -361,7 +364,21 @@ def face_region(entry, ff):
         for a, b in pts:
             q = Q + sx * a + sy * b
             out.append((float((q - O) @ A), float((q - O) @ U)))
+        if getattr(shp, "is_hollow", False) and float(shp.tw) > 0:                  # tubo: el vacío interior no tiene material
+            tw = float(shp.tw)
+            if shp.is_round:
+                inner = G.circle_poly(0.0, 0.0, shp.d / 2.0 - tw, 36)
+            else:
+                bf, d_ = float(shp.bf if shp.bf > 0 else shp.d), float(shp.d)
+                inner = [(-bf / 2 + tw, -d_ / 2 + tw), (bf / 2 - tw, -d_ / 2 + tw), (bf / 2 - tw, d_ / 2 - tw), (-bf / 2 + tw, d_ / 2 - tw)]
+            hin = []
+            for a, b in inner:
+                q = Q + sx * a + sy * b
+                hin.append((float((q - O) @ A), float((q - O) @ U)))
+            return {"outer": out, "holes": [hin]}
         return out
+    if fr is not None and getattr(fr[5], "is_round", False):                  # tubo redondo: la cara es el plano tangente; solo hay contacto en una franja angosta sobre la generatriz
+        return [(0.0, -0.5), (float(ff.L), -0.5), (float(ff.L), 0.5), (0.0, 0.5)]
     L, uh = float(ff.L), float(ff.uh)
     return [(0.0, -uh), (L, -uh), (L, uh), (0.0, uh)]
 
@@ -371,13 +388,16 @@ def _clip_lines(lines, ff, region, info, tol=0.06):
     if region is None or getattr(ff, "A", None) is None:
         return lines
     O, A, U = np.asarray(ff.O, float), np.asarray(ff.A, float), np.asarray(ff.U, float)
+    holes = ()
+    if isinstance(region, dict):
+        holes, region = region["holes"], region["outer"]
     out, tot, kept = [], 0.0, 0.0
     for ln in lines:
         p0, p1 = np.asarray(ln[0], float), np.asarray(ln[1], float)
         a = (float((p0 - O) @ A), float((p0 - O) @ U))
         b = (float((p1 - O) @ A), float((p1 - O) @ U))
         tot += float(np.linalg.norm(p1 - p0))
-        for t0, t1 in _seg_polygon_intervals(a, b, region, tol):
+        for t0, t1 in _seg_polygon_intervals(a, b, region, tol, holes):
             q0, q1 = p0 + (p1 - p0) * t0, p0 + (p1 - p0) * t1
             if float(np.linalg.norm(q1 - q0)) < 0.05:
                 continue
@@ -931,3 +951,67 @@ def trim_angle(pr, trims, reg, mdl, own):
         if lo_ < hi_:
             pr.w0, pr.w1 = max(w0, lo_), min(w1, hi_)
     return notes, halfs, float(pr.w0), float(pr.w1)
+
+
+def trim_prism_volume(pr, pieces, gap, end_sign):
+    """Acorta el prisma `pr` (de un miembro) por su extremo (end_sign = −1: w0, +1: w1) hasta donde empieza el volumen de las cajas `pieces` más la holgura.
+    -> (se aplicó, mensaje)"""
+    U, V = np.asarray(pr.U, float), np.asarray(pr.V, float)
+    W = np.cross(U, V)
+    o_ = np.asarray(pr.o, float)
+    if pr.circle is not None:
+        sec = [(pr.circle[0] * math.cos(a), pr.circle[0] * math.sin(a)) for a in [2 * math.pi * k / 24 for k in range(24)]]
+    else:
+        sec = [tuple(q) for q in pr.poly]
+    w0, w1 = float(pr.w0), float(pr.w1)
+    ws = np.linspace(w0, w1, max(int(math.ceil((w1 - w0) / 0.05)) + 1, 2))
+    rem = np.zeros(len(ws), bool)
+    for (u, v) in sec:
+        Pn = o_ + u * U + v * V + np.outer(ws, W)
+        for pc in pieces:
+            rem |= _in_piece(pc, Pn, gap)
+    if not rem.any():
+        return False, "no toca"
+    idx = np.nonzero(rem)[0]
+    step = float(ws[1] - ws[0])
+    if end_sign < 0:                                                    # se conserva lo que queda después del último punto dentro
+        pr.w0 = float(ws[idx.max()]) + 0.5 * step if idx.max() < len(ws) - 1 else None
+        if pr.w0 is None:
+            pr.w0 = w0
+            return False, "todo"
+    else:
+        if idx.min() == 0:
+            return False, "todo"
+        pr.w1 = float(ws[idx.min()]) - 0.5 * step
+    return True, ""
+
+
+def prism_plane_lines(pr, ff, region=None, tol=0.05):
+    """Cordones de un prisma (p. ej. un ángulo) contra la cara `ff` de otro elemento: aristas del prisma que quedan sobre el plano de la cara,
+    [(p0, p1, nA, nB, índice)], recortadas al material de la cara."""
+    n2, p2 = np.asarray(ff.N, float), np.asarray(ff.O, float)
+    cen = pr.corners().mean(axis=0)
+    sgn = 1.0 if float(n2 @ (cen - p2)) >= 0 else -1.0
+    nB = n2 * sgn
+    W = np.asarray(pr.W, float)
+    poly = pr.poly
+    m = len(poly)
+    edges = []
+    for k in range(m):
+        a, b = poly[k], poly[(k + 1) % m]
+        for w in (pr.w0, pr.w1):
+            edges.append((pr.to_global(a[0], a[1], w), pr.to_global(b[0], b[1], w), "cap" if w == pr.w1 else "cap0"))
+        edges.append((pr.to_global(a[0], a[1], pr.w0), pr.to_global(a[0], a[1], pr.w1), "lon"))
+    out = []
+    for k, (p0, p1, kind) in enumerate(edges):
+        p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+        if abs(float(n2 @ (p0 - p2))) > tol or abs(float(n2 @ (p1 - p2))) > tol or float(np.linalg.norm(p1 - p0)) < 0.05:
+            continue
+        mid = 0.5 * (p0 + p1)
+        e = (p1 - p0) / float(np.linalg.norm(p1 - p0))
+        v = mid - cen
+        v = v - e * float(v @ e)
+        v = v - n2 * float(v @ n2)
+        nA = v / max(float(np.linalg.norm(v)), 1e-12)
+        out.append((p0, p1, nA, nB, k))
+    return _clip_lines(out, ff, region, None)
