@@ -548,7 +548,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 lines, wA, wB = [], nm, parent["part"]                # unión atornillada o sin unión propia: no hay cordón de la placa
             reg[nm]["lines"] = lines
             ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], geo["e3"]))
-            if info.get("clipped", 0.0) > 0.25:
+            if info.get("clipped", 0.0) > 1.0:
                 mdl.notes.append(f"Operación {i + 1}: la placa «{nm}» sobresale de la cara «{o.face}» de «{o.parent}»; el cordón solo se dibuja donde hay apoyo "
                                  f"({info['clipped']:.1f} in de borde quedan sin soldar).")
             if (attach == ATTACHES[0] or spec["perp"]) and not lines:
@@ -575,14 +575,17 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             t = max(float(o.plate_t), 0.0625)
             a_, b_, L = float(o.leg_a), float(o.leg_b), float(o.pl_L)
             side = 1.0 if o.leg_side >= 0 else -1.0
-            s0 = o.pl_s - L / 2.0
+            rot = math.radians(o.pl_rot)                              # giro del ángulo en el plano de la cara: 0 = su eje va a lo largo del elemento; 90 = a lo ancho
+            fA = math.cos(rot) * ff.A + math.sin(rot) * ff.U
+            fU = np.cross(ff.N, fA)
+            c0 = ff.O + ff.A * o.pl_s + ff.U * o.pl_u                  # centro del ángulo sobre la cara
+            s0 = -L / 2.0                                              # inicio del ángulo medido desde el centro a lo largo de su eje
             if side > 0:
                 poly = [(-a_ / 2, 0.0), (a_ / 2, 0.0), (a_ / 2, b_), (a_ / 2 - t, b_), (a_ / 2 - t, t), (-a_ / 2, t)]
             else:
                 poly = [(a_ / 2, 0.0), (-a_ / 2, 0.0), (-a_ / 2, b_), (-a_ / 2 + t, b_), (-a_ / 2 + t, t), (a_ / 2, t)]
-            o3 = ff.O + ff.A * s0 + ff.U * o.pl_u
             from .assembly import _plate_prism
-            pr = _plate_prism(poly, o3, ff.U, ff.N, 0.0, L)
+            pr = _plate_prism(poly, c0 + fA * s0, fU, ff.N, 0.0, L)
             Fy, Fu = _steel(o.plate_steel, True)
             nm = o.name
             halfs = []                                                # semiespacios (punto, normal) que dejan los recortes: se conserva n·(x − punto) ≤ 0
@@ -594,19 +597,18 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             if hw:
                 mdl.parts.append(Part(nm, "angle", f"Ángulo L{a_:g}×{b_:g}×{t:g} × {L:g}", Fy, Fu, [pr], t=t))
                 mdl.parts[-1].owner = f"op:{i}"
-            fA = ff.A
-            top = FaceFrame(ff.O + ff.A * s0 + ff.U * o.pl_u + ff.N * t, fA, ff.N, L, a_ / 2.0, t)
-            Nin, Nout = -side * ff.U, side * ff.U
-            inner = FaceFrame(ff.O + ff.A * s0 + ff.U * (o.pl_u + side * (a_ / 2 - t)) + ff.N * ((t + b_) / 2.0), fA, Nin, L, (b_ - t) / 2.0, t)
-            outer = FaceFrame(ff.O + ff.A * s0 + ff.U * (o.pl_u + side * a_ / 2) + ff.N * (b_ / 2.0), fA, Nout, L, b_ / 2.0, t)
+            top = FaceFrame(c0 + fA * s0 + fU * 0.0 + ff.N * t, fA, ff.N, L, a_ / 2.0, t)
+            Nin, Nout = -side * fU, side * fU
+            inner = FaceFrame(c0 + fA * s0 + fU * (side * (a_ / 2 - t)) + ff.N * ((t + b_) / 2.0), fA, Nin, L, (b_ - t) / 2.0, t)
+            outer = FaceFrame(c0 + fA * s0 + fU * (side * a_ / 2) + ff.N * (b_ / 2.0), fA, Nout, L, b_ / 2.0, t)
             reg[nm] = {"type": "angulo", "faces": {FACES_ANGLE[0]: top, FACES_ANGLE[1]: inner, FACES_ANGLE[2]: outer}, "part": nm, "t": t, "Fy": Fy, "Fu": Fu,
                        "parent": o.parent, "parent_face": o.face, "parent_part": parent["part"], "lines": None}
             spec = {"L1": L, "L2": a_, "t": t, "perp": False}
-            ent.update(ok=True, ff=ff, spec=spec, parent=parent, plate_name=nm, e=(fA, ff.U, ff.N), centre=o3)
+            ent.update(ok=True, ff=ff, spec=spec, parent=parent, plate_name=nm, e=(fA, fU, ff.N), centre=c0)
             # unión: soldada (todo el contorno de la pierna sobre la cara) o atornillada (pernos a traves de la pierna)
-            P = lambda s_, u_, n_: ff.O + ff.A * s_ + ff.U * (o.pl_u + u_) + ff.N * n_     # noqa: E731
-            base = [(P(s0, -a_ / 2, 0), P(s0 + L, -a_ / 2, 0), -ff.U, ff.N), (P(s0, a_ / 2, 0), P(s0 + L, a_ / 2, 0), ff.U, ff.N),
-                    (P(s0, -a_ / 2, 0), P(s0, a_ / 2, 0), -ff.A, ff.N), (P(s0 + L, -a_ / 2, 0), P(s0 + L, a_ / 2, 0), ff.A, ff.N)]
+            P = lambda s_, u_, n_: c0 + fA * s_ + fU * u_ + ff.N * n_     # noqa: E731
+            base = [(P(s0, -a_ / 2, 0), P(s0 + L, -a_ / 2, 0), -fU, ff.N), (P(s0, a_ / 2, 0), P(s0 + L, a_ / 2, 0), fU, ff.N),
+                    (P(s0, -a_ / 2, 0), P(s0, a_ / 2, 0), -fA, ff.N), (P(s0 + L, -a_ / 2, 0), P(s0 + L, a_ / 2, 0), fA, ff.N)]
             lines = []
             for k, l in enumerate(base):
                 seg = PL.clip_segment_halfspaces(l[0], l[1], halfs)
@@ -614,15 +616,15 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                     lines.append((seg[0], seg[1], l[2], l[3], k))
             lines = PL.clip_to_region(lines, ff, PL.face_region(parent, ff))
             reg[nm]["lines"] = lines
-            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], ff.U))
+            ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], fU))
             if o.attach == ATTACHES[0] and hw:
                 for k, ln in enumerate(lines):
-                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, ff.U))
+                    _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, fU))
             elif o.attach == ATTACHES[1] and hw:
-                pts = rot_pts(bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g), o.pl_rot)
+                pts = bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g)
                 wall = parent["faces"][o.face].wall
                 for k, (aa, bb) in enumerate(pts):
-                    p = ff.O + ff.A * (o.pl_s + aa) + ff.U * (o.pl_u + bb) + ff.N * t
+                    p = c0 + fA * aa + fU * bb + ff.N * t
                     grip = bolt_grip(mdl, reg, [nm, o.parent], p, -ff.N, notes=mdl.notes, tag=f"{nm}-B{k + 1}")
                     if grip is None:
                         grip = [(nm, 0.0, t), (parent["part"], t, t + wall)]
@@ -677,7 +679,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 if tgt is None or tn == o.weld_main:
                     continue
                 lines, ffp, winfo = _weld_pair(main, tgt, tf, o, PL)
-                if winfo.get("clipped", 0.0) > 0.25:
+                if winfo.get("clipped", 0.0) > 1.0:
                     mdl.notes.append(f"Operación {i + 1}: «{o.weld_main}» sobresale de la cara de «{tn}»; el cordón solo se dibuja donde hay apoyo ({winfo['clipped']:.1f} in sin soldar).")
                 if lines:
                     pairs.append({"to": tn, "L": sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], main["geo"]["e3"] if main.get("geo") is not None else None)),
