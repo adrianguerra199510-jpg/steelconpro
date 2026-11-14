@@ -61,7 +61,7 @@ export async function openOperation(E, index, { isNew = false } = {}) {
   const el = (n) => info.find((e) => e.name === n);
   const kind = op.kind;
   const K = C.op;
-  const isGeneric = [K.PLATE, K.BOLTS, K.FILLET, K.CUT, K.ANGLE, K.HOLE, K.TRIM, K.WORKPLANE, K.ALIGN].includes(kind);
+  const isGeneric = [K.PLATE, K.BOLTS, K.FILLET, K.CUT, K.ANGLE, K.HOLE, K.TRIM, K.WORKPLANE, K.BLOCK, K.ALIGN].includes(kind);
   const members = nd.members.map((m) => m.name);
   let mdlRoot;
   const refresh = () => E.changed({ geometry: true });
@@ -115,7 +115,8 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     if (kind === K.GUSSET || kind === K.GUSSET_W) items.push(numField('Largo de la cartela desde el principal (0 = automático)', 'gus_L', 'L', 0, 120, null, null, 'A lo largo del eje del miembro, medido desde la cara del principal.'),
       numField('Ancho de la base (0 = automático)', 'gus_hb', 'L', 0, 120), numField('Ancho de la punta (0 = automático)', 'gus_hm', 'L', 0, 120), numField('Corte de las esquinas de la punta', 'gus_cut', 'L', 0, 40));
     if (kind === K.DANG) items.push(numField('Pierna al soporte', 'dang_lo', 'L', 1.5, 12), numField('Pierna sobre el alma (0 = automático)', 'dang_la', 'L', 0, 12), numField('Largo del ángulo (0 = automático)', 'dang_H', 'L', 0, 60));
-    if (kind === K.SEAT) items.push(numField('Pierna horizontal (bajo el ala)', 'seat_Lh', 'L', 2, 14), numField('Pierna vertical (contra el soporte)', 'seat_Lv', 'L', 2, 14), numField('Ancho del asiento (0 = automático)', 'seat_W', 'L', 0, 40));
+    if (kind === K.SEAT) items.push({ path: 'seat_stiff', label: 'Asiento rigidizado (placa vertical bajo el ala)', type: 'check', wide: true }, numField('Espesor del rigidizador (0 = el del ángulo)', 'seat_stiff_t', 'L', 0, 3, 0.0625),
+      numField('Pierna horizontal (bajo el ala)', 'seat_Lh', 'L', 2, 14), numField('Pierna vertical (contra el soporte)', 'seat_Lv', 'L', 2, 14), numField('Ancho del asiento (0 = automático)', 'seat_W', 'L', 0, 40));
     if (isTab || kind === K.DANG) items.push({ path: 'cope_auto', label: 'Cortar la viga secundaria si choca con las alas del principal', type: 'check', wide: true,
       help: 'Calcula, según la posición de la viga en el espacio, el corte (cope) superior e inferior y su largo para que encaje en la viga principal.' });
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Pernos, placas y soldadura' }), addForm(items)));
@@ -163,6 +164,8 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     mdlRoot = trimBody(body, E, op, ctx, info, el, nd, addForm);
   } else if (kind === K.WORKPLANE) {
     mdlRoot = workplaneBody(body, E, op, ctx, info, nd, addForm);
+  } else if (kind === K.BLOCK) {
+    mdlRoot = blockBody(body, E, op, ctx, info, nd, addForm);
   } else if (kind === K.ALIGN) {
     mdlRoot = alignBody(body, E, op, ctx, info, el, nd, addForm, index);
   }
@@ -492,6 +495,20 @@ function workplaneBody(body, E, op, ctx, info, nd, addForm) {
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Plano de trabajo' }), h('div', { class: 'form-grid' }, field('Nombre', nameInp)), h('div', { style: { height: '10px' } }), form),
     h('div', { class: 'card-sec' }, h('h4', { text: 'Orientación rápida' }), pres, h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'La normal fija hacia dónde mira el plano: el azimut se mide en planta desde +X hacia +Y, y la elevación sobre la horizontal.' })));
   const mdlRoot = root; root.refresh = () => form.refresh();
+  body.append(root);
+  return root;
+}
+
+// ---------------------------------------------------------------------------------------------------------- bloque de concreto
+function blockBody(body, E, op, ctx, info, nd, addForm) {
+  const root = h('div', { class: 'col gap-12' });
+  const nameInp = h('input', { class: 'input', type: 'text', value: op.name, onchange: (e) => { const v = e.target.value.trim(); if (v && v !== op.name && !info.some((x) => x.name === v)) { E.renameElement(op.name, v); op.name = v; } else e.target.value = op.name; ctx.onChange(); } });
+  const form = addForm([numField('Largo (eje x del bloque)', 'blk_L', 'L', 1, 1e4), numField('Ancho (eje y)', 'blk_W', 'L', 1, 1e4), numField('Alto (hacia abajo desde la cara superior)', 'blk_H', 'L', 1, 1e4),
+    numField('X del centro de la cara superior', 'wp_x', 'L', -1e5, 1e5), numField('Y del centro de la cara superior', 'wp_y', 'L', -1e5, 1e5), numField('Z de la cara superior', 'wp_z', 'L', -1e5, 1e5),
+    numField('Giro en planta (°)', 'wp_az', '-', -360, 360, 5, 1)]);
+  root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Bloque de concreto (muro, dado o pedestal)' }), h('div', { class: 'form-grid' }, field('Nombre', nameInp)), h('div', { style: { height: '10px' } }), form,
+    h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'Soporte para placas, ángulos y pernos: sus caras son «Cara superior», «frontal», «posterior», «izquierda», «derecha» e «inferior». Los pernos que lo tienen como destino entran al bloque como anclajes (hasta 8 in) sin perforarlo.' })));
+  root.refresh = () => form.refresh();
   body.append(root);
   return root;
 }

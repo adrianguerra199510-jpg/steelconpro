@@ -41,7 +41,7 @@ const os = require('os');
     check(true, 'la operación abre su panel de edición');
     await page.screenshot({ path: path.join(shots, 'electron_operacion.png') });
     await page.click('.pfoot >> text=Cancelar');
-    for (const [kind, key] of [['Placa (refuerzo, cartela o rigidizador)', 'plate'], ['Ángulo (herraje)', 'angle'], ['Huecos y ranuras', 'hole'], ['Recorte contra otro elemento', 'trim'], ['Soldadura de filete entre elementos', 'weld']]) {
+    for (const [kind, key] of [['Placa (refuerzo, cartela o rigidizador)', 'plate'], ['Ángulo (herraje)', 'angle'], ['Huecos y ranuras', 'hole'], ['Recorte contra otro elemento', 'trim'], ['Soldadura de filete entre elementos', 'weld'], ['Bloque de concreto (muro, dado o pedestal)', 'block']]) {
       await page.evaluate((k) => { window.__E.createOperation(k); }, kind);
       await page.waitForSelector('.pfoot >> text=Cancelar', { timeout: 20000 });
       await page.waitForTimeout(800);

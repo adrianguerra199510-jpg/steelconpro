@@ -290,6 +290,7 @@ function opTitle(o) {
     case K.ANGLE: return `${o.name || 'Ángulo'} · L${o.leg_a}×${o.leg_b}`;
     case K.HOLE: return `Huecos en ${o.parent}`;
     case K.WORKPLANE: return `${o.name || 'Plano'} · plano de trabajo`;
+    case K.BLOCK: return `${o.name || 'Bloque'} · bloque de concreto`;
     case K.ALIGN: return `Alinear ${o.member}.${o.face || '—'}`;
     case K.TRIM: return `Recorte · ${(o.targets || []).join(', ') || '—'}`;
     case K.BOLTS: return `Pernos en ${o.parent}`;
@@ -302,6 +303,7 @@ function opTitle(o) {
 function opSub(o) {
   const K = S.C.op;
   if (o.kind === K.WORKPLANE) return `pasa por (${S.us.fmt('L', o.wp_x, 1)}, ${S.us.fmt('L', o.wp_y, 1)}, ${S.us.fmt('L', o.wp_z, 1)}) ${S.us.label('L')}`;
+  if (o.kind === K.BLOCK) return `${S.us.fmt('L', o.blk_L, 1)} × ${S.us.fmt('L', o.blk_W, 1)} × ${S.us.fmt('L', o.blk_H, 1)} ${S.us.label('L')}`;
   if (o.kind === K.ALIGN) return o.parent ? `a ${o.parent}${o.ref_face && o.ref_face !== 'Plano' ? ' · ' + o.ref_face : ''}` : 'sin referencia';
   if (o.kind === K.HOLE) return `${o.rows}×${o.cols} · ${o.hole_shape.toLowerCase()}`;
   if (o.kind === K.TRIM) return `${o.trim_mode.toLowerCase()}`;
@@ -408,7 +410,7 @@ function pickPart(name, part) {
   const nd = E.conn().node, K = S.C.op;
   if (!name) { E.sel = null; renderTree(); highlight(); return; }
   if (name === nd.main_name || nd.members.some((m) => m.name === name)) return select(`m:${name}`);
-  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE || o.kind === K.WORKPLANE));
+  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE || o.kind === K.WORKPLANE || o.kind === K.BLOCK));
   if (oi >= 0) return select(`o:${oi}`);
   const owner = part ? part.owner : '';
   if (owner === 'op:base') { const bi = nd.operations.findIndex((o) => o.kind === K.BASE); if (bi >= 0) return select(`o:${bi}`); }
@@ -433,7 +435,7 @@ async function addMember() {
 // clic derecho en el visor: menú del miembro, de la operación o del espacio vacío
 function opIndexOf(name, part) {
   const nd = E.conn().node, K = S.C.op;
-  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE || o.kind === K.WORKPLANE));
+  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE || o.kind === K.WORKPLANE || o.kind === K.BLOCK));
   if (oi >= 0) return oi;
   const owner = part ? part.owner : '';
   if (owner === 'op:base') return nd.operations.findIndex((o) => o.kind === K.BASE);
