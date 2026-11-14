@@ -418,6 +418,36 @@ def mallador():
     check(n_ > 0 and smax <= 1e-3, f"CN-06: la diagonal mallada ({n_} nodos) no pasa del plano de recorte" + ("" if n_ else f"  rc={r.returncode} {r.stdout[-200:]} {r.stderr[-300:]}"))
 
 
+def placa_base():
+    """Placa base: opción col_weld y cordones modelados (columna-placa y rigidizadores)."""
+    print("\n== placa base: cordones modelados y col_weld ==")
+    from steelconpro.conn import baseplate as BP, geocheck as GC, specs as SP
+    from steelconpro.solver import solve
+    from steelconpro import weldfe
+    for modo in SP.BASE_COLWELD:
+        p = load_book(os.path.join(ROOT, "ejemplos", "CN-04_columna_con_placa_base.scp"))[0]
+        p.node.base_op().col_weld = modo
+        p.stiff.enabled, p.stiff.count = True, 4
+        m = AS.build_model(p)
+        col = [w for w in m.welds if w.name.startswith("Columna-Placa base")]
+        rig = [w for w in m.welds if w.name.startswith("Rigidizador")]
+        bpd = BP.derive(p, p.node)
+        R = solve(bpd.with_combo(0), True)
+        keys = [c.key for c in R.checks]
+        fe = [w["key"] for w in weldfe._walls(bpd)]
+        err = GC.summary(GC.check(m))["errors"]
+        bad = [w.name for w in m.welds if not MC.check_faces(weld_prism(w).faces())["ok"]]
+        if modo == SP.BASE_COLWELD[0]:
+            check(len(col) >= 6 and len(rig) == 16, f"«{modo[:12]}»: {len(col)} cordones de la columna y {len(rig)} de los rigidizadores modelados")
+            check("weld_fl" in keys and "flange" in fe, "«Modelar aquí»: verificaciones y FEM de la soldadura de la columna presentes")
+        else:
+            check(len(col) == 0 and len(rig) == 16, f"«No modelar»: sin cordones de la columna ({len(col)}), rigidizadores modelados ({len(rig)})")
+            check("weld_fl" not in keys and "weld_web" not in keys and set(fe) == {"stiff"}, "«No modelar»: sin verificación ni FEM de la soldadura de la columna; los rigidizadores siguen")
+        check(err == 0 and not bad, f"revisor de geometría sin errores y cordones de la placa base cerrados ({modo[:12]})")
+        check(any(c.key == "stf_weld_pl" for c in R.checks), "verificación del cordón rigidizador-placa presente")
+        check(all(abs(w["spec"].size - p.stiff.weld_size) < 1e-9 for w in weldfe._walls(bpd) if w["key"] == "stiff"), "FEM: el cordón de los rigidizadores usa stiff.weld_size")
+
+
 if __name__ == "__main__":
     casos_recorte()
     casos_agujeros()
@@ -426,6 +456,7 @@ if __name__ == "__main__":
     aristas_visor()
     ejemplos()
     api_mesh()
+    placa_base()
     if not RAPIDO:
         mallador()
         barrido_conexiones()

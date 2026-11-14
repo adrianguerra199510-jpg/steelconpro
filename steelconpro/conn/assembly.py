@@ -2120,6 +2120,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
             mdl.notes.append(f"Placa base: el miembro «{bop.member}» no existe o no tiene extremo libre de ese lado.")
         else:
             bpd = BP.derive(prj, nd)
+    if bop is not None and fem is not None:
+        mdl.notes.append("La placa base se analiza aparte (pestaña «FEM» de la placa base): este análisis del nudo no incluye la placa base, el mortero, el concreto ni los anclajes; "
+                         "el miembro se apoya en su extremo libre.")
     floors = []                                                  # caras superiores de la placa base: las cartelas apoyan en ellas (no se hunden en la placa)
     if bpd is not None:
         E, A_in, bsx, bsy = bp_place

@@ -100,6 +100,7 @@ def run_fem(prj, vals, folder: str, stem: str = "modelo3d", progress=None, cance
                 last = R.msg
                 continue
             R.notes = ([msg] if msg else []) + ([] if info.get("converged", True) else ["Los contactos no llegaron a un conjunto estable (se muestra la ultima iteracion)."])
+            R.notes += [n for n in mdl.notes if n.startswith("La placa base se analiza aparte")]
             return R, R.msg + ("   " + msg if msg else "")
         except Exception as e:                                  # malla o modelo imposibles: se prueba con una malla mas gruesa
             last = f"{type(e).__name__}: {e}"
