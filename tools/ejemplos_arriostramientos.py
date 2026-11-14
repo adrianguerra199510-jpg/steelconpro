@@ -139,7 +139,9 @@ def ex_a08():
     nd.operations = [_gus("D1", gus_hb=26.0), Operation(kind=OP_BASE, member="Columna", end=-1)]
     nd.loads = [Load("Caso 1", "D1", N=-40.0), Load("Caso 1", "Columna", N=-60.0, side=1),
                 Load("Caso 2", "D1", N=40.0), Load("Caso 2", "Columna", N=-60.0, side=1)]
-    return _with_base_data(_prj("TP-A08", "placa base: diagonal HSS con cartela atornillada soldada a la columna y apoyada y soldada sobre la placa base", nd))
+    p = _with_base_data(_prj("TP-A08", "placa base: diagonal HSS con cartela atornillada soldada a la columna y apoyada y soldada sobre la placa base", nd))
+    p.plate.N, p.conc.N2 = 36.0, 52.0                          # la placa se amplía hacia el lado de la cartela (si no, la cartela sobresale de la placa)
+    return p
 
 
 def ex_a09():
