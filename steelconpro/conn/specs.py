@@ -367,6 +367,29 @@ class Nodo:
                 x.member = new
         self.main_name = new
 
+    def rename_element(self, old, new) -> bool:
+        """Cambia el nombre de un elemento cualquiera (principal, miembro, placa, ángulo o plano de trabajo) y de todas las operaciones que lo nombran.
+        False si `old` no existe o `new` ya está en uso."""
+        if old == new or new in self.element_names() or old not in self.element_names():
+            return False
+        if old == self.main_name:
+            self.rename_main(new)
+        elif self.member_named(old) is not None:
+            self.member_named(old).name = new
+            self.rename_member(old, new)
+        else:
+            for o in self.operations:
+                if o.makes_element and o.name == old:
+                    o.name = new
+            for o in self.operations:
+                if o.parent == old:
+                    o.parent = new
+                o.targets = [new if x == old else x for x in (o.targets or [])]
+                o.weld_main = new if o.weld_main == old else o.weld_main
+                o.weld_to = [[new if t[0] == old else t[0], t[1]] for t in (o.weld_to or [])]
+                o.op_member = new if o.op_member == old else o.op_member
+        return True
+
     def rename_member(self, old, new):
         for o in self.operations:
             if o.member == old:

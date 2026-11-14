@@ -679,8 +679,6 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 if tgt is None or tn == o.weld_main:
                     continue
                 lines, ffp, winfo = _weld_pair(main, tgt, tf, o, PL)
-                if winfo.get("clipped", 0.0) > 1.0:
-                    mdl.notes.append(f"Operación {i + 1}: «{o.weld_main}» sobresale de la cara de «{tn}»; el cordón solo se dibuja donde hay apoyo ({winfo['clipped']:.1f} in sin soldar).")
                 if lines:
                     pairs.append({"to": tn, "L": sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], main["geo"]["e3"] if main.get("geo") is not None else None)),
                                   "t_main": _t_element(main), "t_to": _t_element(tgt, ffp), "face": getattr(ffp, "name", "")})
