@@ -194,7 +194,7 @@ def _zones_fused(prj, res, meta, out, tp, u):
             if tp + 1e-4 < z < tp + 4.0 and n in stress]
     zones = {}
     Fz_total = 0.0
-    for (name, (x1, y1), (x2, y2), t, spec) in _walls(prj):
+    for (name, (x1, y1), (x2, y2), t, spec) in ([] if getattr(prj, "colweld_off", False) else _walls(prj)):
         Lw = math.hypot(x2 - x1, y2 - y1)
         if Lw < 1e-6:
             continue
@@ -242,7 +242,7 @@ def _zones_fused(prj, res, meta, out, tp, u):
                 Z.x, Z.y, Z.cap, Z.ratio = xm, ym, cap, ratio
                 Z.note = crit
     # demanda media de cada zona: resultante integrada / longitud de la pared
-    for (name, (x1, y1), (x2, y2), t, spec) in _walls(prj):
+    for (name, (x1, y1), (x2, y2), t, spec) in ([] if getattr(prj, "colweld_off", False) else _walls(prj)):
         if name in zones:
             zones[name].L += math.hypot(x2 - x1, y2 - y1)
             zones[name]._spec = spec

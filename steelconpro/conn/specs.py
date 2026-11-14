@@ -78,6 +78,7 @@ PLATE_SHAPES = ["Rectangular", "Triangular", "Con esquina recortada", "Circular"
 OPENINGS = ["Ninguna", "Circular", "Rectangular", "Rodea al miembro"]
 HOLE_SHAPES = ["Circular", "Ranura", "Rectangular"]
 WELD_TYPES = ["Filete", "CJP (penetración completa)", "PJP (penetración parcial)"]
+BASE_COLWELD = ["Modelar aquí", "No modelar (la defino con la operación de soldadura)"]      # placa base: cordón de la columna a la placa
 TAB_MODES = ["Sobre la cara del soporte", "Hasta el interior de las alas del principal"]
 BEAM_CONNS = ["Atornillada", "Soldada"]
 TRIM_MODES = ["Contra una cara de otro elemento", "Inglete con otro miembro", "Contra el volumen de otro elemento"]
@@ -156,6 +157,7 @@ class Operation:
     # ---- placa base: extremo del miembro principal donde va (−1 = lado −, +1 = lado +); en un miembro conectado va en su extremo libre.
     #      Sus datos (placa, anclajes, llave, rigidizadores, soldadura, concreto, cargas) estan en los bloques de la conexion (ver conn/baseplate.py)
     end: int = -1
+    col_weld: str = BASE_COLWELD[0]      # placa base: «Modelar aquí» (cordón columna-placa del bloque `welds`) o «No modelar» (lo define la operación de soldadura)
     # ---- operaciones generales (placa, pernos, soldadura, corte): elementos sobre los que actuan y parametros
     name: str = ""               # nombre del elemento que crea (placa) o rotulo de la operacion
     parent: str = ""             # elemento al que se une / de cuya cara depende (miembro o placa de otra operacion)

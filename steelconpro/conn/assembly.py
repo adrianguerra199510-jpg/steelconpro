@@ -2120,6 +2120,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
             mdl.notes.append(f"Placa base: el miembro «{bop.member}» no existe o no tiene extremo libre de ese lado.")
         else:
             bpd = BP.derive(prj, nd)
+    if bop is not None and fem is not None:
+        mdl.notes.append("La placa base se analiza aparte (pestaña «FEM» de la placa base): este análisis del nudo no incluye la placa base, el mortero, el concreto ni los anclajes; "
+                         "el miembro se apoya en su extremo libre.")
     floors = []                                                  # caras superiores de la placa base: las cartelas apoyan en ellas (no se hunden en la placa)
     if bpd is not None:
         E, A_in, bsx, bsy = bp_place
@@ -2129,6 +2132,12 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     if bpd is not None:
         E, A_in, bsx, bsy = bp_place
         mdl.extra += BP.plate_faces(bpd, E, A_in, bsx, bsy)
+        _col_part = BP.base_member(nd, bop)[0]
+        for (wn, wa, wb, wp0, wp1, wnA, wnB, wsz, wkind, wgrp) in BP.weld_lines(bpd, E, A_in, bsx, bsy, (reg.get(_col_part) or {}).get("part", _col_part),
+                                                                                  not str(getattr(bop, "col_weld", "")).startswith("No modelar")):
+            w_ = Weld(wn, wa, wb, wp0, wp1, wnA, wnB, float(wsz), 70.0, wgrp)
+            w_.kind = wkind
+            mdl.welds.append(w_)
         Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
         tpb = float(bpd.plate.tp)
         Bw = float(bpd.plate.Dp if bpd.plate.shape == "Circular" else bpd.plate.B)

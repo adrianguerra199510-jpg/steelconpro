@@ -149,6 +149,7 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     const endSel = field('Extremo del principal', selectInput({ value: op.end >= 0 ? '+' : '−', options: [{ value: '−', label: 'Lado − (abajo si es vertical)' }, { value: '+', label: 'Lado +' }], onChange: (v) => { op.end = v === '+' ? 1 : -1; ctx.onChange(); } }));
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Elemento' }), h('div', { class: 'form-grid' }, sel, endSel),
       h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'La placa queda perpendicular al eje del miembro, en su extremo libre. El perfil es el del miembro; se cambia en Miembros.' })));
+    body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Soldadura de la columna a la placa' }), addForm([{ path: 'col_weld', label: 'Cordón de la columna', type: 'combo', items: C.base_colwelds, wide: true, help: 'Con «Modelar aquí» se dibuja y se verifica el cordón de la columna a la placa (con el tipo y el cateto del módulo de soldaduras de la placa base). Con «No modelar» se define con la operación de soldadura (soldar la columna a «Placa base»). Los rigidizadores siempre se modelan con sus cordones.' }])));
     body.append(await baseplateForm(E, ctx));
   } else if (kind === K.PLATE) {                                               // placa
     mdlRoot = plateBody(body, E, op, ctx, info, names, el, nd, us, addForm, index);

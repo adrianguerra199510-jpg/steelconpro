@@ -48,6 +48,7 @@ def derive(prj, nd: Nodo = None, into=None):
         if nc:
             q.combos, q.combo_idx = nc, 0
             q.apply_combo(0)
+    q.colweld_off = bool(op is not None and str(getattr(op, "col_weld", "")).startswith("No modelar"))       # el cordón columna-placa lo define otra operación
     if op is not None:
         name, m = base_member(nd, op)
         if m is None and name is not None:
@@ -215,3 +216,72 @@ def unify(p):
     p.node = nd
     p.ctype = CT_NODE
     return p
+
+
+# ================================================================== cordones modelados (columna-placa y rigidizadores-placa/columna)
+def _wkind(wtype: str) -> str:
+    from .specs import WELD_TYPES
+    t = str(wtype or "")
+    return WELD_TYPES[1] if t.startswith("CJP") else WELD_TYPES[2] if t.startswith("PJP") else WELD_TYPES[0]
+
+
+def weld_lines(bpd, E, A_in, sx, sy, col_part: str, with_column: bool = True):
+    """Cordones de la placa base como geometria del nudo: [(nombre, A, B, p0, p1, nA, nB, cateto, tipo, grupo)] en coordenadas del mundo.
+    · columna -> placa: por las paredes del perfil (alas / alma / cara de tubo), a los dos lados si la especificación lo pide (`both_sides`), con el
+      cateto y el tipo del bloque `welds`; solo si `with_column` (opción «Modelar aquí»);
+    · rigidizador -> placa y rigidizador -> columna: a los dos lados de cada pletina, con `stiff.weld_size`.
+    La placa base y los rigidizadores no son piezas de prismas: sus nombres («Placa base», «stiff») son elementos virtuales para el revisor."""
+    from .. import geometry as G
+    from ..weld3d import _walls
+    O, F = plate_transform(bpd, E, A_in, sx, sy)
+    tp = float(bpd.plate.tp)
+    up = F[:, 2]
+
+    def W(x, y, z):
+        return O + F @ np.array([x, y, z], float)
+
+    def D(x, y):                                                  # dirección horizontal de la placa en el mundo
+        return F @ np.array([x, y, 0.0], float)
+    out = []
+    if with_column:
+        walls = _walls(bpd)
+        pts = [q for (_n, a, b, _t, _s) in walls for q in (a, b)]
+        cx, cy = (sum(q[0] for q in pts) / len(pts), sum(q[1] for q in pts) / len(pts)) if pts else (0.0, 0.0)
+        for (name, (x1, y1), (x2, y2), t, spec) in walls:
+            if str(spec.wtype).startswith("Sin") or spec.size <= 0:
+                continue
+            L = math.hypot(x2 - x1, y2 - y1)
+            if L < 1e-6:
+                continue
+            nx, ny = -(y2 - y1) / L, (x2 - x1) / L
+            mx, my = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
+            sg_out = 1.0 if (mx - cx) * nx + (my - cy) * ny >= -1e-9 else -1.0
+            sides = (sg_out, -sg_out) if getattr(spec, "both_sides", True) else (sg_out,)
+            for k, sg in enumerate(sides):
+                ox, oy = nx * sg * t / 2.0, ny * sg * t / 2.0
+                out.append((f"Columna-Placa base {name}{'' if k == 0 else ' int.'}", col_part, "Placa base", tuple(W(x1 + ox, y1 + oy, tp)), tuple(W(x2 + ox, y2 + oy, tp)),
+                            tuple(D(nx * sg, ny * sg)), tuple(up), float(spec.size), _wkind(spec.wtype), "Cordón columna-placa"))
+    st = bpd.stiff
+    if st.enabled and st.count > 0 and not bpd.section.generic:
+        prof = st.outline()[:-1]
+        u0 = min(q[0] for q in prof)
+        v0 = min(q[1] for q in prof)
+        col_v = [q[1] for q in prof if abs(q[0] - u0) < 1e-9]
+        base_u = [q[0] for q in prof if abs(q[1] - v0) < 1e-9]
+        w = float(st.weld_size)
+        for i, (x1, y1, x2, y2) in enumerate(G.stiffener_lines(bpd)):
+            Ls = math.hypot(x2 - x1, y2 - y1)
+            if Ls < 1e-6:
+                continue
+            ux, uy = (x2 - x1) / Ls, (y2 - y1) / Ls
+            tx, ty = -uy, ux
+            for k, sg in enumerate((1.0, -1.0)):
+                ox, oy = tx * sg * st.t / 2.0, ty * sg * st.t / 2.0
+                na = D(tx * sg, ty * sg)
+                ub0, ub1 = min(base_u), max(base_u)
+                out.append((f"Rigidizador {i + 1}-Placa base {k + 1}", "stiff", "Placa base", tuple(W(x1 + ux * ub0 + ox, y1 + uy * ub0 + oy, tp)),
+                            tuple(W(x1 + ux * ub1 + ox, y1 + uy * ub1 + oy, tp)), tuple(na), tuple(up), w, _wkind("Filete"), "Cordón rigidizador-placa"))
+                vc0, vc1 = min(col_v), max(col_v)
+                out.append((f"Rigidizador {i + 1}-Columna {k + 1}", "stiff", col_part, tuple(W(x1 + ox, y1 + oy, tp + vc0)), tuple(W(x1 + ox, y1 + oy, tp + vc1)),
+                            tuple(na), tuple(D(ux, uy)), w, _wkind("Filete"), "Cordón rigidizador-columna"))
+    return out
