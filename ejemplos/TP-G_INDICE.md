@@ -20,7 +20,8 @@ Se generan con `python3 tools/ejemplos_generales.py` (con `--revisa` imprime el 
 | TP-G14_placas_recortadas | Placa con muesca contra el volumen de una viga; placa cortada por un plano de trabajo | RECORTE (volumen y plano), PLANO DE TRABAJO | 0 / 0 | |
 | TP-G15_modos_soldadura | Rigidizadores con filete, un lado, CJP, PJP e intermitente | PLACA ×5, SOLDADURA ×5 | 0 / 0 | |
 | TP-G16_angulo_asiento | Ángulo de asiento soldado a la columna y atornillado a la viga + ángulo de unión | ÁNGULO ×2 (con giro), PERNOS | 0 / 0 | |
-| TP-G17_tubo_redondo_con_nervios | Tubo redondo con dos nervios perpendiculares soldados sobre la generatriz y placa de cabeza circular | PLACA ×3 | 0 / 0 | Una placa paralela sobre un redondo solo toca la generatriz (nota) |
+| TP-G17_tubo_redondo_con_nervios | Tubo redondo con dos nervios perpendiculares soldados sobre la generatriz y placa de cabeza circular | PLACA ×3 | 0 / 0 | Una placa paralela sobre un redondo solo toca la generatriz (nota) || TP-G18_posicion_referenciada | Continuidad a la altura de las alas de la viga (`pos_ref`), rigidizador de la viga a 9 in de la columna, viga con soldadura de recorte | RECORTE con `trim_weld`, PLACA ×5 con posición referenciada | 0 / 0 | |
+| TP-G19_recortes_con_soldadura | Repisa con muesca contra el volumen de una viga (holgura 0) soldada solo en el contacto y viga recortada con soldadura | RECORTE ×2 con `trim_weld` | 0 / 0 | |
 
 ## No soportado
 - Placas PARALELAS sobre perfiles redondos (silla cilíndrica): solo se admite el nervio perpendicular sobre la generatriz (franja de contacto de ±0.5 in); la paralela deja nota.

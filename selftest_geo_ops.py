@@ -280,6 +280,63 @@ def run():
         fail("la soldadura de un ángulo contra otra placa debe calcularse o avisar")
     print(f"{'ronda 3':34} redondo con soldadura, recorte por volumen de miembros, bloque de concreto, vacío HSS, generatriz, ángulo weld_main: OK" if not FAIL else "ronda 3: con fallas")
 
+    # ------------------------------------------------------------------ ronda 4: soldadura en los recortes y posición referenciada
+    def base4():
+        return prj("W14X90", 90.0, [Member(name="V1", shape="W12X26", az=0.0, el=0.0, pos=0.0, L=48.0)])
+    p = base4()
+    gen(p, OP_PLATE, name="PA", parent=p.node.main_name, face=FACES_I[0], pl_L=20.0, pl_W=12.0, pl_s=67.0, plate_t=0.5)
+    t = gen(p, OP_TRIM, targets=["PA"], parent="V1", face=FACES_I[0], trim_weld=True, weld_size=0.1875)
+    m, errs = build(p, "recorte de placa con soldadura (cara)")
+    if errs or 1 not in getattr(m, "trim_welds", {}) or not any(w.name.startswith("PA-R2") for w in m.welds):
+        fail(f"recorte de placa contra una cara con soldadura: {[e['text'][:80] for e in errs]}")
+    t.trim_mode, t.parent, t.face = TRIM_MODES[2], "V1", ""
+    m, errs = build(p, "recorte de placa con soldadura (volumen)")
+    L_vol = getattr(m, "trim_welds", {}).get(1, {}).get("L", 0.0)
+    if errs or L_vol < 3.0:
+        fail(f"recorte de placa contra el volumen con soldadura: L = {L_vol}, {[e['text'][:80] for e in errs]}")
+    t.trim_gap = 1.0                                                          # con holgura no hay contacto: sin cordones y con nota
+    m, _ = build(p, "recorte con holgura")
+    if m is not None and (1 in getattr(m, "trim_welds", {}) or not any("no toca" in n_ for n_ in m.notes)):
+        fail("un recorte con holgura no debe llevar cordones y debe avisar")
+    p = base4()
+    gen(p, OP_ANGLE, name="AN", parent=p.node.main_name, face=FACES_I[0], leg_a=4.0, leg_b=4.0, pl_L=24.0, pl_s=60.0, plate_t=0.375)
+    gen(p, OP_TRIM, targets=["AN"], parent="V1", trim_mode=TRIM_MODES[2], trim_gap=0.0, trim_weld=True)
+    m, errs = build(p, "recorte de ángulo con soldadura")
+    if errs or 1 not in getattr(m, "trim_welds", {}):
+        fail(f"recorte de ángulo con soldadura: {[e['text'][:80] for e in errs]}")
+    p = prj("W14X90", 90.0, [Member(name="D1", shape="HSS6X6X3/8", az=0.0, el=0.0, pos=0.0, L=40.0, gap=-3.0)])
+    gen(p, OP_PLATE, name="PX", parent=p.node.main_name, face=FACES_I[0], pl_L=10, pl_W=6, pl_s=60, plate_t=1.0)
+    gen(p, OP_TRIM, targets=["D1"], parent="PX", trim_mode=TRIM_MODES[2], trim_gap=0.0, trim_weld=True)
+    m, errs = build(p, "recorte de miembro por volumen con soldadura", clashes=False)
+    if 1 not in getattr(m, "trim_welds", {}):
+        fail("recorte de miembro contra el volumen con soldadura")
+    # posición referenciada
+    p = base4()
+    a = gen(p, OP_PLATE, name="RG", parent=p.node.main_name, face=FACES_I[2], orient=PLATE_ORIENTS[1], role="Rigidizador", pl_L=12.0, pl_W=4.0, pl_s=10.0, plate_t=0.5,
+            pos_ref="V1", pos_ref_face=FACES_I[0], pos_ref_off=0.0)
+    m, _ = build(p, "posición referenciada", clashes=False)
+    zc = float(m.elems["RG"]["geo"]["centre"][2])
+    zr = float(m.elems["V1"]["faces"][FACES_I[0]].O[2])
+    if abs(zc - zr) > 1e-6:
+        fail(f"el rigidizador debe quedar a la altura del ala de V1 (z = {zc:.3f} ≠ {zr:.3f})")
+    a.pos_ref_off = -1.0
+    m, _ = build(p, "posición referenciada con desplazamiento", clashes=False)
+    if abs(float(m.elems["RG"]["geo"]["centre"][2]) - (zr - 1.0)) > 1e-6:
+        fail("el desplazamiento del plano de referencia no se aplica")
+    a.pos_ref_face = FACES_I[2]                                               # plano paralelo a la cara padre: nota
+    m, _ = build(p, "referencia paralela", clashes=False)
+    if m is not None and not any("paralelo" in n_ for n_ in m.notes):
+        fail("un plano de referencia paralelo a la cara padre debe avisar")
+    a.pos_ref, a.pos_ref_face = "RG", FACES_PLATE[0]
+    m, _ = build(p, "referencia circular", clashes=False)
+    if m is not None and not any("circular" in n_ for n_ in m.notes):
+        fail("la referencia a sí misma debe informarse como dependencia circular")
+    a.pos_ref, a.pos_ref_face = "V1", FACES_I[0]
+    p.node.rename_element("V1", "VX")
+    if a.pos_ref != "VX" or 0 not in p.node.dependents("VX"):
+        fail("renombrar y dependientes deben contemplar pos_ref")
+    print(f"{'ronda 4':34} soldadura en recortes (cara, volumen, ángulo, miembro, holgura) y posición referenciada: OK" if not FAIL else "ronda 4: con fallas")
+
     # ------------------------------------------------------------------ triangulación con agujeros que tocan el borde o entre sí
     from steelconpro.conn import geom2d as G
     outer = [(0, 0), (10, 0), (10, 10), (0, 10)]
