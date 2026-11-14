@@ -2076,6 +2076,20 @@ def _apply_trims(mdl, nd, reg, hw=True):
             continue
         s_, e_, d_ = (np.asarray(x, float) for x in mem["ends"])
         P, away = (s_, d_) if o.trim_end == "Inicio" else (e_, -d_)          # punto del extremo y direccion hacia el interior del miembro
+        if o.trim_mode == TRIM_MODES[2]:                                      # contra el volumen de otro elemento: se acorta el miembro hasta la caja del otro
+            from . import plates as PL_
+            oth = reg.get(o.parent)
+            if oth is None or oth.get("part") is None or o.parent == tgt or oth.get("type") in ("plano", "placa base"):
+                mdl.notes.append(f"Operación {i + 1}: elija el elemento (miembro, placa o ángulo) cuyo volumen recorta al miembro.")
+                continue
+            pieces = PL_.cutter_pieces(oth, mdl)
+            es = -1.0 if o.trim_end == "Inicio" else 1.0
+            res = [PL_.trim_prism_volume(pr, pieces, float(o.trim_gap), es) for pr in part.prisms]
+            if not any(r[0] for r in res):
+                mdl.notes.append(f"Operación {i + 1}: el volumen de «{o.parent}» " + ("no toca al miembro." if res and res[0][1] == "no toca" else "se llevaría todo el miembro; no se recorta."))
+            if o.trim_weld:
+                mdl.notes.append(f"Operación {i + 1}: el recorte contra un volumen no lleva soldadura de contorno; use una soldadura entre elementos.")
+            continue
         if o.trim_mode == TRIM_MODES[1]:
             oth = reg.get(o.parent)
             if oth is None or "ends" not in oth or oth.get("type") != "miembro" or o.parent == tgt:
@@ -2101,10 +2115,15 @@ def _apply_trims(mdl, nd, reg, hw=True):
         for pr in part.prisms:
             # el miembro se alarga por el extremo recortado hasta pasar el plano; luego el plano lo corta y cierra la sección con una tapa
             W = np.asarray(pr.W, float)
-            if pr.circle is None and abs(float(W @ d_)) > 0.99:
+            if abs(float(W @ d_)) > 0.99:
                 end_sign = -1.0 if o.trim_end == "Inicio" else 1.0                 # el extremo recortado está en w0 (inicio) o en w1 (fin)
                 w_end = pr.w0 if end_sign < 0 else pr.w1
-                rows = [np.asarray(pr.to_global(u, v, w_end), float) for (u, v) in pr.poly]
+                if pr.circle is not None:                                           # cilindro o tubo redondo: se alarga igual, midiendo con puntos del borde del extremo
+                    ro_ = float(pr.circle[0])
+                    rim = [(ro_ * math.cos(a_), ro_ * math.sin(a_)) for a_ in [2 * math.pi * k_ / 24 for k_ in range(24)]]
+                else:
+                    rim = pr.poly
+                rows = [np.asarray(pr.to_global(u, v, w_end), float) for (u, v) in rim]
                 den = float(W @ -keep_n) * end_sign                                 # avance del extremo respecto de la normal exterior nn = −keep al alargar
                 need = 0.0
                 for c_ in rows:

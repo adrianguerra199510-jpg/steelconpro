@@ -18,7 +18,7 @@ import math
 
 import numpy as np
 
-from .specs import (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
+from .specs import (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK, FACES_BLOCK, OP_ALIGN, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
                     FACES_PLATE, FACES_ANGLE, FACES_END, HOLE_SHAPES, WELD_MODES, WELD_TYPES, Operation)
 
 # ================================================================================================== valores por omision
@@ -120,7 +120,9 @@ def elements(prj) -> dict:
         out.append({"name": m.name, "type": "miembro", "main": False, "label": f"{m.name} ({m.shape})", "faces": face_names_of(AS.shape_of(m.shape)), "t": _shape_t(AS.shape_of(m.shape))})
     for i, o in enumerate(nd.operations):
         if o.makes_element:
-            if o.kind == OP_WORKPLANE:
+            if o.kind == OP_BLOCK:
+                out.append({"name": o.name, "type": "concreto", "main": False, "op": i, "label": f"{o.name} (bloque de concreto {o.blk_L:g}×{o.blk_W:g}×{o.blk_H:g})", "faces": list(FACES_BLOCK), "t": None})
+            elif o.kind == OP_WORKPLANE:
                 out.append({"name": o.name, "type": "plano", "main": False, "op": i, "label": f"{o.name} (plano de trabajo)", "faces": ["Plano"]})
             elif o.kind == OP_ANGLE:
                 out.append({"name": o.name, "type": "ángulo", "main": False, "op": i, "label": f"{o.name} (ángulo L{o.leg_a:g}×{o.leg_b:g}×{o.plate_t:g})", "faces": list(FACES_ANGLE), "t": o.plate_t})
@@ -129,6 +131,28 @@ def elements(prj) -> dict:
     if nd.base_op() is not None:
         out.append({"name": "Placa base", "type": "placa base", "main": False, "label": "Placa base", "faces": ["Cara superior", "Cara inferior"], "t": None})
     return {"elements": out}
+
+
+def block_faces(o):
+    """Caras (FaceFrame) y cuadriláteros de un bloque de concreto: centro de la cara superior en (wp_x, wp_y, wp_z), giro en planta wp_az, medidas blk_L × blk_W × blk_H."""
+    az = math.radians(o.wp_az)
+    ex = np.array([math.cos(az), math.sin(az), 0.0])
+    ey = np.array([-math.sin(az), math.cos(az), 0.0])
+    ez = np.array([0.0, 0.0, 1.0])
+    L, W, H = max(float(o.blk_L), 0.5), max(float(o.blk_W), 0.5), max(float(o.blk_H), 0.5)
+    c = np.array([o.wp_x, o.wp_y, o.wp_z], float)
+    defs = {"Cara superior": (c, ex, ez, L, W / 2.0),
+            "Cara inferior": (c - ez * H, ex, -ez, L, W / 2.0),
+            "Cara frontal": (c - ey * W / 2.0 - ez * H / 2.0, ex, -ey, L, H / 2.0),
+            "Cara posterior": (c + ey * W / 2.0 - ez * H / 2.0, ex, ey, L, H / 2.0),
+            "Cara izquierda": (c - ex * L / 2.0 - ez * H / 2.0, ey, -ex, W, H / 2.0),
+            "Cara derecha": (c + ex * L / 2.0 - ez * H / 2.0, ey, ex, W, H / 2.0)}
+    faces, quads = {}, []
+    for nm, (cp, A, N, ln, uh) in defs.items():
+        ff = FaceFrame(cp - A * ln / 2.0, A, N, ln, uh, 0.0)
+        faces[nm] = ff
+        quads.append([ff.point(0.0, -uh), ff.point(ln, -uh), ff.point(ln, uh), ff.point(0.0, uh)])
+    return faces, {"quads": quads, "c": c, "ex": ex, "ey": ey, "L": L, "W": W, "H": H}
 
 
 def unique_plate_name(nd, base="P") -> str:
@@ -142,7 +166,7 @@ def unique_plate_name(nd, base="P") -> str:
 # ================================================================================================== orden de calculo
 def ordered(nd) -> list:
     """Operaciones generales en un orden que respeta las dependencias (una placa despues de su padre).  -> [(indice, operacion)]"""
-    pending = [(i, o) for i, o in enumerate(nd.operations) if o.kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN)]
+    pending = [(i, o) for i, o in enumerate(nd.operations) if o.kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK, OP_ALIGN)]
     known = set(nd.names()) | ({"Placa base"} if nd.base_op() is not None else set())
     plate_names = {o.name for o in nd.operations if o.kind == OP_PLATE and o.name}
     trims_of = {}                                                  # recortes que cortan una placa: la placa los necesita antes de armarse
@@ -358,6 +382,42 @@ def bolt_grip(mdl, reg, names, p, axis, notes=None, tag="", max_len=60.0, **_unu
     return grip
 
 
+def _ray_box_depth(box, p, axis, tol_gap=0.0):
+    """Entrada (s_in) y largo dentro (s_out − s_in) del eje p + axis·s en el bloque de concreto `box`; None si no lo cruza."""
+    p, ax = np.asarray(p, float), np.asarray(axis, float)
+    c, ex, ey, L, W, H = box["c"], box["ex"], box["ey"], box["L"], box["W"], box["H"]
+    lo, hi = -1e9, 1e9
+    ez = np.array([0.0, 0.0, 1.0])
+    for e_, a0, a1 in ((ex, -L / 2.0, L / 2.0), (ey, -W / 2.0, W / 2.0), (ez, -H, 0.0)):
+        o_, d_ = float((p - c) @ e_), float(ax @ e_)
+        if abs(d_) < 1e-9:
+            if o_ < a0 - 1e-6 or o_ > a1 + 1e-6:
+                return None
+            continue
+        t1, t2 = (a0 - o_) / d_, (a1 - o_) / d_
+        if t1 > t2:
+            t1, t2 = t2, t1
+        lo, hi = max(lo, t1), min(hi, t2)
+    if hi - lo < 1e-6 or hi < -1e-6:
+        return None
+    return max(lo, 0.0), hi - max(lo, 0.0)
+
+
+def _attach_grip(mdl, reg, nm, parent_name, p, axis, t, wall, tag):
+    """Agarre y largo total de un perno que une una placa o un ángulo (`nm`, espesor t) con su elemento padre; si el padre es un bloque de concreto, anclaje."""
+    par = reg[parent_name]
+    if par.get("type") == "concreto":
+        d_in = _ray_box_depth(par["box"], p, axis)
+        total = t + (min(d_in[1], 8.0) if d_in else 8.0)
+        if d_in is None:
+            mdl.notes.append(f"Los anclajes de «{nm}» no entran al bloque «{parent_name}»: revise la posición.")
+        return [(nm, 0.0, t)], total
+    grip = bolt_grip(mdl, reg, [nm, parent_name], p, axis, notes=mdl.notes, tag=tag)
+    if grip is None:
+        grip = [(nm, 0.0, t), (par["part"], t, t + wall)]
+    return grip, max(g_[2] for g_ in grip)
+
+
 def _layers_of_grip(grip, reg, layers):
     """Capas [(elemento, espesor)] con el espesor que de verdad atraviesa el perno (el menor de sus tramos)."""
     out = []
@@ -458,6 +518,10 @@ def _weld_pair(main, tgt, face_name, o, PL):
         return PL.weld_lines(main["geo"], ff, edges, o.weld_a, o.weld_len, region=PL.face_region(tgt, ff), info=info), ff, info
     if main.get("frame_full") is not None:
         return member_contour_lines(main["frame_full"], ff, edges), ff, info
+    if main.get("type") == "angulo" and tgt.get("part") != main.get("parent_part"):       # ángulo contra un elemento que no es su padre: aristas del ángulo sobre esa cara
+        part = next((p_ for p_ in (main.get("_mdl_parts") or []) if p_.name == main.get("part")), None)
+        if part is not None and part.prisms:
+            return PL.prism_plane_lines(part.prisms[0], ff, PL.face_region(tgt, ff)), ff, info
     return list(main.get("lines") or []), ff, info
 
 
@@ -484,6 +548,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
     from . import plates as PL
     entries = []
     order, orphans = ordered(nd)
+    reg_parts = mdl.parts
     all_names = set(nd.element_names()) | ({"Placa base"} if nd.base_op() is not None else set())
     for i, o in orphans:
         refs = [x for x in ([o.parent] + list(o.targets or []) + ([o.weld_main] + [t[0] for t in (o.weld_to or [])] if o.weld_main else [])) if x]
@@ -495,6 +560,13 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
         ent = {"op": o, "index": i, "ok": False}
         entries.append(ent)
         if o.kind in (OP_CUT, OP_TRIM, OP_ALIGN):
+            ent["ok"] = True
+            continue
+        if o.kind == OP_BLOCK:
+            faces_, polys_ = block_faces(o)
+            reg[o.name] = {"type": "concreto", "faces": faces_, "part": o.name, "t": 0.0, "Fy": 0.0, "Fu": 0.0, "box": polys_}
+            mdl.extra.append((f"block:{o.name}", [[tuple(map(float, q)) for q in f] for f in polys_["quads"]], "#b9b5aa", 1.0))
+            mdl.tags.append((tuple(map(float, faces_["Cara superior"].point(faces_["Cara superior"].L / 2.0, 0.0))), o.name))
             ent["ok"] = True
             continue
         if o.kind == OP_WORKPLANE:
@@ -551,6 +623,10 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             if info.get("clipped", 0.0) > 1.0:
                 mdl.notes.append(f"Operación {i + 1}: la placa «{nm}» sobresale de la cara «{o.face}» de «{o.parent}»; el cordón solo se dibuja donde hay apoyo "
                                  f"({info['clipped']:.1f} in de borde quedan sin soldar).")
+            fr_ = parent.get("frame_full")
+            if fr_ is not None and getattr(fr_[5], "is_round", False) and o.face not in FACES_END and not geo["perp"]:
+                mdl.notes.append(f"Operación {i + 1}: «{o.parent}» es un tubo redondo: una placa paralela solo toca su plano tangente (la generatriz); "
+                                 f"use una placa perpendicular soldada por el borde sobre la generatriz.")
             if (attach == ATTACHES[0] or spec["perp"]) and not lines:
                 mdl.notes.append(f"Operación {i + 1}: la placa «{nm}» no tiene borde sobre la cara «{o.face}» de «{o.parent}» (revise la forma, la orientación o los bordes soldados).")
             if (attach == ATTACHES[0] or spec["perp"]) and hw:
@@ -563,10 +639,8 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 grade = o.bolt_grade
                 for k, (a, b) in enumerate(pts):
                     p = ff.point(o.pl_s, o.pl_u) + e1 * a + e2 * b + ff.N * t
-                    grip = bolt_grip(mdl, reg, [nm, o.parent], p, -ff.N, notes=mdl.notes, tag=f"{nm}-B{k + 1}")
-                    if grip is None:
-                        grip = [(nm, 0.0, t), (parent["part"], t, t + wall)]
-                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, max(g_[2] for g_ in grip), grip, grade))
+                    grip, tot_ = _attach_grip(mdl, reg, nm, o.parent, p, -ff.N, t, wall, f"{nm}-B{k + 1}")
+                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, tot_, grip, grade))
                 ent["bolts"] = len(pts)
             elif attach == ATTACHES[1] and spec["perp"]:
                 mdl.notes.append(f"Operación {i + 1}: una placa perpendicular a la cara (rigidizador) se suelda; se dibuja la soldadura.")
@@ -602,7 +676,7 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             inner = FaceFrame(c0 + fA * s0 + fU * (side * (a_ / 2 - t)) + ff.N * ((t + b_) / 2.0), fA, Nin, L, (b_ - t) / 2.0, t)
             outer = FaceFrame(c0 + fA * s0 + fU * (side * a_ / 2) + ff.N * (b_ / 2.0), fA, Nout, L, b_ / 2.0, t)
             reg[nm] = {"type": "angulo", "faces": {FACES_ANGLE[0]: top, FACES_ANGLE[1]: inner, FACES_ANGLE[2]: outer}, "part": nm, "t": t, "Fy": Fy, "Fu": Fu,
-                       "parent": o.parent, "parent_face": o.face, "parent_part": parent["part"], "lines": None}
+                       "parent": o.parent, "parent_face": o.face, "parent_part": parent["part"], "lines": None, "_mdl_parts": reg_parts}
             spec = {"L1": L, "L2": a_, "t": t, "perp": False}
             ent.update(ok=True, ff=ff, spec=spec, parent=parent, plate_name=nm, e=(fA, fU, ff.N), centre=c0)
             # unión: soldada (todo el contorno de la pierna sobre la cara) o atornillada (pernos a traves de la pierna)
@@ -625,22 +699,24 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 wall = parent["faces"][o.face].wall
                 for k, (aa, bb) in enumerate(pts):
                     p = c0 + fA * aa + fU * bb + ff.N * t
-                    grip = bolt_grip(mdl, reg, [nm, o.parent], p, -ff.N, notes=mdl.notes, tag=f"{nm}-B{k + 1}")
-                    if grip is None:
-                        grip = [(nm, 0.0, t), (parent["part"], t, t + wall)]
-                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, max(g_[2] for g_ in grip), grip, o.bolt_grade))
+                    grip, tot_ = _attach_grip(mdl, reg, nm, o.parent, p, -ff.N, t, wall, f"{nm}-B{k + 1}")
+                    mdl.bolts.append(_bolt(f"{nm}-B{k + 1}", p, -ff.N, db, 0.0, tot_, grip, o.bolt_grade))
                 ent["bolts"] = len(pts)
         elif o.kind == OP_BOLTS:
             ff = parent["faces"][o.face]
-            names = [o.parent] + [x for x in (o.targets or []) if x in reg and x != o.parent]
+            names_all = [o.parent] + [x for x in (o.targets or []) if x in reg and x != o.parent]
+            conc = [x for x in names_all if reg[x].get("type") == "concreto"]
+            names = [x for x in names_all if x not in conc]                # los anclajes entran al concreto: no es pieza del agarre y no se le hace agujero
             layers = _bolt_layers(reg, names, ff.wall)
-            layers[0] = (layers[0][0], ff.wall) if reg[o.parent]["type"] == "miembro" else layers[0]
+            if layers and reg[names[0]]["type"] == "miembro":
+                layers[0] = (layers[0][0], ff.wall)
             pts = rot_pts(bolt_grid(o.rows, o.cols, o.bolt_s, o.bolt_g), o.pl_rot)
             pts3 = [ff.point(o.pl_s, o.pl_u) + ff.A * a + ff.U * b for a, b in pts]
             ent["edge"] = bolt_edge_distance(reg, names, ff, pts3)
-            if hw:
+            if hw and names:
                 for k, p in enumerate(pts3):
-                    grip = bolt_grip(mdl, reg, names, p, -ff.N, notes=mdl.notes, tag=f"{o.name or 'B' + str(i + 1)}-B{k + 1}")
+                    tag_ = f"{o.name or 'B' + str(i + 1)}-B{k + 1}"
+                    grip = bolt_grip(mdl, reg, names, p, -ff.N, notes=mdl.notes, tag=tag_)
                     if grip is None:                                  # sin piezas (no se dibujan los herrajes): espesores de las capas
                         grip, s0_ = [], 0.0
                         for nm_, t_ in layers:
@@ -648,7 +724,16 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                             s0_ += t_
                     elif k == 0:                                      # espesores reales de las capas que atraviesa el primer perno (para las verificaciones)
                         layers = _layers_of_grip(grip, reg, layers)
-                    mdl.bolts.append(_bolt(f"{o.name or 'B' + str(i + 1)}-B{k + 1}", p, -ff.N, db, 0.0, max(g_[2] for g_ in grip), grip, o.bolt_grade))
+                    total = max(g_[2] for g_ in grip)
+                    for cn in conc:                                   # anclaje: sigue dentro del bloque hasta su empotramiento (8 in o lo que quede de bloque)
+                        d_in = _ray_box_depth(reg[cn]["box"], p, -ff.N, total)
+                        if d_in is None:
+                            msg = f"Los anclajes «{tag_.rsplit('-B', 1)[0]}» no entran al bloque «{cn}»: revise la posición del grupo."
+                            if msg not in mdl.notes:
+                                mdl.notes.append(msg)
+                        else:
+                            total = max(total, d_in[0] + min(d_in[1], 8.0))
+                    mdl.bolts.append(_bolt(tag_, p, -ff.N, db, 0.0, total, grip, o.bolt_grade))
             ent.update(ok=True, ff=ff, layers=layers, bolts=len(pts), parent=parent)
         elif o.kind == OP_HOLE:
             ff = parent["faces"][o.face]
@@ -804,7 +889,7 @@ def add_checks(prj, nd, R, rec, mdl):
             tw_ = mdl.trim_welds[i]
             _weld_checks(R.checks, grp, f"{key}_tw", float(o.weld_size), tw_["L"], float(o.force_V), float(o.force_T), tw_["t_main"], tw_["t_to"], label=f"{(o.targets or [''])[0]} — {tw_['to']}", wtype=o.weld_type)
             continue
-        if o.kind in (OP_TRIM, OP_HOLE, OP_WORKPLANE, OP_ALIGN) and ent.get("ok"):
+        if o.kind in (OP_TRIM, OP_HOLE, OP_WORKPLANE, OP_BLOCK, OP_ALIGN) and ent.get("ok"):
             continue                                                   # solo geometría: no hay nada que verificar
         if not ent.get("ok"):
             _chk(R.checks, grp, f"{key}_na", "La operación no se pudo armar (falta el elemento o la cara) — NO EVALUADO", 0.0, 1.0, "-", "", "Revise el elemento y la cara en la operación.", skip=True)
@@ -890,12 +975,12 @@ def add_operation(nd, kind: str, **kw) -> Operation:
     d = defaults(kind, kw.get("role", ""))
     d.update(kw)
     o = Operation(kind=kind, **d)
-    if kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE) and "member" not in kw:
+    if kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK) and "member" not in kw:
         o.member = ""                                    # estas operaciones se refieren a elementos por `parent` y `targets`, no a un miembro
     if kind == OP_BASE and "member" not in kw:
         o.member = nd.main_name                          # la placa base va, por defecto, en el extremo del miembro principal
-    if kind in (OP_PLATE, OP_ANGLE, OP_WORKPLANE) and not o.name:
-        o.name = unique_plate_name(nd, {OP_PLATE: "P", OP_ANGLE: "A"}.get(kind, "PT"))
+    if kind in (OP_PLATE, OP_ANGLE, OP_WORKPLANE, OP_BLOCK) and not o.name:
+        o.name = unique_plate_name(nd, {OP_PLATE: "P", OP_ANGLE: "A", OP_BLOCK: "BC"}.get(kind, "PT"))
     if kind in (OP_PLATE, OP_ANGLE, OP_HOLE) and not o.parent:
         o.parent = nd.main_name
     if kind in (OP_PLATE, OP_ANGLE, OP_HOLE) and not o.face:

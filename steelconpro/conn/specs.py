@@ -60,15 +60,16 @@ OP_ANGLE = "Ángulo (herraje)"
 OP_TRIM = "Recorte contra otro elemento"
 OP_WORKPLANE = "Plano de trabajo"
 OP_ALIGN = "Alinear cara"
-OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_CUT, OP_TRIM, OP_WORKPLANE, OP_ALIGN]
-GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_ALIGN)
+OP_BLOCK = "Bloque de concreto (muro, dado o pedestal)"
+OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_CUT, OP_TRIM, OP_WORKPLANE, OP_BLOCK, OP_ALIGN]
+GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK, OP_ALIGN)
 # grupos del menu "Agregar operacion" (como la cinta de IDEA)
 OP_GROUPS = [("Conexión de corte", [OP_TAB, OP_DANG, OP_SEAT]),
              ("Conexión de momento", [OP_EP_FLUSH, OP_EP_EXT, OP_WELD]),
              ("Conexión de diagonal", [OP_GUSSET, OP_GUSSET_W]),
              ("Placas, pernos y soldaduras", [OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET]),
              ("Modificar elementos", [OP_COPE, OP_CUT, OP_TRIM, OP_HOLE]),
-             ("Referencias", [OP_WORKPLANE]),
+             ("Referencias", [OP_WORKPLANE, OP_BLOCK]),
              ("Rigidizar el miembro principal", [OP_CONT]),
              ("Apoyo del miembro", [OP_BASE])]
 PLATE_ROLES = ["Refuerzo", "Cartela", "Rigidizador"]
@@ -89,6 +90,7 @@ FACES_INNER = ["Ala superior (interior)", "Ala inferior (interior)"]     # caras
 FACES_I = ["Ala superior", "Ala inferior", "Alma +", "Alma −"] + FACES_END + FACES_INNER
 FACES_BOX = ["Cara +X", "Cara −X", "Cara +Y", "Cara −Y"] + FACES_END
 FACES_PLATE = ["Cara +", "Cara −"]
+FACES_BLOCK = ["Cara superior", "Cara frontal", "Cara posterior", "Cara izquierda", "Cara derecha", "Cara inferior"]   # bloque de concreto: ejes locales x (largo), y (ancho), z (alto); frontal = −y
 FACES_ANGLE = ["Pierna sobre la cara", "Pierna saliente +", "Pierna saliente −"]
 FACE_LABELS = {"I": FACES_I, "box": FACES_BOX, "plate": FACES_PLATE}
 CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
@@ -180,6 +182,9 @@ class Operation:
     wp_z: float = 0.0
     wp_az: float = 0.0           # plano de trabajo: azimut de la normal en planta, grados (desde +X hacia +Y)
     wp_el: float = 0.0           # plano de trabajo: inclinación de la normal sobre la horizontal, grados (90 = normal vertical, plano horizontal)
+    blk_L: float = 24.0          # bloque de concreto: largo (eje x local), in.  Posición: (wp_x, wp_y, wp_z) = centro de la cara superior; giro en planta: wp_az
+    blk_W: float = 24.0          # bloque de concreto: ancho (eje y local), in
+    blk_H: float = 24.0          # bloque de concreto: alto (hacia abajo desde la cara superior), in
     wp_size: float = 60.0        # plano de trabajo: lado del cuadrado que se dibuja, in
     ref_face: str = ""           # alinear cara: cara del elemento de referencia (el plano de trabajo no tiene caras que elegir)
     al_offset: float = 0.0       # alinear cara: distancia a la que queda la cara del plano de referencia, in (+ en el sentido de la normal de la referencia)
@@ -249,7 +254,7 @@ class Operation:
 
     @property
     def makes_element(self) -> bool:
-        return self.kind in (OP_PLATE, OP_ANGLE, OP_WORKPLANE)
+        return self.kind in (OP_PLATE, OP_ANGLE, OP_WORKPLANE, OP_BLOCK)
 
 
 @dataclass

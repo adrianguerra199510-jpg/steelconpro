@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from steelconpro.model import Project, save_book, load_book
 from steelconpro.conn import ops as OPS
 from steelconpro.conn.specs import (CT_NODE, END_LABELS, Member, Operation, Load, Nodo, OP_PLATE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE,
-                                    OP_BASE, PLATE_SHAPES, PLATE_ORIENTS, ATTACHES, WELD_MODES, WELD_TYPES, WELD_SIDES, TRIM_MODES, OPENINGS, HOLE_SHAPES,
+                                    OP_BASE, OP_BLOCK, PLATE_SHAPES, PLATE_ORIENTS, ATTACHES, WELD_MODES, WELD_TYPES, WELD_SIDES, TRIM_MODES, OPENINGS, HOLE_SHAPES,
                                     FACES_I, FACES_END, FACES_PLATE, FACES_ANGLE)
 
 OUT = Path(__file__).resolve().parent.parent / "ejemplos"
@@ -255,19 +255,22 @@ def g10_cartela_cubierta() -> Project:
 
 
 def g11_apoyo_sobre_muro() -> Project:
-    """Apoyo de una viga W16X31 sobre un muro: placa de apoyo soldada al ala inferior con huecos ranurados para los anclajes, rigidizadores de apoyo en el alma y ángulo atornillado al alma."""
+    """Apoyo de una viga W16X31 sobre un muro de concreto (elemento «Bloque de concreto»): placa de apoyo soldada al ala inferior, más ancha que el ala, con huecos ranurados; cuatro anclajes que entran al muro; rigidizadores de apoyo en el alma y ángulo atornillado al alma."""
     nd = beam("W16X31", end=1)
-    s0 = nd.main_len_neg - 4.0
-    gen(nd, OP_PLATE, name="PA", parent=nd.main_name, face=F_BOT, shape=RECT, pl_L=12.0, pl_W=5.5, pl_s=s0, plate_t=0.75, plate_steel=A36, weld_size=0.25)
-    gen(nd, OP_HOLE, parent="PA", face="Cara +", rows=2, cols=1, bolt_s=7.0, pl_s=6.0, pl_u=0.0, hole_shape=HOLE_SHAPES[1], hole_L=2.0, hole_D=0.9375, hole_rot=0.0)
+    s0 = nd.main_len_neg - 6.0                                                   # la placa llega al extremo de la viga (x de −12 a 0)
+    zb = -(15.9 / 2.0) - 0.75                                                    # cara inferior de la placa de apoyo
+    gen(nd, OP_BLOCK, name="MURO", wp_x=-6.0, wp_y=0.0, wp_z=zb, wp_az=0.0, blk_L=24.0, blk_W=16.0, blk_H=24.0)
+    gen(nd, OP_PLATE, name="PA", parent=nd.main_name, face=F_BOT, shape=RECT, pl_L=12.0, pl_W=12.0, pl_s=s0, plate_t=0.75, plate_steel=A36, weld_size=0.25)
+    gen(nd, OP_HOLE, parent="PA", face="Cara −", rows=2, cols=2, bolt_s=7.0, bolt_g=9.0, pl_s=6.0, pl_u=0.0, hole_shape=HOLE_SHAPES[1], hole_L=2.0, hole_D=0.9375, hole_rot=0.0)
+    gen(nd, OP_BOLTS, name="ANC", parent="PA", face="Cara −", targets=["MURO"], rows=2, cols=2, bolt_s=7.0, bolt_g=9.0, pl_s=6.0, pl_u=0.0, bolt_size="3/4", bolt_grade="A307")
     for k, face in enumerate((F_WEBP, F_WEBM)):
         nm = f"RA{k + 1}"
         gen(nd, OP_PLATE, name=nm, parent=nd.main_name, face=face, role="Rigidizador", orient=PERP_T, shape=CLIP, pl_L=15.02, pl_W=2.6, pl_clip=0.75, pl_s=s0, plate_t=0.375,
             plate_steel=A36, weld_size=0.1875)
         gen(nd, OP_FILLET, weld_main=nm, weld_to=[[nd.main_name, F_TOPI], [nd.main_name, F_BOTI]], weld_size=0.1875)
-    gen(nd, OP_ANGLE, name="AL", parent=nd.main_name, face=F_WEBP, attach=BOLT, leg_a=4.0, leg_b=4.0, plate_t=0.375, pl_L=6.0, pl_s=s0 - 8.0, rows=2, cols=1, bolt_s=3.0)
+    gen(nd, OP_ANGLE, name="AL", parent=nd.main_name, face=F_WEBP, attach=BOLT, leg_a=4.0, leg_b=4.0, plate_t=0.375, pl_L=6.0, pl_s=s0 - 10.0, rows=2, cols=1, bolt_s=3.0)
     nd.loads = [Load("Caso 1", nd.main_name, Vz=-40.0, side=1)]
-    return project("TP-G11", "apoyo de viga sobre muro: placa con ranuras, rigidizadores de apoyo y ángulo", nd)
+    return project("TP-G11", "apoyo de viga sobre muro de concreto con placa, ranuras y anclajes", nd)
 
 
 def g12_placa_con_aberturas() -> Project:
