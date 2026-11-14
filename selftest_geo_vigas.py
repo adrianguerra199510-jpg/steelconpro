@@ -25,6 +25,8 @@ def errores(mdl):
 
 
 def centrar(nd, m, cara):
+    if cara == "n":
+        return
     A, msx, msy = AS.main_frame(nd)
     ms = AS.shape_of(nd.main_shape)
     d = AS.member_dir(m)
@@ -151,6 +153,35 @@ def opciones():
     mdl = construir(caso(OP_DANG, "W12X40", 90.0, 0, "y", "HSS6X6X3/8"), "doble angulo en cara angosta")
     if mdl is not None and (not any("más ancha" in x or "angosta" in x for x in mdl.notes) or errores(mdl)):
         FAIL.append("doble ángulo en una cara angosta: debe avisar y no dar errores")
+    # soporte redondo: la placa simple se apoya con silla (también esviada); el resto de las conexiones avisa
+    for main, el, base in (("HSS12.750X0.500", 90.0, 0), ("HSS8.625X0.322", 90.0, 0), ("HSS12.750X0.500", 0.0, 90)):
+        for beam in ("W16X31", "HSS6X6X3/8"):
+            for dl in (0.0, 30.0, -30.0):
+                nd = caso(OP_TAB, main, el, base, "n", beam, dl)
+                mdl = construir(nd, f"tab redondo {main} {beam} {dl}")
+                if mdl is not None and errores(mdl):
+                    FAIL.append(f"placa simple sobre tubo redondo {main}/{beam}/{dl:g}°: {errores(mdl)[0]['text'][:110]}")
+    mdl = construir(caso(OP_DANG, "HSS12.750X0.500", 90.0, 0, "n", "W16X31"), "doble angulo redondo")
+    if mdl is not None and not any("redondo" in x for x in mdl.notes):
+        FAIL.append("doble ángulo sobre un principal redondo: debe avisar que no se apoya")
+    # asiento rigidizado: rigidizador soldado a la columna y al ángulo
+    mdl = construir(caso(OP_SEAT, "W14X90", 90.0, 0, "y", "W16X31", 0.0, seat_stiff=True, seat_Lv=8.0), "asiento rigidizado")
+    if mdl is not None:
+        rg = mdl.part("Rigidizador V1")
+        if rg is None or errores(mdl) or not any(w.A == "Rigidizador V1" and w.B == "P" for w in mdl.welds) or not any(w.A == "Rigidizador V1" and w.B == "Asiento V1" for w in mdl.welds):
+            FAIL.append("asiento rigidizado: falta el rigidizador, sus cordones a la columna y al ángulo, o hay errores")
+    # viga esviada al alma de una columna I (se cortan las alas de la viga)
+    for kind in (OP_TAB, OP_DANG):
+        for az in (60.0, 120.0, 75.0):
+            mdl = construir(caso(kind, "W14X90", 90.0, 0, "x", "W16X31", az), f"alma esviada {kind} {az}") if False else None
+    for kind in (OP_TAB, OP_DANG):
+        for az in (60.0, 120.0, 75.0):
+            m = Member(name="V1", shape="W16X31", az=az)
+            nd = Nodo(main_name="P", main_shape="W14X90", main_el=90.0, members=[m], operations=[Operation(kind=kind, member="V1")])
+            centrar(nd, m, "x")
+            mdl = construir(nd, f"alma esviada {kind} {az}")
+            if mdl is not None and errores(mdl):
+                FAIL.append(f"viga esviada al alma ({kind[:12]}, az {az:g}): {errores(mdl)[0]['text'][:110]}")
     # llegada casi paralela a la cara o sin tocar el principal: nunca excepción
     for az in (88.0, 90.0, 0.0):
         nd = caso(OP_TAB, "W14X90", 90.0, 0, "y", "W16X31")

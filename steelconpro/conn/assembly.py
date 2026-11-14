@@ -226,6 +226,7 @@ class _Ctx:
         self.bdir, self.bsx, self.bsy = dirv, sx, sy
         self.mfr = None                 # (eje, sx, sy) del principal
         self.aligned = False            # la placa esta alineada con otro elemento (dir / sx / sy son los de la placa)
+        self.saddle = None              # apoyo redondo: (radio, eje del principal, vector radial de Q): el borde de la placa sigue la curvatura del tubo (silla)
 
     def at(self, s, lat=0.0, v=0.0):
         """Punto a `s` del apoyo Q a lo largo del miembro, `lat` en sx y `v` en sy."""
@@ -238,6 +239,17 @@ class _Ctx:
 
     def face_s(self, lat=0.0, v=0.0) -> float:
         """Distancia, a lo largo de `dir`, desde Q hasta el plano de la cara del apoyo en el punto (lat, v) de la seccion del miembro (0 si llega de frente)."""
+        if self.saddle is not None:                                   # tubo redondo: la placa llega a la superficie cilindrica
+            R, Ax, rq = self.saddle
+            d = self.dir - Ax * float(np.dot(self.dir, Ax))
+            w = lat * (self.sx - Ax * float(np.dot(self.sx, Ax))) + v * (self.sy - Ax * float(np.dot(self.sy, Ax)))
+            a_ = float(np.dot(d, d))
+            if a_ < 1e-9:
+                return 0.0
+            b_ = 2.0 * float(np.dot(d, rq + w))
+            c_ = float(np.dot(rq + w, rq + w)) - R * R
+            disc = b_ * b_ - 4.0 * a_ * c_
+            return float((-b_ + math.sqrt(max(disc, 0.0))) / (2.0 * a_))
         if not self.oblique:
             return 0.0
         cn = float(np.dot(self.dir, self.sn))
@@ -251,7 +263,7 @@ class _Ctx:
 
     def u_face(self, lats, vs) -> float:
         """Menor distancia a la cara del apoyo en un recuadro (lats, vs): hasta ahi se alarga una placa para despues recortarla contra la cara."""
-        return min(self.face_s(a, b) for a in lats for b in vs) if self.oblique else 0.0
+        return min(self.face_s(a, b) for a in lats for b in vs) if (self.oblique or self.saddle is not None) else 0.0
 
     def clip_support(self, prism):
         """Recorta el prisma contra el plano de la cara del apoyo (se conserva el lado de afuera): la pieza queda apoyada sin entrar en el soporte."""
@@ -368,6 +380,14 @@ def fix_weld_normals(welds):
         w.nB = tuple(map(float, unit(b - c * a)))
 
 
+def member_ret(nd, m, op=None) -> float:
+    """Retroceso del extremo de la viga `m` por llegar esviada o inclinada a la cara plana del principal (solo placa simple, doble ángulo y asiento; 0 en los demás casos)."""
+    if op is None or op.kind not in (OP_TAB, OP_DANG, OP_SEAT):
+        return 0.0
+    _, sx, sy = member_frame(m)
+    return skew_retreat(shape_of(m.shape), flat_support_normal(nd, m), member_dir(m), sx, sy)
+
+
 def tab_extra(nd, m, op) -> float:
     """Placa simple «hasta el interior de las alas»: cuánto se saca la viga del principal (del alma al borde de las alas) para que no choque con ellas.
     0 si no aplica (el principal no es un perfil I o la viga no llega por el alma)."""
@@ -478,7 +498,10 @@ def _tab_geometry(ctx, tag):
     else:
         clip = min(clip, H / 2.0 - 0.1, Lp - 0.1)
         yl, yh = ty_p - H / 2, ty_p + H / 2
-        if clip > 1e-6:
+        if ctx.saddle is not None:                                      # borde junto al tubo redondo: sigue su curvatura
+            ys_ = [yl + (yh - yl) * i / 8.0 for i in range(9)]
+            poly = [(Lp, yl), (Lp, yh)] + [(x0(y_), y_) for y_ in reversed(ys_)]
+        elif clip > 1e-6:
             poly = [(x0(yl + clip), yl + clip), (x0(yl) + clip, yl), (Lp, yl), (Lp, yh), (x0(yh) + clip, yh), (x0(yh - clip), yh - clip)]
         else:
             poly = [(x0(yl), yl), (Lp, yl), (Lp, yh), (x0(yh), yh)]            # la placa nace en la cara del soporte (x = 0)
@@ -545,10 +568,13 @@ def _tab_geometry(ctx, tag):
             hw_ = (sep_ if two_plates else (Hf if stepped else H)) / 2.0
             cy_ = ty if two_plates else ty_p
             cl_ = 0.0 if (stepped or two_plates) else clip
-            p0_ = ctx.on_face(lat_face, cy_ - hw_ + cl_)
-            p1_ = ctx.on_face(lat_face, cy_ + hw_ - cl_)
-            ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}", name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
-                                  tuple(map(float, ctx.sx * sg)), tuple(map(float, nBs)), w, 70.0, tag))
+            nseg = 8 if ctx.saddle is not None else 1                  # contra un tubo redondo el cordón sigue la curva: varios tramos rectos
+            vv_ = [cy_ - hw_ + cl_ + (2.0 * hw_ - 2.0 * cl_) * i / nseg for i in range(nseg + 1)]
+            for i_ in range(nseg):
+                p0_ = ctx.on_face(lat_face, vv_[i_])
+                p1_ = ctx.on_face(lat_face, vv_[i_ + 1])
+                ctx.welds.append(Weld(f"{name}-W{'1' if sg > 0 else '2'}" + (f".{i_ + 1}" if nseg > 1 else ""), name, ctx.main_name, tuple(map(float, p0_)), tuple(map(float, p1_)),
+                                      tuple(map(float, ctx.sx * sg)), tuple(map(float, nBs)), w, 70.0, tag))
         if two_plates:                                              # la placa de corte se suelda a la cara interior de cada placa, por sus dos caras
             e2_ = min(max(e, 0.5), Lp - 0.5)
             for vs, nfl in ((ty + sep_ / 2.0, -1.0), (ty - sep_ / 2.0, 1.0)):
@@ -682,11 +708,14 @@ def _seat_geometry(ctx, tag):
             if room_v < Lv - 1e-6:
                 ctx.notes.append(f"{m.name}: la pierna vertical del asiento se acorta de {Lv:g} a {max(room_v, 1.0):.2f} in: la cara del principal no es más alta.")
                 Lv = max(room_v, 1.0)
-    if not ctx.oblique:
+    stiff = bool(getattr(ctx.op, "seat_stiff", False))
+    ts = (float(ctx.op.seat_stiff_t) if getattr(ctx.op, "seat_stiff_t", 0.0) > 0 else t) if stiff else 0.0
+    two = ctx.oblique or stiff                                     # dos prismas: pierna horizontal siguiendo a la viga y pierna vertical plana sobre la cara
+    if not two:
         poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh + ofs, yb - t), (Lh + ofs, yb), (-EMBED, yb)]
         prs = [_plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0)]        # U×V = dir×sy = -sx (simetrico)
     else:
-        sn = np.asarray(ctx.sn, float)
+        sn = np.asarray(ctx.sn if ctx.oblique else ctx.dir, float)
         ub = ctx.u_face((-W / 2.0, W / 2.0), (yb - t, yb))
         horiz = ctx.clip_support(_plate_prism([(ub, yb - t), (Lh + ofs, yb - t), (Lh + ofs, yb), (ub, yb)], ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0))
         perp = ctx.sx - float(np.dot(ctx.sx, sn)) * sn
@@ -697,8 +726,12 @@ def _seat_geometry(ctx, tag):
         Vf = np.cross(sn, ef)
         up = 1.0 if float(np.dot(Vf, ctx.sy)) >= 0 else -1.0                           # sentido «arriba» del eje V de la pierna
         b0, b1 = (-Lv, 0.0) if up > 0 else (0.0, Lv)
-        vert = _plate_prism([(-Wf / 2.0, b0), (Wf / 2.0, b0), (Wf / 2.0, b1), (-Wf / 2.0, b1)], C, ef, Vf, 0.0, t)
-        prs = [horiz, vert]
+        if stiff:                                                                     # la pierna vertical lleva una ranura por donde pasa el rigidizador
+            hs = ts / cphi / 2.0
+            verts = [_plate_prism([(a_, b0), (c_, b0), (c_, b1), (a_, b1)], C, ef, Vf, 0.0, t) for (a_, c_) in ((-Wf / 2.0, -hs), (hs, Wf / 2.0))]
+        else:
+            verts = [_plate_prism([(-Wf / 2.0, b0), (Wf / 2.0, b0), (Wf / 2.0, b1), (-Wf / 2.0, b1)], C, ef, Vf, 0.0, t)]
+        prs = [horiz] + verts
         room = min(_face_room(ctx, C, ef), _face_room(ctx, C, -ef)) if ctx.main_name else 1e9
         if room < Wf / 2.0 - 1e-6:
             ctx.notes.append(f"{m.name}: el asiento ({Wf:.1f} in sobre la cara) es más ancho que la cara del principal.")
@@ -706,7 +739,7 @@ def _seat_geometry(ctx, tag):
     for k, sg in enumerate((1, -1)):
         ctx.bolts.append(_bolt(f"{tag}-A{k + 1}", ctx.at(Lh * 0.62 + ofs, sg * gauge / 2.0, yb - t), ctx.sy, ctx.db, 0.0, t + (shp.tf if shp.tf > 0 else 0.5),
                                [(f"Asiento {tag}", 0.0, t), (ctx.partname, t, t + (shp.tf if shp.tf > 0 else 0.5))], ctx.op.bolt_grade))
-        if not ctx.oblique:
+        if not two:
             p, ax = ctx.at(t, sg * gauge / 2.0, yb - Lv * 0.6), -ctx.dir
         else:
             p, ax = C + ef * (sg * gauge / 2.0) + Vf * (-Lv * 0.6 * up) + sn * t, -sn
@@ -715,6 +748,23 @@ def _seat_geometry(ctx, tag):
             continue
         ctx.bolts.append(_bolt(f"{tag}-S{k + 1}", p, ax, ctx.db, 0.0, t + st,
                                [(f"Asiento {tag}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
+    if stiff:                                                      # rigidizador: placa vertical centrada bajo el ala, de la cara del apoyo al borde del ángulo
+        Le = Lh + ofs
+        vt, vb = yb - t, yb - Lv
+        cut = min(1.0, Le * 0.3)
+        poly = [(ctx.u_face((-ts / 2.0, ts / 2.0), (vt,)), vt), (Le, vt), (Le, vt - cut), (Le * 0.45, vb), (ctx.u_face((-ts / 2.0, ts / 2.0), (vb,)), vb)]
+        nmS = f"Rigidizador {tag}"
+        pS = ctx.clip_support(_plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -ts / 2.0, ts / 2.0))
+        ctx.parts.append(Part(nmS, "stiff", f"Rigidizador del asiento PL {ts:g}", Fy, Fu, [pS], t=ts))
+        w_ = float(ctx.op.weld_size)
+        nBs = np.asarray(ctx.sn if ctx.oblique else ctx.dir, float)
+        for sg in (1.0, -1.0):
+            if ctx.main_name:                                      # a la cara del apoyo, por los dos lados
+                ctx.welds.append(Weld(f"{nmS}-W{'1' if sg > 0 else '2'}", nmS, ctx.main_name, tuple(map(float, ctx.on_face(sg * ts / 2.0, vt))), tuple(map(float, ctx.on_face(sg * ts / 2.0, vb))),
+                                      tuple(map(float, ctx.sx * sg)), tuple(map(float, nBs)), w_, 70.0, tag))
+            u0 = ctx.face_s(sg * ts / 2.0, vt)                     # al ángulo, bajo su pierna horizontal
+            ctx.welds.append(Weld(f"{nmS}-A{'1' if sg > 0 else '2'}", nmS, f"Asiento {tag}", tuple(map(float, ctx.at(u0, sg * ts / 2.0, vt))), tuple(map(float, ctx.at(Le, sg * ts / 2.0, vt))),
+                                  tuple(map(float, ctx.sx * sg)), tuple(map(float, -ctx.sy)), w_, 70.0, tag))
     return 0.5 + ret
 
 
@@ -1913,11 +1963,20 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 align = (unit(sn_m), k)
                 mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
                                  f"la viga se corta en ángulo contra la cara y sus alas se sueldan a ella.")
+            if cop is not None and mshape.is_round and s_ex is not None and shp.kind != 'GEN':
+                rq_ = Q - A * float(np.dot(Q, A))
+                if kind == OP_TAB and abs(float(np.dot(rq_, rq_)) - (mshape.d / 2.0) ** 2) < 0.05 * (mshape.d / 2.0) ** 2:
+                    c.saddle = (mshape.d / 2.0, np.asarray(A, float), np.asarray(rq_, float))        # placa simple sobre un tubo redondo: borde con silla
+                    c.ret = _clear_of_main(shp, Q + dirv * gap_eff(m), dirv, sx, sy, ext, msx, msy)               # la viga no debe entrar en el tubo
+                elif kind in (OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD):
+                    mdl.notes.append(f"{m.name}: «{kind}» no se puede apoyar en un principal redondo (cara curva): se dibuja contra el plano tangente y queda separado del tubo; use placa simple (con silla) o una placa propia.")
             if cop is not None and kind in (OP_TAB, OP_DANG, OP_SEAT) and c.oblique and not c.aligned:
                 c.ret = skew_retreat(shp, c.sn, dirv, sx, sy)
                 if c.ret > 0.05:
                     mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
                                      f"la placa se apoya en la cara y el extremo de la viga se retrasa {c.ret:.2f} in para librarla.")
+            if cop is not None and kind in (OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD) and c.oblique and mshape.kind == W_SHAPE and attach_info(nd, m).get("face") == "alma":
+                mdl.notes.append(f"{m.name}: llega esviado al alma de «{nd.main_name}», dentro de sus alas: la viga choca con ellas y «{kind}» no se corta; use placa simple o doble ángulo (se cortan las alas de la viga) o «hasta el interior de las alas».")
             ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
             if kind == OP_TAB:
                 c.extra = tab_extra(nd, m, cop)

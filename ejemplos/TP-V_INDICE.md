@@ -1,7 +1,7 @@
 # Ejemplos TP-V: conexiones típicas viga–columna y viga–viga
 
 Se generan con `python3 tools/ejemplos_vigas.py` (con `--revisar` también arma cada modelo, corre el revisor de geometría y `api.verify`).
-Estado del revisor de geometría: **0 errores y 0 avisos en los 30 ejemplos**; `api.verify` corre sin excepciones. Prueba: `python3 selftest_geo_vigas.py`.
+Estado del revisor de geometría: **0 errores y 0 avisos en los 38 ejemplos**; `api.verify` corre sin excepciones. Prueba: `python3 selftest_geo_vigas.py`.
 
 | Código | Qué es | Operaciones | Notas |
 |---|---|---|---|
@@ -35,12 +35,19 @@ Estado del revisor de geometría: **0 errores y 0 avisos en los 30 ejemplos**; `
 | TP-V28 | Viga de cubierta, pendiente 18° | placa extrema a ras | |
 | TP-V29 | Viga de cubierta, pendiente 10° | doble ángulo | |
 | TP-V30 | Secundaria esviada 30° a viga maestra | placa simple | cope automático |
+| TP-V31 | Viga esviada 30° al alma de columna W | `Placa simple` | se cortan las alas de la viga (cope automático) |
+| TP-V32 | Viga esviada 30° (otro lado) al alma de columna W | `Doble ángulo` | cope automático |
+| TP-V33 | Viga inclinada 12° al alma de columna W | `Placa simple` | |
+| TP-V34 | Asiento rigidizado en ala de columna W | `Asiento` (`seat_stiff`, `seat_stiff_t`) | rigidizador por una ranura de la pierna vertical, soldado a la columna y al ángulo |
+| TP-V35 | Asiento rigidizado con viga esviada 30° | `Asiento` (`seat_stiff`) | |
+| TP-V36 | Asiento rigidizado en columna HSS | `Asiento` (`seat_stiff`) | |
+| TP-V37 | Placa simple a columna de tubo redondo | `Placa simple` | borde de la placa con silla; cordón en varios tramos |
+| TP-V38 | Placa simple de viga HSS a tubo redondo horizontal, esviaje 30° | `Placa simple` | la viga se retrasa para no entrar al tubo |
 
 ## Limitaciones conocidas (no soportado o avisado)
-- Viga esviada o inclinada que llega al **alma de una columna I** (dentro de las alas): la viga choca con las alas de la columna; solo se resuelve la llegada
-  perpendicular (con cope automático o «hasta el interior de las alas»). No hay ejemplo.
-- Apoyo redondo (HSS circular) o sección libre: las conexiones se dibujan perpendiculares al miembro (sin plano de apoyo conocido).
-- Viga más profunda que la cara del soporte (p. ej. W16 contra una HSS de 12 in de alto): el asiento se acorta y se avisa; las alas soldadas / pernos que quedan
-  fuera de la cara se omiten con una nota.
-- Asiento rigidizado: no existe la operación.
+- Placa extrema, asiento y alas soldadas con la viga esviada o inclinada contra el ALMA de una columna I (dentro de las alas): la viga choca con las alas; se avisa
+  y se recomienda placa simple o doble ángulo (se cortan las alas de la viga). Un esviaje de 45° desde el centro del alma ya sale por el borde de las alas.
+- Apoyo redondo (HSS circular): solo la placa simple (con silla). Doble ángulo, asiento, placa extrema y alas soldadas se avisan (cara curva).
+- Sección libre (Section Designer) como principal: sin plano de apoyo conocido; se dibuja perpendicular al miembro.
+- Viga más profunda que la cara del soporte: el asiento se acorta y se avisa; las alas soldadas / pernos fuera de la cara se omiten con nota.
 - «Dos placas arriba y abajo» solo se arma con el principal vertical (alas a los lados de la viga); con viga maestra horizontal se avisa y se dibuja una placa.

@@ -204,6 +204,8 @@ class Operation:
     seat_Lh: float = 5.0         # ángulo de asiento: pierna horizontal (bajo el ala), in
     seat_Lv: float = 6.0         # ángulo de asiento: pierna vertical (contra el soporte), in
     seat_W: float = 0.0          # ángulo de asiento: ancho, in (0 = automático)
+    seat_stiff: bool = False     # ángulo de asiento rigidizado: placa vertical bajo el ala de la viga, pasa por una ranura de la pierna vertical y se suelda a la columna y al ángulo
+    seat_stiff_t: float = 0.0    # ángulo de asiento rigidizado: espesor de la placa rigidizadora, in (0 = el del ángulo)
     wf_top: str = WELD_TYPES[1]  # conexiones de momento: tipo de soldadura del ala superior de la viga a la placa / al soporte
     wf_bot: str = WELD_TYPES[1]  # idem, ala inferior
     wf_web: str = WELD_TYPES[0]  # idem, alma

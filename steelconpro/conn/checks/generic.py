@@ -140,7 +140,7 @@ def _gusset(nd, op, m, vals, rec):
 
 def _tab_weld(nd, op, m, vals, rec):
     """Placa simple soldada al alma de la viga conectada: filetes en el borde superior, el inferior y el del extremo de la placa (traslape sobre el alma)."""
-    from ..assembly import tab_dims, tab_extra, gap_eff
+    from ..assembly import tab_dims, tab_extra, gap_eff, member_ret
     from ..common import bolt_db
     N, Vy, Vz, T, My, Mz = vals
     ck = []
@@ -148,8 +148,9 @@ def _tab_weld(nd, op, m, vals, rec):
     if beam is None or beam.is_hollow:
         not_evaluated(ck, "tw", "Soldadura de la placa a la viga", "AISC 360-22 J2.4", "Solo para vigas I.")
         return ck
-    n, s_, cols, g_, H, Wd, a = tab_dims(op, m, beam, bolt_db(op.bolt_size), tab_extra(nd, m, op))
-    ov = max(Wd - gap_eff(m) - tab_extra(nd, m, op), 0.1)
+    ret_ = member_ret(nd, m, op)
+    n, s_, cols, g_, H, Wd, a = tab_dims(op, m, beam, bolt_db(op.bolt_size), tab_extra(nd, m, op), ret_)
+    ov = max(Wd - gap_eff(m) - tab_extra(nd, m, op) - ret_, 0.1)
     from ..specs import WELD_TYPES, WELD_SIDES
     one = getattr(op, "weld_side", WELD_SIDES[0]) != WELD_SIDES[0]                 # filete de un solo lado: la mitad de cordón en la cara del soporte
     L = 2.0 * ov + H

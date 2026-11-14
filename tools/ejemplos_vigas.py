@@ -222,8 +222,48 @@ def v30():
                 [("S1", "W16X31", 120, 0, "x", dict(off=4.0))], [("S1", OP_TAB, {})], [("S1", dict(Vz=V))], nombre="Viga maestra")
 
 
+def v31():
+    return nudo("TP-V31", "viga esviada 30° al alma de una columna W con placa simple (se cortan las alas de la viga)", "W14X90", 90, [("V1", "W16X31", 60, 0, "x", {})],
+                [("V1", OP_TAB, {})], [("V1", dict(Vz=V))])
+
+
+def v32():
+    return nudo("TP-V32", "viga esviada 30° al alma de una columna W con doble ángulo", "W14X90", 90, [("V1", "W16X31", 120, 0, "x", {})],
+                [("V1", OP_DANG, {})], [("V1", dict(Vz=V))])
+
+
+def v33():
+    return nudo("TP-V33", "viga inclinada 12° al alma de una columna W con placa simple", "W14X90", 90, [("V1", "W16X31", 90, 12.0, "x", {})],
+                [("V1", OP_TAB, {})], [("V1", dict(Vz=V))])
+
+
+def v34():
+    return nudo("TP-V34", "asiento rigidizado bajo una viga W contra el ala de una columna W", "W14X90", 90, [("V1", "W16X31", 0, 0, "y", {})],
+                [("V1", OP_SEAT, dict(plate_t=0.5, seat_Lv=8.0, seat_Lh=5.0, seat_stiff=True, seat_stiff_t=0.5))], [("V1", dict(Vz=-30.0))])
+
+
+def v35():
+    return nudo("TP-V35", "asiento rigidizado con la viga esviada 30°", "W14X90", 90, [("V1", "W16X31", 30, 0, "y", {})],
+                [("V1", OP_SEAT, dict(plate_t=0.5, seat_Lv=8.0, seat_Lh=5.0, seat_stiff=True))], [("V1", dict(Vz=-30.0))])
+
+
+def v36():
+    return nudo("TP-V36", "asiento rigidizado contra la cara de una columna HSS", "HSS10X10X1/2", 90, [("V1", "W16X31", 0, 0, "y", {})],
+                [("V1", OP_SEAT, dict(plate_t=0.5, seat_Lv=8.0, seat_Lh=5.0, seat_stiff=True))], [("V1", dict(Vz=-30.0))])
+
+
+def v37():
+    return nudo("TP-V37", "placa simple de una viga W a una columna de tubo redondo (borde de la placa con silla)", "HSS12.750X0.500", 90, [("V1", "W16X31", 0, 0, None, {})],
+                [("V1", OP_TAB, {})], [("V1", dict(Vz=V))], steel_main="ASTM A500 Gr.C (HSS red.)")
+
+
+def v38():
+    return nudo("TP-V38", "placa simple de una viga HSS a un tubo redondo horizontal con esviaje de 30°", "HSS12.750X0.500", 0, [("S1", "HSS6X6X3/8", 120, 0, None, {})],
+                [("S1", OP_TAB, {})], [("S1", dict(Vz=V))], steel_main="ASTM A500 Gr.C (HSS red.)", nombre="Cordon")
+
+
 EJEMPLOS = [(f"TP-V{k:02d}", fn) for k, fn in enumerate([v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21,
-                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30], 1)]
+                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38], 1)]
 
 
 def nombre_archivo(p) -> str:
