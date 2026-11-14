@@ -155,7 +155,7 @@ def run():
         add2("ANGLE", {})
         add2("HOLE", {"parent": "P1", "rows": 2, "cols": 2})
         add2("HOLE", {"parent": "P2", "hole_shape": SP.HOLE_SHAPES[1]})
-        add2("PLATE", {"parent": mm["name"], "face": SP.FACES_END[1], "pl_L": 8, "pl_W": 8, "shape": SP.PLATE_SHAPES[3], "opening": SP.OPENINGS[3], "op_member": mm["name"]})
+        add2("PLATE", {"parent": mm["name"], "face": SP.FACES_END[1], "pl_L": 8, "pl_W": 8, "pl_s": 3.0, "shape": SP.PLATE_SHAPES[3], "opening": SP.OPENINGS[3], "op_member": mm["name"]})
         pn = c2["node"]["operations"][-1]["name"]
         add2("FILLET", {"weld_mode": SP.WELD_MODES[1], "targets": [mm["name"]], "parent": pn, "face": "Cara −"})
         add2("TRIM", {"targets": [mm["name"]], "parent": c2["node"]["main_name"], "face": SP.FACES_I[0], "trim_gap": 0.5})

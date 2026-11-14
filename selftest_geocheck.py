@@ -111,11 +111,11 @@ OPS.add_operation(p5.node, SP.OP_TRIM, targets=["P1"], parent=p5.node.main_name,
 m5 = AS.build_model(p5)
 poly5 = m5.part("P1").prisms[0].poly
 ys5 = [q[1] for q in poly5]
-if max(ys5) > 1.25 or min(ys5) > -2.9 or not any(w.name.startswith("P1-W") and abs(w.p0[1] - 1.2) < 0.05 and abs(w.p1[1] - 1.2) < 0.05 for w in m5.welds):
+if max(ys5) > -0.7 or min(ys5) > -2.9 or not any(w.name.startswith("P1-W") and abs(w.p0[1] + 0.8) < 0.1 and abs(w.p1[1] + 0.8) < 0.1 for w in m5.welds):   # la holgura se mide hacia el lado que se conserva
     fail(f"corte de placa: contorno {poly5}")
 p5.node.operations[-1].trim_flip = True
 poly5b = AS.build_model(p5).part("P1").prisms[0].poly
-if min(q[1] for q in poly5b) < 1.15:
+if min(q[1] for q in poly5b) < 0.7:
     fail("corte de placa: «conservar el otro lado» no invierte el lado")
 print(f"{'corte de placas':34} la placa se recorta contra el plano de otra cara (contorno, cordones y lado a conservar): OK")
 
