@@ -352,6 +352,36 @@ def g17_tubo_redondo_con_nervios() -> Project:
     return project("TP-G17", "tubo redondo con nervios soldados sobre la generatriz y placa de cabeza circular", nd)
 
 
+def g18_posicion_referenciada() -> Project:
+    """Posición referenciada: la viga W16X31 se recorta contra el ala de la columna con su soldadura de contorno (en el propio recorte); las placas de continuidad se colocan a la altura de las alas de la viga (`pos_ref` = ala de V1) y un rigidizador del alma de la viga se coloca a 9 in del ala de la columna."""
+    nd = column(end=0)
+    nd.members = [Member(name="V1", shape="W16X31", steel=A992, az=0.0, el=0.0, pos=0.0, L=60.0)]
+    gen(nd, OP_TRIM, targets=["V1"], parent=nd.main_name, face=F_TOP, trim_gap=0.0, trim_weld=True, weld_size=0.25)
+    for k, (ref_face, off) in enumerate(((F_TOP, -0.22), (F_BOT, 0.22))):         # el plano del ala de la viga fija la altura (pl_s); el centro de la placa queda a media ala
+        for j, face in enumerate((F_WEBP, F_WEBM)):
+            nm = f"CN{k}{j + 1}"
+            gen(nd, OP_PLATE, name=nm, parent=nd.main_name, face=face, role="Rigidizador", orient=PERP_T, shape=CLIP, pl_L=12.58, pl_W=6.6, pl_clip=0.75, plate_t=0.44,
+                plate_steel=A36, weld_size=0.25, pos_ref="V1", pos_ref_face=ref_face, pos_ref_off=off)
+            gen(nd, OP_FILLET, weld_main=nm, weld_to=[[nd.main_name, F_TOPI], [nd.main_name, F_BOTI]], weld_size=0.25)
+    gen(nd, OP_PLATE, name="GP", parent="V1", face=F_WEBP, role="Rigidizador", orient=PERP_T, shape=CLIP, pl_L=15.02, pl_W=2.5, pl_clip=0.5, plate_t=0.375, plate_steel=A36,
+        weld_size=0.1875, pos_ref=nd.main_name, pos_ref_face=F_TOP, pos_ref_off=9.0)     # rigidizador de la viga a 9 in del ala de la columna
+    gen(nd, OP_FILLET, weld_main="GP", weld_to=[["V1", F_TOPI], ["V1", F_BOTI]], weld_size=0.1875)
+    nd.loads = [Load("Caso 1", "V1", Vz=-25.0), Load("Caso 1", nd.main_name, N=-60.0, side=1)]
+    return project("TP-G18", "placas de continuidad a la altura de las alas de la viga (posición referenciada) y viga con soldadura de recorte", nd)
+
+
+def g19_recortes_con_soldadura() -> Project:
+    """Recortes con soldadura solo donde hay contacto: repisa con muesca contra el volumen de una viga (holgura 0) soldada a ella, y viga recortada contra el ala de la columna con soldadura de contorno."""
+    nd = column(end=0)
+    nd.members = [Member(name="V1", shape="W12X26", steel=A992, az=0.0, el=0.0, pos=0.0, L=48.0)]
+    z = nd.main_len_neg
+    gen(nd, OP_PLATE, name="PN", parent=nd.main_name, face=F_TOP, shape=RECT, pl_L=20.0, pl_W=12.0, pl_s=z + 7.0, plate_t=0.5, plate_steel=A36, weld_size=0.25)
+    gen(nd, OP_TRIM, targets=["PN"], parent="V1", trim_mode=M_VOL, trim_gap=0.0, trim_weld=True, weld_size=0.1875)
+    gen(nd, OP_TRIM, targets=["V1"], parent=nd.main_name, face=F_TOP, trim_gap=0.0, trim_weld=True, weld_size=0.1875)
+    nd.loads = [Load("Caso 1", "V1", Vz=-10.0)]
+    return project("TP-G19", "recortes de placa y de viga con soldadura solo en los tramos de contacto", nd)
+
+
 EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atornillado),
             ("TP-G02_empalme_viga_atornillado.scp", g02_empalme_viga_atornillado),
             ("TP-G03_empalme_columna_hss.scp", g03_empalme_columna_hss),
@@ -368,7 +398,9 @@ EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atorn
             ("TP-G14_placas_recortadas.scp", g14_placas_recortadas),
             ("TP-G15_modos_soldadura.scp", g15_modos_soldadura),
             ("TP-G16_angulo_asiento.scp", g16_angulo_asiento),
-            ("TP-G17_tubo_redondo_con_nervios.scp", g17_tubo_redondo_con_nervios)]
+            ("TP-G17_tubo_redondo_con_nervios.scp", g17_tubo_redondo_con_nervios),
+            ("TP-G18_posicion_referenciada.scp", g18_posicion_referenciada),
+            ("TP-G19_recortes_con_soldadura.scp", g19_recortes_con_soldadura)]
 
 
 def main(revisa=False):

@@ -2176,7 +2176,7 @@ def _apply_trims(mdl, nd, reg, hw=True):
             continue
         tgt = o.targets[0] if o.targets else ""
         mem = reg.get(tgt)
-        if mem is not None and mem.get("type") == "plate":            # un recorte de placa ya se aplicó al armar la placa (plates.apply_trims)
+        if mem is not None and mem.get("type") in ("plate", "angulo"):            # un recorte de placa o ángulo ya se aplicó al armar la placa (plates.apply_trims)
             continue
         part = next((p for p in mdl.parts if p.name == (mem or {}).get("part")), None)
         if mem is None or part is None or mem.get("type") != "miembro" or "ends" not in mem:
@@ -2195,8 +2195,16 @@ def _apply_trims(mdl, nd, reg, hw=True):
             res = [PL_.trim_prism_volume(pr, pieces, float(o.trim_gap), es) for pr in part.prisms]
             if not any(r[0] for r in res):
                 mdl.notes.append(f"Operación {i + 1}: el volumen de «{o.parent}» " + ("no toca al miembro." if res and res[0][1] == "no toca" else "se llevaría todo el miembro; no se recorta."))
-            if o.trim_weld:
-                mdl.notes.append(f"Operación {i + 1}: el recorte contra un volumen no lleva soldadura de contorno; use una soldadura entre elementos.")
+            if o.trim_weld and any(r[0] for r in res) and mem.get("frame_full") is not None:
+                from types import SimpleNamespace
+                pr0 = part.prisms[0]
+                cap_pt = np.asarray(pr0.to_global(0.0, 0.0, pr0.w1 if es > 0 else pr0.w0) if pr0.circle is None else pr0.to_global(0.0, 0.0, pr0.w1 if es > 0 else pr0.w0), float)
+                lines = OPS.member_contour_lines(mem["frame_full"], SimpleNamespace(N=tuple(d_), O=tuple(cap_pt)), None)
+                lc, ffo = [], None
+                for _nm, ffc in PL_.contact_faces(oth, d_, cap_pt):
+                    lc += PL_.clip_to_region(lines, ffc, PL_.face_region(oth, ffc))
+                    ffo = ffo or ffc
+                OPS.add_trim_weld(mdl, i, o, tgt, mem, o.parent, oth, lc, hw, ffo)
             continue
         if o.trim_mode == TRIM_MODES[1]:
             oth = reg.get(o.parent)
@@ -2249,17 +2257,15 @@ def _apply_trims(mdl, nd, reg, hw=True):
             other = reg.get(o.parent) or {}
             ffp = SimpleNamespace(N=tuple(-keep_n), O=tuple(pt))
             lines = OPS.member_contour_lines(mem["frame_full"], ffp, None)
-            tot = 0.0
-            for k, ln in enumerate(lines):
-                tot += float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0])))
-                if hw:
-                    mdl.welds.append(OPS._mkweld(Weld, f"{tgt}-R{i + 1}.{k + 1}", mem["part"], other.get("part", mem["part"]), ln, o.weld_size, f"R{i + 1}", o.weld_type))
-            if not lines:
-                mdl.notes.append(f"Operación {i + 1}: no se pudo generar la soldadura del recorte.")
-            else:
-                ffo = (other.get("faces") or {}).get(o.face) if o.trim_mode != TRIM_MODES[1] else None
-                mdl.trim_welds = getattr(mdl, "trim_welds", {})
-                mdl.trim_welds[i] = {"L": tot, "t_main": OPS._t_element(mem), "t_to": OPS._t_element(other, ffo) if other else OPS._t_element(mem), "to": o.parent}
+            from . import plates as PL_
+            ffo = None
+            if o.trim_mode == TRIM_MODES[1]:                                 # inglete: solo donde la sección del otro miembro toca el plano
+                lines = PL_.miter_clip(lines, other, pt, -keep_n)
+            else:                                                           # contra una cara: solo donde la cara tiene material
+                ffo = (other.get("faces") or {}).get(o.face)
+                if ffo is not None:
+                    lines = PL_.clip_to_region(lines, ffo, PL_.face_region(other, ffo))
+            OPS.add_trim_weld(mdl, i, o, tgt, mem, o.parent, other, lines, hw, ffo)
 
 
 def _fem_setup(mdl, nd, fem, ends, lneg, lpos, mshape):

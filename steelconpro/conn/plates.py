@@ -609,6 +609,7 @@ def apply_trims(geo, trims, reg, mdl=None, own=None):
         geo["poly"], geo["groups"] = poly, groups
         geo["prism"].poly = [(float(a), float(b)) for a, b in poly]
         geo.setdefault("cuts", {})[cut_id] = {"N": N, "P": P}
+        geo.setdefault("trim_gid", {})[id(o)] = cut_id
     return notes
 
 
@@ -798,6 +799,7 @@ def _trim_volume(geo, o, reg, mdl, own):
     if len(cont) == len(poly0) and all(math.dist(a, b) < 1e-9 for a, b in zip(cont, poly0)) and not holes:
         return [f"Recorte de «{tn}»: el volumen de «{o.parent}»{' con su holgura' if gap else ''} no toca la placa."]
     groups = _regroup(cont, geo["poly"], geo["groups"])
+    geo.setdefault("trim_gid", {})[id(o)] = len(geo["groups"])              # el borde nuevo (muesca) recibe el número que sigue a los anteriores
     geo["poly"], geo["groups"] = list(cont), groups
     geo["prism"].poly = [(float(a), float(b)) for a, b in cont]
     for h in holes:
@@ -851,7 +853,7 @@ def trim_angle(pr, trims, reg, mdl, own):
     `trim_flip`) o contra el volumen de otro elemento (se le quita el tramo del eje que queda dentro de la caja del otro más la holgura).
     -> (avisos, semiespacios [(punto, normal)] que se conservan con n·(x − punto) ≤ 0, nuevo w0, nuevo w1)"""
     from .specs import TRIM_MODES
-    notes, halfs = [], []
+    notes, halfs, contacts = [], [], {}
     U, V = np.asarray(pr.U, float), np.asarray(pr.V, float)
     W = np.cross(U, V)
     o_ = np.asarray(pr.o, float)
@@ -912,6 +914,14 @@ def trim_angle(pr, trims, reg, mdl, own):
             step = float(ws[1] - ws[0]) if len(ws) > 1 else 0.0
             nw0 = w0 if best[0] == 0 else float(ws[best[0]]) - 0.5 * step
             nw1 = w1 if best[1] == len(ws) - 1 else float(ws[best[1]]) + 0.5 * step
+            cl = []
+            for end_w, tow in ((nw0, W), (nw1, -W)):                         # extremos que el recorte dejó nuevos: contorno de la sección contra las caras del otro elemento
+                if abs(end_w - (w0 if end_w == nw0 else w1)) > 1e-6:
+                    capl = cap_lines(pr, end_w, tow)
+                    pt_ = o_ + W * end_w
+                    for _nm, ffc in contact_faces(par, W, pt_):
+                        cl += _clip_lines(capl, ffc, face_region(par, ffc), None)
+            contacts[id(o)] = cl
             pr.w0, pr.w1 = nw0, nw1
             continue
         if par is None or o.face not in par["faces"]:
@@ -948,9 +958,10 @@ def trim_angle(pr, trims, reg, mdl, own):
                 lo_, hi_ = min(lo_, min(ends)), max(hi_, max(ends))
         pr.cut_planes = list(pr.cut_planes) + [(tuple(map(float, P)), tuple(map(float, n)))]
         halfs.append((P, n))
+        contacts[id(o)] = _clip_lines(section_cut_lines(pr, P, n), ff, face_region(par, ff), None)
         if lo_ < hi_:
             pr.w0, pr.w1 = max(w0, lo_), min(w1, hi_)
-    return notes, halfs, float(pr.w0), float(pr.w1)
+    return notes, halfs, float(pr.w0), float(pr.w1), contacts
 
 
 def trim_prism_volume(pr, pieces, gap, end_sign):
@@ -1015,3 +1026,90 @@ def prism_plane_lines(pr, ff, region=None, tol=0.05):
         nA = v / max(float(np.linalg.norm(v)), 1e-12)
         out.append((p0, p1, nA, nB, k))
     return _clip_lines(out, ff, region, None)
+
+
+def contact_faces(entry, plane_n, plane_p, tol=0.1, par_tol=0.99):
+    """Caras del elemento `entry` paralelas a un plano (normal `plane_n`) y a menos de `tol` de él: [(nombre, FaceFrame)] (en el recorte contra un volumen)."""
+    out = []
+    n = np.asarray(plane_n, float)
+    for nm, ff in (entry.get("faces") or {}).items():
+        N = np.asarray(ff.N, float)
+        if abs(float(N @ n)) >= par_tol and abs(float(N @ (np.asarray(plane_p, float) - np.asarray(ff.O, float)))) <= tol:
+            out.append((nm, ff))
+    return out
+
+
+def section_cut_lines(pr, plane_pt, plane_n):
+    """Contorno de la sección de un prisma con un plano: [(p0, p1, nA, nB, k)] (un tramo por arista del polígono de la sección), con nA = normal exterior del
+    contorno en el plano de la sección y nB = −`plane_n` (hacia el lado que se conserva si `plane_n` mira al lado que se quita)."""
+    U, V = np.asarray(pr.U, float), np.asarray(pr.V, float)
+    W = np.cross(U, V)
+    o_ = np.asarray(pr.o, float)
+    n = np.asarray(plane_n, float)
+    pt = np.asarray(plane_pt, float)
+    nW = float(n @ W)
+    if abs(nW) < 1e-9:
+        return []
+    poly = [tuple(q) for q in pr.poly]
+    pts = []
+    for (u, v) in poly:
+        d0 = float(n @ (o_ + u * U + v * V - pt))
+        w = -d0 / nW
+        pts.append(o_ + u * U + v * V + w * W if pr.w0 - 1e-6 <= w <= pr.w1 + 1e-6 else None)
+    sgn = 1.0 if G.area(poly) >= 0 else -1.0
+    out = []
+    m = len(poly)
+    for k in range(m):
+        a, b = pts[k], pts[(k + 1) % m]
+        if a is None or b is None or float(np.linalg.norm(b - a)) < 1e-6:
+            continue
+        (au, av), (bu, bv) = poly[k], poly[(k + 1) % m]
+        nA = sgn * (U * (bv - av) - V * (bu - au))
+        nA = nA / max(float(np.linalg.norm(nA)), 1e-12)
+        out.append((a, b, nA, -n, k))
+    return out
+
+
+def cap_lines(pr, w, toward):
+    """Contorno del extremo de un prisma en w (a lo largo de W): aristas del polígono con nA = normal exterior y nB = `toward` (normal del plano hacia el cuerpo)."""
+    U, V = np.asarray(pr.U, float), np.asarray(pr.V, float)
+    if pr.circle is not None:
+        ro = pr.circle[0]
+        poly = G.circle_poly(0.0, 0.0, ro, 24)
+    else:
+        poly = [tuple(q) for q in pr.poly]
+    sgn = 1.0 if G.area(poly) >= 0 else -1.0
+    m = len(poly)
+    out = []
+    for k in range(m):
+        (au, av), (bu, bv) = poly[k], poly[(k + 1) % m]
+        a, b = pr.to_global(au, av, w), pr.to_global(bu, bv, w)
+        nA = sgn * (U * (bv - av) - V * (bu - au))
+        nA = nA / max(float(np.linalg.norm(nA)), 1e-12)
+        out.append((np.asarray(a, float), np.asarray(b, float), nA, np.asarray(toward, float), k))
+    return out
+
+
+def miter_clip(lines, other, pt, n):
+    """Recorta los cordones de un inglete al contorno de la sección del otro miembro proyectada sobre el plano del inglete (solo ahí se tocan los dos)."""
+    from types import SimpleNamespace
+    fr = other.get("frame_full") if other else None
+    if fr is None:
+        return lines
+    n = np.asarray(n, float) / max(float(np.linalg.norm(n)), 1e-12)
+    ref = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    A = np.cross(ref, n)
+    A = A / float(np.linalg.norm(A))
+    ff = SimpleNamespace(O=np.asarray(pt, float), N=n, A=A, U=np.cross(n, A), L=1.0, uh=1.0)
+    start, end, d, sx, sy, shp = (np.asarray(x, float) if k < 5 else x for k, x in enumerate(fr))
+    from .ops import _shape_outline
+    poly, _g = _shape_outline(shp)
+    den = float(d @ n)
+    if abs(den) < 1e-6:
+        return lines
+    reg = []
+    for a, b in poly:
+        X = start + sx * a + sy * b
+        X = X + d * (float((ff.O - X) @ n) / den)
+        reg.append((float((X - ff.O) @ ff.A), float((X - ff.O) @ ff.U)))
+    return _clip_lines(lines, ff, reg, None, tol=0.08)

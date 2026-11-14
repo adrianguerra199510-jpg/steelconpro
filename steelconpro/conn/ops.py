@@ -344,6 +344,43 @@ def resolve_position(o, parent, reg):
     return o2, ""
 
 
+def add_trim_weld(mdl, i, o, tgt_name, tgt, cutter_name, cutter, lines, hw=True, ffo=None):
+    """Soldadura de un recorte (`trim_weld`): cordones SOLO en los tramos donde la pieza recortada `tgt` toca al elemento que la corta; registra el largo y los
+    espesores para las verificaciones (`mdl.trim_welds[i]`)."""
+    tot = 0.0
+    ref = tgt["geo"]["e3"] if tgt.get("geo") is not None else None
+    for k, ln in enumerate(lines):
+        if o.weld_type != WELD_TYPES[0] or side_ok(o, ln[2], ref):
+            tot += float(np.linalg.norm(np.asarray(ln[1]) - np.asarray(ln[0])))
+        if hw:
+            from .fem.model3d import Weld
+            _addw(mdl, _mkweld(Weld, f"{tgt_name}-R{i + 1}.{k + 1}", tgt["part"], (cutter or {}).get("part", tgt["part"]), ln, o.weld_size, f"R{i + 1}", o.weld_type, o, ref))
+    if not lines or tot <= 1e-6:
+        mdl.notes.append(f"Operación {i + 1}: el recorte de «{tgt_name}» no toca a «{cutter_name}» (o lo toca con holgura): no hay tramos que soldar.")
+        return
+    mdl.trim_welds = getattr(mdl, "trim_welds", {})
+    mdl.trim_welds[i] = {"L": tot, "t_main": _t_element(tgt), "t_to": _t_element(cutter, ffo) if cutter else _t_element(tgt), "to": cutter_name}
+
+
+def plate_trim_lines(geo, o, reg, PL):
+    """Tramos del borde recortado de una placa que tocan al elemento cortante: (líneas, cara)."""
+    from .specs import TRIM_MODES
+    gid = (geo.get("trim_gid") or {}).get(id(o))
+    par = reg.get(o.parent)
+    if gid is None or par is None:
+        return [], None
+    if o.trim_mode == TRIM_MODES[2]:
+        lines, ffo = [], None
+        for ffc in par["faces"].values():
+            ls = PL.weld_lines(geo, ffc, {gid}, region=PL.face_region(par, ffc))
+            if ls and ffo is None:
+                ffo = ffc
+            lines += ls
+        return lines, ffo
+    ff = par["faces"].get(o.face)
+    return (PL.weld_lines(geo, ff, {gid}, region=PL.face_region(par, ff)), ff) if ff is not None else ([], None)
+
+
 def _bisect_in(part, p, ax, s_out, s_in, n=12):
     """Punto entre `s_out` (fuera de la pieza) y `s_in` (dentro) donde el eje p + ax·s entra en ella."""
     from . import geocheck as GC
@@ -651,6 +688,10 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
                 lines, wA, wB = [], nm, parent["part"]                # unión atornillada o sin unión propia: no hay cordón de la placa
             reg[nm]["lines"] = lines
             ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], geo["e3"]))
+            for j_, t_ in enumerate(nd.operations):                   # soldadura de los recortes que cortan esta placa (solo donde toca al elemento cortante)
+                if t_.kind == OP_TRIM and t_.trim_weld and t_.targets and t_.targets[0] == o.name:
+                    tl_, ffo_ = plate_trim_lines(geo, t_, reg, PL)
+                    add_trim_weld(mdl, j_, t_, nm, reg[nm], t_.parent, reg.get(t_.parent), tl_, hw, ffo_)
             if info.get("clipped", 0.0) > 1.0:
                 mdl.notes.append(f"Operación {i + 1}: la placa «{nm}» sobresale de la cara «{o.face}» de «{o.parent}»; el cordón solo se dibuja donde hay apoyo "
                                  f"({info['clipped']:.1f} in de borde quedan sin soldar).")
@@ -693,10 +734,10 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             pr = _plate_prism(poly, c0 + fA * s0, fU, ff.N, 0.0, L)
             Fy, Fu = _steel(o.plate_steel, True)
             nm = o.name
-            halfs = []                                                # semiespacios (punto, normal) que dejan los recortes: se conserva n·(x − punto) ≤ 0
+            halfs, tcont = [], {}                                     # semiespacios (punto, normal) que dejan los recortes: se conserva n·(x − punto) ≤ 0
             trims_ = [t_ for t_ in nd.operations if t_.kind == OP_TRIM and t_.targets and t_.targets[0] == o.name]
             if trims_:
-                nts, halfs, w0_, w1_ = PL.trim_angle(pr, trims_, reg, mdl, nm)
+                nts, halfs, w0_, w1_, tcont = PL.trim_angle(pr, trims_, reg, mdl, nm)
                 mdl.notes += [f"Operación {i + 1}: {n_}" for n_ in nts]
                 s0, L = s0 + w0_, w1_ - w0_                           # el recorte (recto) acorta el ángulo: sus caras y cordones siguen al largo que queda
             if hw:
@@ -722,6 +763,9 @@ def build_generic(mdl, nd, reg: dict, hw: bool = True):
             lines = PL.clip_to_region(lines, ff, PL.face_region(parent, ff))
             reg[nm]["lines"] = lines
             ent["weld_len"] = sum(float(np.linalg.norm(np.asarray(l[1]) - np.asarray(l[0]))) for l in lines if o.weld_type != WELD_TYPES[0] or side_ok(o, l[2], fU))
+            for j_, t_ in enumerate(nd.operations):
+                if t_.kind == OP_TRIM and t_.trim_weld and t_.targets and t_.targets[0] == o.name:
+                    add_trim_weld(mdl, j_, t_, nm, reg[nm], t_.parent, reg.get(t_.parent), (tcont or {}).get(id(t_), []) if trims_ else [], hw)
             if o.attach == ATTACHES[0] and hw:
                 for k, ln in enumerate(lines):
                     _addw(mdl, _mkweld(Weld, f"{nm}-W{k + 1}", nm, parent["part"], ln, o.weld_size, nm, wtype, o, fU))
