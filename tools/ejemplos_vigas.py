@@ -222,8 +222,23 @@ def v30():
                 [("S1", "W16X31", 120, 0, "x", dict(off=4.0))], [("S1", OP_TAB, {})], [("S1", dict(Vz=V))], nombre="Viga maestra")
 
 
+def v31():
+    return nudo("TP-V31", "viga esviada 30° al alma de una columna W con placa simple (se cortan las alas de la viga)", "W14X90", 90, [("V1", "W16X31", 60, 0, "x", {})],
+                [("V1", OP_TAB, {})], [("V1", dict(Vz=V))])
+
+
+def v32():
+    return nudo("TP-V32", "viga esviada 30° al alma de una columna W con doble ángulo", "W14X90", 90, [("V1", "W16X31", 120, 0, "x", {})],
+                [("V1", OP_DANG, {})], [("V1", dict(Vz=V))])
+
+
+def v33():
+    return nudo("TP-V33", "viga inclinada 12° al alma de una columna W con placa simple", "W14X90", 90, [("V1", "W16X31", 90, 12.0, "x", {})],
+                [("V1", OP_TAB, {})], [("V1", dict(Vz=V))])
+
+
 EJEMPLOS = [(f"TP-V{k:02d}", fn) for k, fn in enumerate([v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21,
-                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30], 1)]
+                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33], 1)]
 
 
 def nombre_archivo(p) -> str:

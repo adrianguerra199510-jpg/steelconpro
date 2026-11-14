@@ -1926,6 +1926,8 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 if c.ret > 0.05:
                     mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
                                      f"la placa se apoya en la cara y el extremo de la viga se retrasa {c.ret:.2f} in para librarla.")
+            if cop is not None and kind in (OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD) and c.oblique and mshape.kind == W_SHAPE and attach_info(nd, m).get("face") == "alma":
+                mdl.notes.append(f"{m.name}: llega esviado al alma de «{nd.main_name}», dentro de sus alas: la viga choca con ellas y «{kind}» no se corta; use placa simple o doble ángulo (se cortan las alas de la viga) o «hasta el interior de las alas».")
             ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
             if kind == OP_TAB:
                 c.extra = tab_extra(nd, m, cop)
