@@ -690,11 +690,14 @@ def _seat_geometry(ctx, tag):
             if room_v < Lv - 1e-6:
                 ctx.notes.append(f"{m.name}: la pierna vertical del asiento se acorta de {Lv:g} a {max(room_v, 1.0):.2f} in: la cara del principal no es más alta.")
                 Lv = max(room_v, 1.0)
-    if not ctx.oblique:
+    stiff = bool(getattr(ctx.op, "seat_stiff", False))
+    ts = (float(ctx.op.seat_stiff_t) if getattr(ctx.op, "seat_stiff_t", 0.0) > 0 else t) if stiff else 0.0
+    two = ctx.oblique or stiff                                     # dos prismas: pierna horizontal siguiendo a la viga y pierna vertical plana sobre la cara
+    if not two:
         poly = [(-EMBED, yb - Lv), (t, yb - Lv), (t, yb - t), (Lh + ofs, yb - t), (Lh + ofs, yb), (-EMBED, yb)]
         prs = [_plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0)]        # U×V = dir×sy = -sx (simetrico)
     else:
-        sn = np.asarray(ctx.sn, float)
+        sn = np.asarray(ctx.sn if ctx.oblique else ctx.dir, float)
         ub = ctx.u_face((-W / 2.0, W / 2.0), (yb - t, yb))
         horiz = ctx.clip_support(_plate_prism([(ub, yb - t), (Lh + ofs, yb - t), (Lh + ofs, yb), (ub, yb)], ctx.Q, ctx.dir, ctx.sy, -W / 2.0, W / 2.0))
         perp = ctx.sx - float(np.dot(ctx.sx, sn)) * sn
@@ -705,8 +708,12 @@ def _seat_geometry(ctx, tag):
         Vf = np.cross(sn, ef)
         up = 1.0 if float(np.dot(Vf, ctx.sy)) >= 0 else -1.0                           # sentido «arriba» del eje V de la pierna
         b0, b1 = (-Lv, 0.0) if up > 0 else (0.0, Lv)
-        vert = _plate_prism([(-Wf / 2.0, b0), (Wf / 2.0, b0), (Wf / 2.0, b1), (-Wf / 2.0, b1)], C, ef, Vf, 0.0, t)
-        prs = [horiz, vert]
+        if stiff:                                                                     # la pierna vertical lleva una ranura por donde pasa el rigidizador
+            hs = ts / cphi / 2.0
+            verts = [_plate_prism([(a_, b0), (c_, b0), (c_, b1), (a_, b1)], C, ef, Vf, 0.0, t) for (a_, c_) in ((-Wf / 2.0, -hs), (hs, Wf / 2.0))]
+        else:
+            verts = [_plate_prism([(-Wf / 2.0, b0), (Wf / 2.0, b0), (Wf / 2.0, b1), (-Wf / 2.0, b1)], C, ef, Vf, 0.0, t)]
+        prs = [horiz] + verts
         room = min(_face_room(ctx, C, ef), _face_room(ctx, C, -ef)) if ctx.main_name else 1e9
         if room < Wf / 2.0 - 1e-6:
             ctx.notes.append(f"{m.name}: el asiento ({Wf:.1f} in sobre la cara) es más ancho que la cara del principal.")
@@ -714,7 +721,7 @@ def _seat_geometry(ctx, tag):
     for k, sg in enumerate((1, -1)):
         ctx.bolts.append(_bolt(f"{tag}-A{k + 1}", ctx.at(Lh * 0.62 + ofs, sg * gauge / 2.0, yb - t), ctx.sy, ctx.db, 0.0, t + (shp.tf if shp.tf > 0 else 0.5),
                                [(f"Asiento {tag}", 0.0, t), (ctx.partname, t, t + (shp.tf if shp.tf > 0 else 0.5))], ctx.op.bolt_grade))
-        if not ctx.oblique:
+        if not two:
             p, ax = ctx.at(t, sg * gauge / 2.0, yb - Lv * 0.6), -ctx.dir
         else:
             p, ax = C + ef * (sg * gauge / 2.0) + Vf * (-Lv * 0.6 * up) + sn * t, -sn
@@ -723,6 +730,23 @@ def _seat_geometry(ctx, tag):
             continue
         ctx.bolts.append(_bolt(f"{tag}-S{k + 1}", p, ax, ctx.db, 0.0, t + st,
                                [(f"Asiento {tag}", 0.0, t)] + ([(ctx.main_name, t, t + st)] if ctx.main_name else []), ctx.op.bolt_grade))
+    if stiff:                                                      # rigidizador: placa vertical centrada bajo el ala, de la cara del apoyo al borde del ángulo
+        Le = Lh + ofs
+        vt, vb = yb - t, yb - Lv
+        cut = min(1.0, Le * 0.3)
+        poly = [(ctx.u_face((-ts / 2.0, ts / 2.0), (vt,)), vt), (Le, vt), (Le, vt - cut), (Le * 0.45, vb), (ctx.u_face((-ts / 2.0, ts / 2.0), (vb,)), vb)]
+        nmS = f"Rigidizador {tag}"
+        pS = ctx.clip_support(_plate_prism(poly, ctx.Q, ctx.dir, ctx.sy, -ts / 2.0, ts / 2.0))
+        ctx.parts.append(Part(nmS, "stiff", f"Rigidizador del asiento PL {ts:g}", Fy, Fu, [pS], t=ts))
+        w_ = float(ctx.op.weld_size)
+        nBs = np.asarray(ctx.sn if ctx.oblique else ctx.dir, float)
+        for sg in (1.0, -1.0):
+            if ctx.main_name:                                      # a la cara del apoyo, por los dos lados
+                ctx.welds.append(Weld(f"{nmS}-W{'1' if sg > 0 else '2'}", nmS, ctx.main_name, tuple(map(float, ctx.on_face(sg * ts / 2.0, vt))), tuple(map(float, ctx.on_face(sg * ts / 2.0, vb))),
+                                      tuple(map(float, ctx.sx * sg)), tuple(map(float, nBs)), w_, 70.0, tag))
+            u0 = ctx.face_s(sg * ts / 2.0, vt)                     # al ángulo, bajo su pierna horizontal
+            ctx.welds.append(Weld(f"{nmS}-A{'1' if sg > 0 else '2'}", nmS, f"Asiento {tag}", tuple(map(float, ctx.at(u0, sg * ts / 2.0, vt))), tuple(map(float, ctx.at(Le, sg * ts / 2.0, vt))),
+                                  tuple(map(float, ctx.sx * sg)), tuple(map(float, -ctx.sy)), w_, 70.0, tag))
     return 0.5 + ret
 
 
