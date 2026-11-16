@@ -1,4 +1,4 @@
-// Flujo del FEM en el visor: Ejecutar análisis -> botones de malla y cortes -> resultados y deformada.  Uso: xvfb-run -a node tests/femshot.js <carpeta> [archivo.scp] [texto]
+// Flujo del FEM en el visor: «Calcular» (un solo botón de análisis; el de la pestaña FEM solo mallla) -> botón de la malla -> resultados y deformada.  Uso: xvfb-run -a node tests/femshot.js <carpeta> [archivo.scp] [texto]
 const { _electron: electron } = require('playwright');
 const path = require('path'), fs = require('fs'), os = require('os');
 (async () => {
@@ -17,8 +17,8 @@ const path = require('path'), fs = require('fs'), os = require('os');
   console.log('grupo FEM visible antes de analizar:', await page.evaluate(() => window.__E.ui.femGroup.style.display !== 'none'));
   await page.screenshot({ path: path.join(shots, 'fem_0_inicio.png') });
   await page.click('.tab[data-id="fem"]'); await wait(500);
-  await page.click('text=Ejecutar análisis'); await wait(4000);
-  console.log('grupo FEM visible tras pulsar:', await page.evaluate(() => window.__E.ui.femGroup.style.display !== 'none'), '· resultados visibles:', await page.evaluate(() => window.__E.ui.femRes.style.display !== 'none'));
+  await page.click('.calc-big'); await wait(4000);
+  console.log('grupo FEM visible tras Calcular:', await page.evaluate(() => window.__E.ui.femGroup.style.display !== 'none'), '· resultados visibles:', await page.evaluate(() => window.__E.ui.femRes.style.display !== 'none'));
   await page.screenshot({ path: path.join(shots, 'fem_1_cortes.png') });
   await page.click('[title^="Ver la malla"]'); await wait(25000);
   await page.screenshot({ path: path.join(shots, 'fem_2_malla.png') });

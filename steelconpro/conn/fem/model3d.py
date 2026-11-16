@@ -16,9 +16,9 @@ import numpy as np
 
 COLORS = {"beam": "#9dc3e6", "column": "#bdd7ee", "support": "#c9c9c9", "plate": "#f4b183", "angle": "#f8cbad",
           "stiff": "#a9d18e", "gusset": "#ffd966", "brace": "#8faadc", "hss": "#9dc3e6", "weld": "#c00000",
-          "bolt": "#1f3864", "other": "#d9d9d9"}
+          "bolt": "#1f3864", "concrete": "#b8b2a6", "other": "#d9d9d9"}
 KIND_NAMES = {"beam": "Viga", "column": "Columna", "support": "Soporte", "plate": "Placas", "angle": "Angulos", "stiff": "Rigidizadores",
-              "gusset": "Cartela", "brace": "Arriostramiento", "hss": "Perfiles HSS", "weld": "Soldaduras", "other": "Otras"}
+              "gusset": "Cartela", "brace": "Arriostramiento", "hss": "Perfiles HSS", "weld": "Soldaduras", "concrete": "Concreto", "other": "Otras"}
 
 
 # ---------------------------------------------------------------------------------------------- geometria basica
@@ -147,6 +147,8 @@ class Part:
     hard: tuple = None                  # (Fy efectivo, Fu efectivo, deformacion en Fu): acero con endurecimiento en lugar de φ·Fy perfectamente plastico (RBS)
     no_peeq: bool = False               # pieza donde la plastificacion es el comportamiento buscado: no se verifica su deformacion plastica
     cuts: list = field(default_factory=list)        # prismas solidos que se restan de la pieza (p. ej. el cordon al recortar una diagonal HSS)
+    E: float = 0.0                      # modulo de elasticidad propio (ksi); 0 = el del acero.  El concreto bajo la placa base lo lleva
+    elastic: bool = False               # material elastico lineal (sin plastificacion ni verificacion de esfuerzos): el concreto
 
     def bbox(self):
         P = np.vstack([p.corners() for p in self.prisms])
@@ -175,6 +177,7 @@ class Bolt:
     nut_s: float
     grade: str = "A325-N"
     planes: int = 1                     # planos de corte (1 o 2)
+    fix_nut: bool = False               # el cuerpo rigido de la tuerca (anclaje embebido en el concreto) queda empotrado
 
 
 @dataclass
@@ -247,6 +250,7 @@ class Model3D:
     extra: list = field(default_factory=list)     # piezas ya hechas de caras en el mundo (placa base): (etiqueta, caras, color, alfa)
     generic: list = field(default_factory=list)   # entradas de las operaciones generales (placas, pernos, soldaduras) para sus verificaciones
     elems: dict = field(default_factory=dict)     # elementos con caras (miembros, placas, placa base): nombre -> datos
+    base_fem: bool = False                        # la placa base (y su concreto y anclajes) entra al FEM del nudo
     base_xf: tuple = None                         # (O, F) de la placa base: coordenadas de placa -> mundo (None sin placa base)
 
     def part(self, name):
@@ -339,7 +343,7 @@ def model_from_dict(d: dict) -> Model3D:
         return FaceSel(x["part"], tuple(x["box"]), tuple(x["normal"]) if x.get("normal") is not None else None)
     m = Model3D(d["name"])
     for p in d["parts"]:
-        m.parts.append(Part(p["name"], p["kind"], p["label"], p["Fy"], p["Fu"], [prism(q) for q in p["prisms"]], p.get("t", 0.0), p.get("stub", False), tuple(p["hard"]) if p.get("hard") else None, p.get("no_peeq", False), [prism(q) for q in p.get("cuts", [])]))
+        m.parts.append(Part(p["name"], p["kind"], p["label"], p["Fy"], p["Fu"], [prism(q) for q in p["prisms"]], p.get("t", 0.0), p.get("stub", False), tuple(p["hard"]) if p.get("hard") else None, p.get("no_peeq", False), [prism(q) for q in p.get("cuts", [])], float(p.get("E", 0.0)), bool(p.get("elastic", False))))
     for b in d["bolts"]:
         b = dict(b)
         b["p"], b["axis"] = tuple(b["p"]), tuple(b["axis"])

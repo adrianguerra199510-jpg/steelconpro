@@ -1768,7 +1768,7 @@ def set_main(nd, name) -> list:
     nd.main_name, nd.main_shape, nd.main_steel = m.name, m.shape, m.steel
     nd.main_az, nd.main_el, nd.main_roll = m.az, m.el, m.roll
     nd.main_end = END_LABELS[2]
-    nd.main_len_neg, nd.main_len_pos = 0.0, max(s_ex + gap_eff(m) + m.L, 1.0)
+    nd.main_len_neg, nd.main_len_pos = 0.0, max(s_ex + gap_eff(m) + old.member_len(m), 1.0)
     A2, msx2, msy2 = main_frame(nd)
     frm2 = (A2, msx2, msy2)
 
@@ -1909,12 +1909,12 @@ def build_model(prj, vals=None) -> Model3D:
     return build_nodo(nd, name=prj.element or prj.ctype, prj=prj, fem=vals if isinstance(vals, dict) else None)
 
 
-FEM_LEN = 30.0        # largo de miembro que se modela en el analisis FEM (in): mas alla, el esfuerzo ya no depende del nudo
+FEM_LEN = 30.0        # (sin uso) el largo modelado lo fija Nodo.auto_len(): el mismo que se dibuja y se malla
 
 
 def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     """Modelo 3D del nudo: el miembro principal, los miembros conectados y el resultado de aplicar las operaciones en el orden de la lista.
-    Con `fem` ({"case": i}) los miembros se recortan a `FEM_LEN` y se agregan el apoyo del principal y las cargas del caso (analisis nodal)."""
+    Con `fem` ({"case": i}) se agregan el apoyo del principal y las cargas del caso (analisis nodal)."""
     hw = True if fem is not None else (nd.show_hw if hardware is None else hardware)
     nd, align_notes = resolve_aligns(nd, prj)
     mdl = Model3D(name)
@@ -1925,15 +1925,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     Fy, Fu = _steel(nd.main_steel)
     if lneg + lpos < 1.0:
         lneg = lpos = 24.0
-    L_cap = None
-    if fem is not None:
-        L_cap = float(fem.get("L", FEM_LEN))
-        # el tramo modelado del principal rodea a los puntos donde llegan los miembros (no al origen del nudo): de (menor posicion − L) a (mayor + L)
-        pos = [float(m.pos) for m in nd.members] or [0.0]
-        lo, hi = max(min(pos) - L_cap, -lneg), min(max(pos) + L_cap, lpos)
-        if hi - lo < 2.0 * L_cap * 0.25:
-            lo, hi = max(-lneg, min(pos) - L_cap), min(lpos, max(pos) + L_cap)
-        lneg, lpos = -lo, hi                                    # lneg puede ser negativo: el tramo empieza por encima del origen
+    L_cap = None                                    # el modelo dibujado es el que se malla: sin recortes aparte para el FEM
     fem_ends = {}
     mdl.parts.append(Part(nd.main_name, "column", f"{nd.main_name} {mshape.label}", Fy, Fu,
                           section_prisms(mshape, (0, 0, 0), msx, msy, A, -lneg, lpos), t=mshape.tw, stub=True))
@@ -1961,7 +1953,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
             mdl.notes.append(f"{m.name}: su eje no toca al miembro principal (revise el azimut, la elevación o la posición).")
             s_ex = 0.0
         Q = P0 + dirv * s_ex
-        Lm = max(min(m.L, L_cap) if L_cap else m.L, 1.0)
+        Lm = max(nd.member_len(m), 1.0)
         ops = nd.ops_of(m.name)
         conns = [o for o in ops if o.is_connection] if hw else []
         conn_op = conns[0] if conns else None
@@ -2113,16 +2105,13 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         ctxs.extend(ctxs_m)
     bop = nd.base_op()
     bp_place, bpd = None, None
-    if bop is not None and prj is not None and hw and fem is None:
+    if bop is not None and prj is not None and hw:
         from . import baseplate as BP
         bp_place = BP.end_of_member(nd, bop, free_ends, frames)
         if bp_place is None:
             mdl.notes.append(f"Placa base: el miembro «{bop.member}» no existe o no tiene extremo libre de ese lado.")
         else:
             bpd = BP.derive(prj, nd)
-    if bop is not None and fem is not None:
-        mdl.notes.append("La placa base se analiza aparte (pestaña «FEM» de la placa base): este análisis del nudo no incluye la placa base, el mortero, el concreto ni los anclajes; "
-                         "el miembro se apoya en su extremo libre.")
     floors = []                                                  # caras superiores de la placa base: las cartelas apoyan en ellas (no se hunden en la placa)
     if bpd is not None:
         E, A_in, bsx, bsy = bp_place
@@ -2132,10 +2121,20 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     _build_gussets(ctxs, nd, mdl, floors)
     if bpd is not None:
         E, A_in, bsx, bsy = bp_place
-        mdl.extra += BP.plate_faces(bpd, E, A_in, bsx, bsy)
+        if fem is None:
+            mdl.extra += BP.plate_faces(bpd, E, A_in, bsx, bsy)
+        else:
+            mdl.base_fem = _fem_base_parts(mdl, nd, bpd, bp_place, bop)
         _col_part = BP.base_member(nd, bop)[0]
         for (wn, wa, wb, wp0, wp1, wnA, wnB, wsz, wkind, wgrp) in BP.weld_lines(bpd, E, A_in, bsx, bsy, (reg.get(_col_part) or {}).get("part", _col_part),
                                                                                   not str(getattr(bop, "col_weld", "")).startswith("No modelar")):
+            if fem is not None:
+                if not getattr(mdl, "base_fem", False):
+                    continue
+                if wa == "stiff":
+                    wa = "Rigidizador " + wn.split()[1].split("-")[0]
+                elif wb == "stiff":
+                    wb = "Rigidizador " + wn.split()[1].split("-")[0]
             w_ = Weld(wn, wa, wb, wp0, wp1, wnA, wnB, float(wsz), 70.0, wgrp)
             w_.kind = wkind
             mdl.welds.append(w_)
@@ -2173,9 +2172,80 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     _apply_trims(mdl, nd, reg, hw)
     mdl.elems = reg
     if fem is not None:
-        _fem_setup(mdl, nd, fem, fem_ends, lneg, lpos, mshape)
+        _fem_setup(mdl, nd, fem, fem_ends, lneg, lpos, mshape, base=bool(getattr(mdl, 'base_fem', False)))
     _node_dims(mdl, A * (-lneg), A * lpos, axes)
     return mdl
+
+
+def _fem_base_parts(mdl, nd, bpd, bp_place, bop) -> bool:
+    """Placa base dentro del modelo FEM del nudo (UN solo modelo): la placa con sus agujeros, los rigidizadores, el bloque de concreto bajo ella (elastico, empotrado en su cara
+    inferior, con su propio módulo) y los anclajes como pernos que atraviesan placa y concreto (resortes con la rigidez del vástago, tuerca empotrada en el fondo).  El contacto
+    placa-concreto solo comprime.  Devuelve False (y deja una nota) si la placa no se puede incluir: entonces el nudo se analiza apoyado en el extremo del principal."""
+    from . import baseplate as BP
+    from .. import geometry as G
+    from ..params3d import washer_radius
+    from .fem.model3d import Part, Bolt, FaceSel, Support, poly_prism
+    E, A_in, bsx, bsy = bp_place
+    if bop.member != nd.main_name and bop.member:
+        mdl.notes.append("La placa base va en un miembro conectado: se analiza apoyando el nudo en el extremo del principal (la placa no entra al FEM).")
+        return False
+    side = 1 if bop.end >= 0 else -1
+    if side != (-1 if int(getattr(nd, "balance_end", -1)) < 0 else 1):
+        mdl.notes.append("La placa base no está en el lado de apoyo del principal («lado que equilibra»): no entra al FEM; cambie el lado de equilibrio en las cargas.")
+        return False
+    Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
+    up = Fb[:, 2]
+    ax_i = int(np.argmax(np.abs(up)))
+    if abs(float(up[ax_i])) < 0.999:
+        mdl.notes.append("La placa base está inclinada respecto de los ejes globales: no entra al FEM (se analiza apoyando el nudo en el extremo del principal).")
+        return False
+
+    def W(x, y, z):
+        return Ob + Fb @ np.array([x, y, z], float)
+    tp = float(bpd.plate.tp)
+    g = bpd.bolts.geom()
+    Fy, Fu = _steel(bpd.plate.steel, True)
+    outl = [tuple(map(float, q)) for q in G.plate_outline(bpd)]
+    if len(outl) > 3 and math.hypot(outl[0][0] - outl[-1][0], outl[0][1] - outl[-1][1]) < 1e-9:
+        outl = outl[:-1]
+    mdl.parts.append(Part("Placa base", "plate", "Placa base", Fy, Fu, [poly_prism(outl, Ob, Fb[:, 0], Fb[:, 1], 0.0, tp)], t=tp))
+    # ---- concreto bajo la placa (el mortero de nivelacion se modela como concreto)
+    xs, ys = [q[0] for q in outl], [q[1] for q in outl]
+    mg = 3.0
+    rect = [(min(xs) - mg, min(ys) - mg), (max(xs) + mg, min(ys) - mg), (max(xs) + mg, max(ys) + mg), (min(xs) - mg, max(ys) + mg)]
+    H = float(min(max(float(bpd.bolts.hef), 6.0), 18.0))
+    fc = float(bpd.conc.fc)
+    Ec = 57.0 * math.sqrt(max(fc, 1.0) * 1000.0)                          # ACI 19.2.2.1: 57000·√f'c (psi) → ksi
+    conc = Part("Concreto", "concrete", "Concreto", 1.0e5, 1.0e5, [poly_prism(rect, W(0, 0, -H), Fb[:, 0], Fb[:, 1], 0.0, H)], t=H, stub=True, no_peeq=True, E=Ec, elastic=True)
+    mdl.parts.append(conc)
+    P = np.vstack([pr.corners() for pr in conc.prisms])
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    c0 = float(W(0, 0, -H)[ax_i])
+    lo[ax_i], hi[ax_i] = c0 - 0.05, c0 + 0.05
+    mdl.supports.append(Support("Apoyo del concreto (cara inferior)", FaceSel("Concreto", tuple(float(v) for i in range(3) for v in (lo[i], hi[i])), tuple(float(-x) for x in up)), (1, 2, 3)))
+    # ---- anclajes: del plano superior de la placa hasta el fondo del concreto
+    rw = float(washer_radius(bpd))
+    for k, (bx, by) in enumerate(G.bolt_positions(bpd)):
+        mdl.bolts.append(Bolt(f"Anclaje {k + 1}", tuple(float(v) for v in W(bx, by, tp)), tuple(float(-x) for x in up), float(g.db), float(g.dh), rw,
+                              [("Placa base", 0.0, tp), ("Concreto", tp, tp + H)], 0.0, tp + H, "A307", 1, True))
+    # ---- rigidizadores
+    st = bpd.stiff
+    if st.enabled and st.count > 0 and not bpd.section.generic:
+        Fys, Fus = _steel(st.steel, True)
+        prof = [(float(q[0]), float(q[1])) for q in st.outline()[:-1]]
+        for i, (x1, y1, x2, y2) in enumerate(G.stiffener_lines(bpd)):
+            Ls = math.hypot(x2 - x1, y2 - y1)
+            if Ls < 1e-6:
+                continue
+            ux, uy = (x2 - x1) / Ls, (y2 - y1) / Ls
+            D = Fb @ np.array([ux, uy, 0.0], float)
+            mdl.parts.append(Part(f"Rigidizador {i + 1}", "stiff", f"Rigidizador {i + 1}", Fys, Fus,
+                                  [poly_prism(prof, W(x1, y1, tp), D, up, -float(st.t) / 2.0, float(st.t) / 2.0)], t=float(st.t)))
+    if getattr(bpd.lug, "enabled", False):
+        mdl.notes.append("La llave de corte no se modela en el FEM del nudo: el cortante lo toman los anclajes.")
+    mdl.notes.append("Placa base dentro del FEM: concreto elástico (E = 57000·√f'c) empotrado en su cara inferior, contacto placa–concreto sin tracción y anclajes como resortes "
+                     "(rigidez del vástago, tuerca empotrada en el fondo; se verifican como pernos A307).")
+    return True
 
 
 def _apply_trims(mdl, nd, reg, hw=True):
@@ -2278,29 +2348,32 @@ def _apply_trims(mdl, nd, reg, hw=True):
             OPS.add_trim_weld(mdl, i, o, tgt, mem, o.parent, other, lines, hw, ffo)
 
 
-def _fem_setup(mdl, nd, fem, ends, lneg, lpos, mshape):
+def _fem_setup(mdl, nd, fem, ends, lneg, lpos, mshape, base=False):
     """Zona refinada del analisis FEM, apoyo del miembro principal y cargas del caso de carga `fem['case']` (analisis nodal)."""
     from . import nodal
     cases = nodal.cases_of(nd)
-    pts = [np.asarray(b.p, float) for b in mdl.bolts] + [np.asarray(w.p0, float) for w in mdl.welds] + [np.asarray(w.p1, float) for w in mdl.welds]
+    pts = [np.asarray(b.p, float) for b in mdl.bolts if not b.fix_nut] + [np.asarray(w.p0, float) for w in mdl.welds] + [np.asarray(w.p1, float) for w in mdl.welds]
     for p in mdl.parts:
-        if not p.stub:
+        if not p.stub and not (base and p.name == "Placa base"):
             for pr in p.prisms:
                 pts += list(pr.corners())
     if pts:
         P = np.asarray(pts)
         lo, hi = P.min(axis=0) - 3.0, P.max(axis=0) + 3.0
         r = max(mshape.d, mshape.bf) / 2.0 + 3.0
-        lo, hi = np.minimum(lo, -r), np.maximum(hi, r)
+        r_lo, r_hi = np.full(3, -r), np.full(3, r)
+        if base:                                                  # la placa base fija el fondo de la zona: no se invade el concreto
+            r_lo[:], r_hi[:] = lo, hi
+        lo, hi = np.minimum(lo, r_lo), np.maximum(hi, r_hi)
     else:
         lo, hi = np.full(3, -12.0), np.full(3, 12.0)
     mdl.zone = (float(lo[0]), float(hi[0]), float(lo[1]), float(hi[1]), float(lo[2]), float(hi[2]))
     i = int(fem.get("case", 0))
     if not cases:
         mdl.notes.append("Sin casos de carga: el análisis FEM necesita cargas (agréguelas en «Cargas»).")
-        sups, lds = nodal.fem_conditions(nd, [], ends, lneg, lpos, mshape)
+        sups, lds = nodal.fem_conditions(nd, [], ends, lneg, lpos, mshape, support=not base)
     else:
-        sups, lds = nodal.fem_conditions(nd, cases[min(i, len(cases) - 1)][1], ends, lneg, lpos, mshape)
+        sups, lds = nodal.fem_conditions(nd, cases[min(i, len(cases) - 1)][1], ends, lneg, lpos, mshape, support=not base)
     mdl.supports += sups
     mdl.loads += lds
 

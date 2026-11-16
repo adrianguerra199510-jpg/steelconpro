@@ -26,6 +26,10 @@ def mesh_params(mdl, fea, f: float = 1.0) -> dict:
     part_lc, part_far = {}, {}
     for p in mdl.parts:
         t = p.thickness
+        if p.elastic:                                   # concreto bajo la placa base: elastico y de apoyo, malla gruesa (fina solo en los anclajes y bajo la placa)
+            part_lc[p.name] = 2.2 * k
+            part_far[p.name] = 6.0
+            continue
         if p.stub:
             lc = _clip(2.4 * t, 0.55, 1.1) * k
             lc = (manual * 1.6 if manual > 0 else lc)
@@ -72,8 +76,6 @@ def run_fem(prj, vals, folder: str, stem: str = "modelo3d", progress=None, cance
         try:
             say(f"1/4  Armando el modelo 3D ...{tag}")
             vals = dict(vals or {})
-            if "case" in vals:
-                vals.setdefault("L", float(getattr(fea, "fem_len", 30.0)))
             mdl = build_model(prj, vals)
             params = mesh_params(mdl, fea, f)
             say(f"2/4  Mallando con Gmsh ...{tag}")
@@ -100,7 +102,6 @@ def run_fem(prj, vals, folder: str, stem: str = "modelo3d", progress=None, cance
                 last = R.msg
                 continue
             R.notes = ([msg] if msg else []) + ([] if info.get("converged", True) else ["Los contactos no llegaron a un conjunto estable (se muestra la ultima iteracion)."])
-            R.notes += [n for n in mdl.notes if n.startswith("La placa base se analiza aparte")]
             return R, R.msg + ("   " + msg if msg else "")
         except Exception as e:                                  # malla o modelo imposibles: se prueba con una malla mas gruesa
             last = f"{type(e).__name__}: {e}"

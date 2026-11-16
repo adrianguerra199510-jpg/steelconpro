@@ -50,8 +50,7 @@ const os = require('os');
     await page.click('summary:has-text("Configuración del análisis FEM")');
     await wait(600);
     await page.screenshot({ path: path.join(shots, 'fem_1_configuracion.png') });
-    await page.locator('button:has-text("Ejecutar análisis")').first().click();
-    await page.click('[title^="Ver la malla"]');
+    await page.click('button:has-text("Generar malla y ver en el visor")');
     for (let i = 0; i < 120; i++) { if (await page.evaluate(() => /Malla: /.test(document.body.innerText))) break; await wait(1000); }
     await wait(2500);
     await page.screenshot({ path: path.join(shots, 'fem_2_malla.png') });

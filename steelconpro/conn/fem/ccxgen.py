@@ -238,6 +238,7 @@ class CcxCase:
         self.bolt_ax = []            # [(elem, ref0, ref1, k, bolt index)]
         self.bolt_sh = []            # [(elem, n1, n2, dof, k)]
         self.gaps = []               # [(elem, n1, n2, dof, k)]
+        self.fix_refs = []           # nodos de referencia de anclajes empotrados en su extremo embebido
         self._build_bolts()
         self._build_welds()
         self._build_gaps()
@@ -288,6 +289,8 @@ class CcxCase:
                       f"*NSET, NSET=RIM_{_san(b.tag)}_{ip}", _wrap(rim_ids)] + self._rigid(rim_ids, ref, rot, c)
                 refs.append(ref)
                 rims.append(len(rim_ids))
+                if ip == len(b.grip) - 1 and getattr(b, "fix_nut", False):
+                    self.fix_refs += [ref, rot]
             Ab = math.pi * b.db ** 2 / 4.0
             Lgrip = abs(b.nut_s - b.head_s) + 0.5 * b.db
             kax = self.E_ST * Ab / Lgrip
@@ -357,6 +360,8 @@ class CcxCase:
             for d in ld.fix_rot:
                 bc.append(f"{rot}, {d}, {d}")
             self.meta["loads"].append({"name": ld.name, "ref": ref, "rot": rot, "nodes": ns, "F": list(ld.F), "M": list(ld.M)})
+        for n in self.fix_refs:
+            bc.append(f"{n}, 1, 3")
         self.head_bc = H
         self.bc, self.cl = bc, cl
         fm = [max(abs(x) for x in ld.F) for ld in mdl.loads] + [max(abs(x) for x in ld.M) / 10.0 for ld in mdl.loads]
@@ -386,8 +391,10 @@ class CcxCase:
         for k in self.keys:
             if not len(self.mesh.E[k]):
                 continue
-            L += [f"*MATERIAL, NAME=M_{_san(k)}", "*ELASTIC", f"{self.E_ST:.1f}, {self.NU:.3f}"]
-            if plastic and not k.startswith("W:"):
+            pm0 = self.part_mats.get(k)
+            Ek = float(pm0.E) if (pm0 is not None and getattr(pm0, "E", 0.0) > 0) else self.E_ST
+            L += [f"*MATERIAL, NAME=M_{_san(k)}", "*ELASTIC", f"{Ek:.1f}, {0.2 if (pm0 is not None and pm0.elastic) else self.NU:.3f}"]
+            if plastic and not k.startswith("W:") and not (pm0 is not None and pm0.elastic):
                 pm = self.part_mats[k]
                 if pm.hard:
                     fy, fu, eu = pm.hard

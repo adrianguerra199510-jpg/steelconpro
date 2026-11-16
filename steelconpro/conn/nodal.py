@@ -136,7 +136,7 @@ def _base_cases(prj, nd: Nodo):
         ext = AS.outer_extent(AS.shape_of(nd.main_shape))
         d2 = (float(np.dot(A_in0, msx)), float(np.dot(A_in0, msy)))
         s_ex = AS.exit_dist(ext, o2, d2) or 0.0
-        E = P0 + A_in0 * (s_ex + AS.gap_eff(m) + max(m.L, 1.0))
+        E = P0 + A_in0 * (s_ex + AS.gap_eff(m) + max(nd.member_len(m), 1.0))
         A_in, sx, sy = -A_in0, sx0, -sy0
     rot = math.radians(float(prj.section.rotation))
     c, s = math.cos(rot), math.sin(rot)
@@ -172,7 +172,7 @@ def _box(E, R):
     return (float(E[0] - R), float(E[0] + R), float(E[1] - R), float(E[1] + R), float(E[2] - R), float(E[2] + R))
 
 
-def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, mshape):
+def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, mshape, support: bool = True):
     """Apoyo y cargas del modelo FEM de un caso de carga: el lado que equilibra del principal se empotra; en el otro lado del principal y en el extremo libre de cada
     miembro conectado se aplica la accion dada (fuerza y momento trasladados al extremo).  Devuelve (apoyos, cargas) del modelo 3D."""
     from .fem.model3d import FaceSel, LoadApp, Support
@@ -182,7 +182,7 @@ def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, 
     Rm = max(mshape.d, mshape.bf) / 2.0 + 1.0
     O = np.zeros(3)
     E_of = lambda side: A * side * (lpos if side > 0 else lneg)             # noqa: E731
-    sups = [Support("Apoyo del principal", FaceSel(nd.main_name, _box(E_of(sb), Rm), tuple(float(x) for x in A * sb)), (1, 2, 3))]
+    sups = [Support("Apoyo del principal", FaceSel(nd.main_name, _box(E_of(sb), Rm), tuple(float(x) for x in A * sb)), (1, 2, 3))] if support else []    # sin él, la placa base es el apoyo
     lds = []
     sg = -sb
     Fg, Mg = np.zeros(3), np.zeros(3)

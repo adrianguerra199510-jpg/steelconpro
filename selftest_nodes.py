@@ -60,18 +60,19 @@ def run():
     if abs(x0 - (d / 2.0 + 1.0)) > 1e-6:
         FAIL.append(f"nudos: la viga debe empezar en d/2 + retranqueo = {d / 2 + 1.0:.3f}; empieza en {x0:.4f}")
     zmin, zmax = float(mdl.part("Columna").bbox()[0][2]), float(mdl.part("Columna").bbox()[1][2])
-    if abs(zmin + 60.0) > 1e-9 or abs(zmax - 60.0) > 1e-9:
-        FAIL.append(f"nudos: columna intermedia debe ir de -60 a 60: {zmin}..{zmax}")
+    Lau = nd.auto_len()                                     # el largo modelado lo fija el cálculo (no se edita)
+    if abs(zmin + Lau) > 1e-9 or abs(zmax - Lau) > 1e-9:
+        FAIL.append(f"nudos: columna intermedia debe ir de -{Lau} a {Lau}: {zmin}..{zmax}")
     if len([b for b in mdl.bolts if b.tag.startswith("V1")]) != 3 or mdl.part("Placa V1") is None:
         FAIL.append("nudos: placa simple con 3 pernos")
     nd.main_end = END_LABELS[1]
     cz = AS.build_nodo(nd).part("Columna").bbox()
-    if abs(float(cz[1][2])) > 1e-9 or abs(float(cz[0][2]) + 60.0) > 1e-9:
-        FAIL.append("nudos: columna de extremo superior debe ir de -60 a 0")
+    if abs(float(cz[1][2])) > 1e-9 or abs(float(cz[0][2]) + Lau) > 1e-9:
+        FAIL.append("nudos: columna de extremo superior debe ir de -L a 0")
     nd.main_end = END_LABELS[2]
     cz = AS.build_nodo(nd).part("Columna").bbox()
-    if abs(float(cz[0][2])) > 1e-9 or abs(float(cz[1][2]) - 60.0) > 1e-9:
-        FAIL.append("nudos: columna de extremo inferior debe ir de 0 a 60")
+    if abs(float(cz[0][2])) > 1e-9 or abs(float(cz[1][2]) - Lau) > 1e-9:
+        FAIL.append("nudos: columna de extremo inferior debe ir de 0 a L")
     nd2 = PRE.build(MODE_COL, "int1", "I", "ep_flush")
     m2 = AS.build_nodo(nd2)
     pe = m2.part("Placa extrema V1")
@@ -127,13 +128,13 @@ def run():
     if not any("Se descartaron" in n_ for n_ in notes_) or mdl1.notes:
         FAIL.append(f"principal: avisos {notes_} / {mdl1.notes}")
     far0 = box(mdl0, "V1")[1][0]
-    if abs(box(mdl1, "V1")[1][0] - far0) > 1e-6 or abs(box(mdl1, "V1")[0][0]) > 1e-6:
+    if box(mdl1, "V1")[1][0] < ndp.auto_len() or abs(box(mdl1, "V1")[0][0]) > 1e-6:      # el largo modelado es automático
         FAIL.append(f"principal: el nuevo principal debe ir del nudo al extremo de la viga ({far0}): {box(mdl1, 'V1')[:, 0]}")
     if np.abs(box(mdl1, "V2") - box(mdl0, "V2")).max() > 1e-6:
         FAIL.append(f"principal: la otra viga no debe moverse: {box(mdl1, 'V2')} contra {box(mdl0, 'V2')}")
     cz0 = box(mdl0, "Columna")
-    if abs(box(mdl1, "Columna+")[1][2] - cz0[1][2]) > 1e-6 or abs(box(mdl1, "Columna−")[0][2] - cz0[0][2]) > 1e-6:
-        FAIL.append("principal: los dos tramos de la columna deben conservar sus extremos")
+    if box(mdl1, "Columna+")[1][2] < ndp.auto_len() - 1e-6 or box(mdl1, "Columna−")[0][2] > -ndp.auto_len() + 1e-6:
+        FAIL.append("principal: los dos tramos de la columna deben conservar al menos su largo")
     sh1 = box(mdl1, "V1")
     if box(mdl1, "Columna+")[0][2] < sh1[1][2] - 1e-6 or box(mdl1, "Columna−")[1][2] > sh1[0][2] + 1e-6:
         FAIL.append("principal: los tramos de la columna deben apoyar en las alas del nuevo principal, sin entrar")
@@ -145,8 +146,8 @@ def run():
     mbp = AS.build_nodo(nbp)
     if set(nbp.names()) != {"S1", "Viga principal+", "Viga principal−"} or abs(nbp.main_az - 90.0) > 1e-6 or abs(nbp.main_el) > 1e-6:
         FAIL.append(f"principal: S1 (a 90°) debe dar un eje en +Y: {nbp.names()} az {nbp.main_az}")
-    if abs(box(mbp, "Viga principal+")[1][0] - box(mb0, "Viga principal")[1][0]) > 1e-6 or abs(box(mbp, "Viga principal−")[0][0] - box(mb0, "Viga principal")[0][0]) > 1e-6:
-        FAIL.append("principal: los tramos de la viga principal anterior deben conservar sus extremos")
+    if box(mbp, "Viga principal+")[1][0] < box(mb0, "Viga principal")[1][0] - 1e-6 or box(mbp, "Viga principal−")[0][0] > box(mb0, "Viga principal")[0][0] + 1e-6:
+        FAIL.append("principal: los tramos de la viga principal anterior deben conservar al menos su largo")
     # un extremo: el principal termina en el nudo y solo queda un miembro
     nde = PRE.build(MODE_COL, "ext1", "I", "tab")
     AS.set_main(nde, "V1")
@@ -236,7 +237,7 @@ def run():
     zmin0 = float(AS.build_model(pbd).bounds()[0][2])
     AS.set_main(ndb, "V1")
     mdb = AS.build_model(pbd)
-    if ndb.base_op() is None or ndb.base_op().member not in ndb.names() or ndb.base_op().member == "V1" or abs(float(mdb.bounds()[0][2]) - (zmin0 - 24.0)) > 1e-6:
+    if ndb.base_op() is None or ndb.base_op().member not in ndb.names() or ndb.base_op().member == "V1" or float(mdb.bounds()[0][2]) > zmin0 + 1e-6:
         FAIL.append(f"placa base: al designar otro principal la placa debe seguir en el extremo libre: {ndb.base_op()}, z {mdb.bounds()[0][2]} (antes {zmin0})")
     print(f"{'placa base como operacion':34} 4 archivos de placa base abren y dan el mismo D/C que el motor, perfil y giro coinciden ({n_or} casos), columna inclinada, "
           f"{n_bp} nudos con placa en miembros o en el lado +, al designar el principal la placa sigue: OK")

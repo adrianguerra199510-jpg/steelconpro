@@ -63,10 +63,10 @@ export async function openMember(E, name) {
     num(isMain ? 'Azimut del eje (en planta)' : 'Azimut (en planta)', P.az, null, -360, 360, 5, 1), num(isMain ? 'Inclinación del eje (90° = vertical)' : 'Inclinación sobre la horizontal', P.el, null, -90, 90, 5, 1),
     num('Giro de la sección sobre su eje', P.roll, null, -180, 180, 5, 1)];
   if (isMain) {
-    items.push({ path: 'main_end', label: 'Extremo', type: 'combo', items: C.end_labels }, num('Largo del lado − (abajo si es vertical)', 'main_len_neg', 'L', 0, 4000), num('Largo del lado +', 'main_len_pos', 'L', 0, 4000));
+    items.push({ path: 'main_end', label: 'Extremo', type: 'combo', items: C.end_labels });
   } else {
     items.push(num('Posición sobre el principal', 'pos', 'L', -4000, 4000, null, null, 'Medida desde el nudo, a lo largo del eje del principal.'), num('Desplazamiento (peralte del principal)', 'off', 'L', -400, 400),
-      num('Desplazamiento (ancho del principal)', 'off2', 'L', -400, 400), num('Largo dibujado', 'L', 'L', 1, 4000), num('Desplazamiento sobre su eje (+ hacia atrás)', 'gap', 'L', -120, 240));
+      num('Desplazamiento (ancho del principal)', 'off2', 'L', -400, 400), num('Desplazamiento sobre su eje (+ hacia atrás)', 'gap', 'L', -120, 240));
   }
   body.append(h('div', { class: 'card-sec' }, h('h4', { text: isMain ? 'Miembro principal' : 'Miembro conectado' }), h('div', { class: 'form-grid' }, field('Nombre', nameInp)),
     h('div', { style: { height: '10px' } }), renderItems(items, ctx)));

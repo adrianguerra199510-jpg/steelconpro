@@ -161,15 +161,16 @@ def mesh_job(job: dict, out_npz: str) -> dict:
                 bb = gmsh.model.getBoundingBox(*dt)
                 box(P["lc_weld"], 1e22, np.array(bb[:3]) - 0.02, np.array(bb[3:]) + 0.02)
         # refinamiento alrededor de cada agujero
-        hole_curves = []
+        hole_curves, hole_curves_c = [], []                  # agujeros en acero / en el concreto (anclajes: malla mas gruesa)
         for b in mdl.bolts:
             ax = unit(b.axis)
             for (pn, s0, s1) in b.grip:
                 c = np.asarray(b.p, float) + ax * 0.5 * (s0 + s1)
                 half = np.abs(ax) * (0.5 * (s1 - s0) + 0.08) + (1 - np.abs(ax)) * (b.dh / 2 + 0.02)
                 lo, hi = c - half, c + half
+                _pp = mdl.part(pn)
                 for (d_, t_) in gmsh.model.getEntitiesInBoundingBox(*lo, *hi, 1):
-                    hole_curves.append(t_)
+                    (hole_curves_c if (b.fix_nut or (_pp is not None and _pp.elastic)) else hole_curves).append(t_)
         if hole_curves:
             dist = fld.add("Distance")
             fld.setNumbers(dist, "CurvesList", sorted(set(hole_curves)))
@@ -180,6 +181,17 @@ def mesh_job(job: dict, out_npz: str) -> dict:
             fld.setNumber(th, "SizeMax", 1e22)
             fld.setNumber(th, "DistMin", 0.12)
             fld.setNumber(th, "DistMax", 0.12 + 2.5 * P["lc_hole"])
+            ids.append(th)
+        if hole_curves_c:
+            dist = fld.add("Distance")
+            fld.setNumbers(dist, "CurvesList", sorted(set(hole_curves_c)))
+            fld.setNumber(dist, "Sampling", 20)
+            th = fld.add("Threshold")
+            fld.setNumber(th, "InField", dist)
+            fld.setNumber(th, "SizeMin", max(0.7, 2.0 * P["lc_hole"]))
+            fld.setNumber(th, "SizeMax", 1e22)
+            fld.setNumber(th, "DistMin", 0.2)
+            fld.setNumber(th, "DistMax", 1.5)
             ids.append(th)
         fm = fld.add("Min")
         fld.setNumbers(fm, "FieldsList", ids)

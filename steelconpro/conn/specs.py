@@ -16,6 +16,7 @@ No hay tipologias (viga-columna, viga a viga, crucetas): el nudo se arma por OPE
 Unidades internas: in, kip, grados.
 """
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 
 # La primera es la placa base (el resto del programa); la otra es el nudo generico (steelconpro/conn/).
@@ -335,10 +336,36 @@ class Nodo:
     def names(self) -> list:
         return [self.main_name] + [m.name for m in self.members]
 
+    def auto_len(self):
+        """Largo (in) con el que se modela cada miembro desde la zona del nudo: el mismo que se dibuja y que se malla en el FEM.  No lo edita el usuario: lo fija el
+        calculo (dos veces el mayor peralte o ancho de los perfiles del nudo, y lo que pidan las placas y cartelas, con un mínimo de 60 in), de modo que el esfuerzo en el
+        extremo lejano ya no dependa del nudo (Saint-Venant)."""
+        from . import assembly as AS
+        ds = []
+        for lab in [self.main_shape] + [m.shape for m in self.members]:
+            sh = AS.shape_of(lab)
+            ds.append(max(float(sh.d), float(getattr(sh, "bf", 0.0) or 0.0)))
+        need = 2.0 * max(ds or [14.0])
+        for o in self.operations:                                  # el tramo ha de alojar las placas y cartelas que salen del nudo
+            for k, extra in (("pl_L", 6.0), ("gus_L", 12.0), ("tab_W", 12.0), ("ep_h", 6.0), ("dang_H", 12.0)):
+                v = float(getattr(o, k, 0.0) or 0.0)
+                if v > 0:
+                    need = max(need, v + extra)
+        return float(math.ceil(max(need, 60.0)))
+
+    def member_len(self, m=None):
+        """Largo modelado de un miembro conectado (automático: ver `auto_len`)."""
+        return self.auto_len()
+
     def lengths(self):
-        """(largo en el lado negativo, largo en el lado positivo) segun como termina el principal."""
+        """(largo en el lado negativo, largo en el lado positivo) del principal, medidos desde el origen del nudo: el tramo automático (`auto_len`) a cada lado de los
+        puntos donde llegan los miembros, según como termina el principal."""
         k = self.end_index
-        return (self.main_len_neg if k != 2 else 0.0, self.main_len_pos if k != 1 else 0.0)
+        L = self.auto_len()
+        pos = [float(m.pos) for m in self.members] or [0.0]
+        neg = L + max(0.0, -min(pos))
+        up = L + max(0.0, max(pos))
+        return (neg if k != 2 else 0.0, up if k != 1 else 0.0)
 
     def member_named(self, name):
         return next((m for m in self.members if m.name == name), None)

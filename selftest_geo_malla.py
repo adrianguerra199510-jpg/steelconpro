@@ -448,6 +448,49 @@ def placa_base():
         check(all(abs(w["spec"].size - p.stiff.weld_size) < 1e-9 for w in weldfe._walls(bpd) if w["key"] == "stiff"), "FEM: el cordón de los rigidizadores usa stiff.weld_size")
 
 
+def modelo_unico(con_malla=True):
+    """UN solo modelo FEM: con placa base entran la placa, el concreto, los anclajes y los rigidizadores; el largo de los miembros es el automático (el mismo que se dibuja)."""
+    print("\n== modelo único (nudo + placa base) y largo automático ==")
+    import tempfile
+    from pathlib import Path
+    from steelconpro import geometry as G
+    from steelconpro import api
+    from steelconpro.conn import baseplate as BP
+    from steelconpro.conn.fem import driver, ccxgen
+    p = load_book(os.path.join(ROOT, "ejemplos", "CN-04_columna_con_placa_base.scp"))[0]
+    p.stiff.enabled, p.stiff.count = True, 4
+    nd = p.node
+    check(not hasattr(p.fea, "fem_len"), "el FEM ya no tiene largo editable (fem_len)")
+    L = nd.auto_len()
+    full = AS.build_model(p)
+    for m in nd.members:                                               # largo dibujado = largo automático (sin recortes aparte para el FEM)
+        c = full.elems[m.name]["ends"]
+        ln = float(np.linalg.norm(np.asarray(c[1]) - np.asarray(c[0])))
+        check(abs(ln - max(L, 1.0)) < 1e-6 or ln >= L - 1e-6, f"{m.name}: largo dibujado {ln:.1f} = automático {L:.0f}")
+    mdl = AS.build_model(p, {"case": 0})
+    names = [q.name for q in mdl.parts]
+    bpd = BP.derive(p, nd)
+    nb = len(G.bolt_positions(bpd))
+    check(mdl.base_fem and "Placa base" in names and "Concreto" in names, "placa base y concreto dentro del modelo FEM")
+    check(sum(1 for q in names if q.startswith("Rigidizador")) == 4, "los 4 rigidizadores son piezas del FEM")
+    check(len([b for b in mdl.bolts if b.tag.startswith("Anclaje")]) == nb and all(b.fix_nut for b in mdl.bolts if b.tag.startswith("Anclaje")), f"{nb} anclajes con la tuerca empotrada")
+    check([s_.name for s_ in mdl.supports] == ["Apoyo del concreto (cara inferior)"], "el único apoyo es la cara inferior del concreto")
+    wnames = {w.A for w in mdl.welds} | {w.B for w in mdl.welds}
+    check(all(n in names for n in wnames), "todos los cordones unen piezas que existen en el modelo")
+    check(not any("femcut" == (q.get("kind") if isinstance(q, dict) else None) for q in api.mesh({"connection": __import__("dataclasses").asdict(p)})["parts"]), "el visor no dibuja planos de corte del FEM")
+    if con_malla:
+        with tempfile.TemporaryDirectory() as td:
+            params = driver.mesh_params(mdl, p.fea, 1.0)
+            npz, out = driver._mesh(mdl, params, Path(td), "t", None)
+            check(npz is not None, f"malla del modelo único: {str(out)[-120:]}")
+            if npz is not None:
+                mm = ccxgen.Mesh(str(npz))
+                n_el = {k: len(mm.E[k]) for k in mm.names}
+                check(all(n_el.get(k, 0) > 0 for k in ("Placa base", "Concreto", "Columna")), "malla con columna, placa base y concreto")
+                case = ccxgen.CcxCase(mdl, mm, {"plastic": True, "contacts": True})
+                check(len(case.fix_refs) == 2 * nb and len(case.gaps) > 0, f"CalculiX: {len(case.fix_refs) // 2} anclajes empotrados y {len(case.gaps)} contactos")
+
+
 if __name__ == "__main__":
     casos_recorte()
     casos_agujeros()
@@ -457,6 +500,7 @@ if __name__ == "__main__":
     ejemplos()
     api_mesh()
     placa_base()
+    modelo_unico(con_malla=not RAPIDO)
     if not RAPIDO:
         mallador()
         barrido_conexiones()

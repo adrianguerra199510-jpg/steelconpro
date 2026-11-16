@@ -167,7 +167,8 @@ export class Viewer {
     for (const p of this.parts) for (const m of p.objs) { m.geometry.dispose(); m.material.dispose(); this.root.remove(m); }
     this.parts = [];
     this.dimGroup.clear();
-    this.overlay.replaceChildren(); this.loadEls = [];
+    this.clearLoads();                                  // las flechas y sus rótulos son del modelo anterior
+    this.overlay.replaceChildren(); this.loadEls = []; this.labelEls = []; this.dimEls = []; this.dimLabels = [];
   }
 
   // closed: la malla de la pieza es una superficie cerrada con las normales hacia afuera (prismas del modelo): se dibuja solo la cara que mira a la cámara.
@@ -332,7 +333,7 @@ export class Viewer {
 
   select(names) { this.selected = new Set(names || []); this._applySelection(); this.requestRender(); }
   _applySelection() {
-    const any = this.selected.size > 0;
+    const any = [...this.selected].some((n) => this.parts.some((p) => p.name === n));          // una selección que no está en la escena (malla, resultados) no atenúa todo
     for (const p of this.parts) {
       const on = this.selected.has(p.name);
       for (const m of p.mats) {
