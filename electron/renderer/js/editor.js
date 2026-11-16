@@ -871,8 +871,8 @@ function femSection(cfg) {
   E.ui.femMeshGo = meshGo; E.ui.femStop = stop;
   syncFemButtons();
   const card = h('div', { class: 'card-sec' }, h('h4', { text: cfg.title }), h('p', { class: 'hint-text', text: cfg.desc }),
-    h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: 'El análisis completo se ejecuta con «Calcular». Aquí solo se genera y se ve la malla; los botones de la malla, los resultados y la deformada quedan en la barra superior del visor.' }),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, meshGo, stop), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null);
+    h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: 'Por ahora solo se genera la malla: aquí se genera y se ve en el visor, y el botón de la malla queda en la barra superior del visor.' }),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, meshGo), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null);
   if (E.femRunning) pollJob(kind, cfg);
   return card;
 }
@@ -890,7 +890,8 @@ async function startFem() {
     pollJob('node', cfg);
   } catch (e) { E.femRunning = false; syncFemButtons(); errorBox(e); }
 }
-function calcular() { runVerify.flush(); startFem(); }
+// Por ahora el análisis FEM no se lanza con «Calcular» (solo se malla desde la pestaña FEM); `startFem` queda listo para activarlo.
+function calcular() { runVerify.flush(); }
 
 function pollJob(kind, cfg) {
   E.pollers = E.pollers || {};
