@@ -2128,6 +2128,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         E, A_in, bsx, bsy = bp_place
         Ob, Fb = BP.plate_transform(bpd, E, A_in, bsx, bsy)
         floors.append(("Placa base", Ob + Fb @ np.array([0.0, 0.0, float(bpd.plate.tp)]), Fb[:, 2].copy()))
+        mdl.base_xf = (np.asarray(Ob, float), np.asarray(Fb, float))
     _build_gussets(ctxs, nd, mdl, floors)
     if bpd is not None:
         E, A_in, bsx, bsy = bp_place

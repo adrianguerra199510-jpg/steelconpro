@@ -247,6 +247,7 @@ class Model3D:
     extra: list = field(default_factory=list)     # piezas ya hechas de caras en el mundo (placa base): (etiqueta, caras, color, alfa)
     generic: list = field(default_factory=list)   # entradas de las operaciones generales (placas, pernos, soldaduras) para sus verificaciones
     elems: dict = field(default_factory=dict)     # elementos con caras (miembros, placas, placa base): nombre -> datos
+    base_xf: tuple = None                         # (O, F) de la placa base: coordenadas de placa -> mundo (None sin placa base)
 
     def part(self, name):
         return next((p for p in self.parts if p.name == name), None)

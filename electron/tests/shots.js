@@ -50,19 +50,11 @@ const os = require('os');
     await page.click('summary:has-text("Configuración del análisis FEM")');
     await wait(600);
     await page.screenshot({ path: path.join(shots, 'fem_1_configuracion.png') });
-    await page.click('text=Ver malla en el visor');
+    await page.locator('button:has-text("Ejecutar análisis")').first().click();
+    await page.click('[title^="Ver la malla"]');
     for (let i = 0; i < 120; i++) { if (await page.evaluate(() => /Malla: /.test(document.body.innerText))) break; await wait(1000); }
     await wait(2500);
     await page.screenshot({ path: path.join(shots, 'fem_2_malla.png') });
-  });
-  await step('fembase', async () => {
-    await home(); await open('CN-04');
-    await page.click('.tabbar >> text=FEM');
-    await wait(800);
-    await page.locator('text=Ver malla en el visor').nth(1).click();
-    for (let i = 0; i < 90; i++) { if (await page.evaluate(() => /Malla: /.test(document.body.innerText))) break; await wait(1000); }
-    await wait(2500);
-    await page.screenshot({ path: path.join(shots, 'fem_3_malla_placa_base.png') });
   });
   await step('tipologias', async () => {
     await home(); await open('CN-04');

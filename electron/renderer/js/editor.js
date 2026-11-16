@@ -154,7 +154,7 @@ async function saveNow(manual) {
 E.changed = (opts = {}) => {
   markDirty();
   E.stale = true; E.res = null; E.calculating = false;
-  if (E.femStarted || E.femDone) { E.femStarted = false; E.femDone = false; updateFemTools(); }                        // un cambio descarta los resultados: sin D/C hasta volver a calcular
+  if (E.femStarted || E.femDone || E.baseDone) { E.femStarted = false; E.femDone = false; E.baseDone = false; updateFemTools(); }                        // un cambio descarta los resultados: sin D/C hasta volver a calcular
   if (opts.structure) renderTree(); else renderTree();
   if (opts.geometry !== false) { runMesh(); E.geo = null; renderGeo(); runGeo(); }
   runNodal();
@@ -214,7 +214,7 @@ function build(app) {
   ui.femBackBtn = iconBtn('box', 'Volver al modelo', () => backToModel());
   ui.femGroup = h('div', { class: 'group', style: { display: 'none' } }, ui.femMeshBtn, ui.femBackBtn);
   ui.femCase = h('select', { title: 'Caso de carga' }); ui.femField = h('select', { title: 'Resultado' }); ui.femScale = h('select', { title: 'Deformada' }); ui.femPart = h('select', { title: 'Pieza' });
-  ui.femRes = h('div', { class: 'group', style: { display: 'none' } }, ui.femCase, ui.femField, ui.femScale, ui.femPart);
+  ui.femWhich = h('select', { title: 'Análisis' }); ui.femRes = h('div', { class: 'group', style: { display: 'none' } }, ui.femWhich, ui.femCase, ui.femField, ui.femScale, ui.femPart);
   vtool.append(ui.femGroup, ui.femRes);
   ui.fembar = h('div', { class: 'vhud' });
   const center = h('div', { class: 'viewer-wrap' }, ui.vhost, vtool, ui.note, ui.fembar);
@@ -822,26 +822,38 @@ function femConfig() {
     num('Factor para el D/C pico de la soldadura', 'weld_peak_factor', '-', 1, 3)], ctx, { cols: 2 });
   return h('details', { class: 'card-sec', style: { marginTop: '8px' } }, h('summary', { style: { cursor: 'pointer', fontWeight: 700 }, text: 'Configuración del análisis FEM' }), h('div', { style: { height: '8px' } }), g1);
 }
-// malla de elementos finitos en el visor (sin resolver)
-async function showMesh(kind, cfg, status) {
-  const st = E.fems[kind];
+// malla de elementos finitos en el visor (sin resolver): una sola escena con TODO mezclado (nudo + placa base, si la hay)
+async function waitJob(r, status, msg) {
+  for (;;) {
+    const j = await call('job_status', { job: r.job });
+    status.textContent = j.message || msg;
+    if (j.done) { if (j.state !== 'done') throw new Error(j.error || 'No se pudo generar la malla.'); return; }
+    await new Promise((ok) => setTimeout(ok, 800));
+  }
+}
+async function showMeshAll(status) {
+  const hasBase = E.conn().node.operations.some((o) => o.kind === S.C.op.BASE);
+  const hasLoads = !!(E.nodal && E.nodal.cases && E.nodal.cases.length);
+  const nst = (E.fems && E.fems.node) || { combo: '0' };
+  const bst = (E.fems && E.fems.base) || { combo: '0' };
+  const ncase = parseInt(nst.combo, 10) || 0, bcombo = parseInt(bst.combo, 10) || 0;
   try {
     status.textContent = 'Generando la malla…';
-    const [startFn, sceneFn, key] = cfg.meshApi || ['fem_mesh_start', 'fem_mesh_scene', 'case'];
-    const r = await call(startFn, { connection: E.conn(), [key]: parseInt(st.combo, 10) || 0, force: false });
-    for (;;) {
-      const j = await call('job_status', { job: r.job });
-      status.textContent = j.message || 'Generando la malla…';
-      if (j.done) { if (j.state !== 'done') throw new Error(j.error || 'No se pudo generar la malla.'); break; }
-      await new Promise((ok) => setTimeout(ok, 800));
-    }
-    const d = await call(sceneFn, { connection: E.conn(), [key]: parseInt(st.combo, 10) || 0, part: st.meshPart || 'all' });
+    const jobs = [];
+    if (hasLoads) jobs.push(call('fem_mesh_start', { connection: E.conn(), case: ncase, force: false }).then((r) => waitJob(r, status, 'Mallando el nudo…')));
+    if (hasBase) jobs.push(call('fem_base_mesh_start', { connection: E.conn(), combo: bcombo, force: false }).then((r) => waitJob(r, status, 'Mallando la placa base…')));
+    await Promise.all(jobs);
+    const ds = [];
+    if (hasLoads) ds.push(await call('fem_mesh_scene', { connection: E.conn(), case: ncase, part: 'all' }));
+    if (hasBase) ds.push(await call('fem_base_mesh_scene', { connection: E.conn(), combo: bcombo, part: 'all', world: true }));
+    if (!ds.length) throw new Error('No hay nada que mallar.');
+    const lo = [0, 1, 2].map((i) => Math.min(...ds.map((d) => d.bounds[0][i]))), hi = [0, 1, 2].map((i) => Math.max(...ds.map((d) => d.bounds[1][i])));
+    const d = { parts: ds.flatMap((x) => x.parts), bounds: [lo, hi], message: '', mesh: { nodes: ds.reduce((a, x) => a + x.mesh.nodes, 0), elements: ds.reduce((a, x) => a + x.mesh.elements, 0) } };
     const keep = !!E.femView;
     E.femView = true;
     E.viewer.setModel(d, { keepView: keep });
     E.viewer.setLoads([]);
     clear(E.ui.fembar);
-    st.meshParts = d.parts_list;
     status.textContent = `Malla: ${d.mesh.nodes.toLocaleString('es')} nodos · ${d.mesh.elements.toLocaleString('es')} elementos tetraédricos`;
     setStatus(status.textContent);
   } catch (e) { status.textContent = ''; errorBox(e); }
@@ -856,7 +868,7 @@ function femSection(kind, cfg) {
   const run = btn('Ejecutar análisis', { icon: 'cpu', kind: 'primary', onClick: async () => {
     try {
       const r = await cfg.start(st); E.jobs[kind] = r.job;
-      if (kind === 'node') { E.femStarted = true; E.femDone = false; updateFemTools(); runMesh.flush(); }
+      E.femStarted = true; if (kind === 'node') E.femDone = false; else E.baseDone = false; E.femKind = kind; updateFemTools(); runMesh.flush();
       pollJob(kind, status, run, stop, cfg);
     } catch (e) { errorBox(e); }
   } });
@@ -865,23 +877,9 @@ function femSection(kind, cfg) {
   const fields = st.fields.length ? st.fields : [{ id: 'vm', label: 'Esfuerzo de von Mises' }, { id: 'u', label: 'Desplazamiento |U|' }, { id: 'uz', label: 'Desplazamiento vertical' }, { id: 'peeq', label: 'Deformación plástica (PEEQ)' }];
   const parts = [{ id: 'all', label: 'Todo el conjunto' }, ...st.parts.filter((p) => p.id !== 'all')];
   const show = () => showFem(kind, cfg);
-  const view = h('div', { style: { marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '10px' } }, h('h4', { text: 'Ver resultados: deformada y esfuerzos', style: { marginBottom: '8px' } }),
-    h('div', { class: 'form-grid' },
-      cases.length ? field2(cfg.caseLabel, selectInput({ value: st.combo, options: cases, onChange: (v) => { st.combo = v; show(); } })) : null,
-      field2('Resultado', selectInput({ value: st.field, options: fields.map((f) => ({ value: f.id, label: f.label })), onChange: (v) => { st.field = v; show(); } })),
-      field2('Deformada', selectInput({ value: String(st.scale), options: [{ value: '0', label: 'Sin deformar' }, { value: '10', label: '×10' }, { value: '50', label: '×50' }, { value: '200', label: '×200' }, { value: '1000', label: '×1000' }], onChange: (v) => { st.scale = parseFloat(v); show(); } })),
-      field2('Pieza', selectInput({ value: st.part, options: parts.map((p) => ({ value: p.id, label: p.label })), onChange: (v) => { st.part = v; show(); } }))),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, btn('Mostrar en el visor', { icon: 'eye', onClick: show }), btn('Volver al modelo', { icon: 'box', onClick: backToModel })));
-  const meshStatus = h('div', { class: 'muted', style: { fontSize: '12.5px', marginTop: '6px' } });
-  const meshBox = cfg.mesh ? h('div', { style: { marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '10px' } }, h('h4', { text: 'Ver el modelo mallado', style: { marginBottom: '8px' } }),
-    h('p', { class: 'hint-text', text: 'Genera solo la malla (sin resolver) con el tamaño de elemento de la configuración y la muestra en el visor con sus aristas, pieza por pieza.' }),
-    h('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } },
-      cases.length ? field2(cfg.caseLabel, selectInput({ value: st.combo, options: cases, onChange: (v) => { st.combo = v; } })) : null,
-      field2('Pieza', h('div', { class: 'mesh-part-slot' }, selectInput({ value: st.meshPart || 'all', options: [{ value: 'all', label: 'Todo el conjunto' }, ...(st.meshParts || []).filter((x) => x.id !== 'all').map((x) => ({ value: x.id, label: x.label }))], onChange: (v) => { st.meshPart = v; if (E.femView) showMesh(kind, cfg, meshStatus); } }))),
-      btn('Ver malla en el visor', { icon: 'layers', kind: 'primary', onClick: () => showMesh(kind, cfg, meshStatus) }), btn('Volver al modelo', { icon: 'box', onClick: backToModel })), meshStatus) : null;
-  const inViewer = kind === 'node';                                           // en el nudo, la malla y los resultados se manejan desde la barra superior del visor
   const card = h('div', { class: 'card-sec' }, h('h4', { text: cfg.title }), h('p', { class: 'hint-text', text: cfg.desc }),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null, inViewer ? null : meshBox, inViewer ? h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'Al ejecutar el análisis aparecen en la barra superior del visor los botones de la malla y, al terminar, los resultados y la deformada.' }) : view);
+    h('div', { class: 'row', style: { marginTop: '8px' } }, run, stop), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null,
+    h('p', { class: 'hint-text', style: { marginTop: '8px' }, text: 'Al ejecutar el análisis aparecen en la barra superior del visor los botones de la malla (todo el modelo mezclado: nudo y placa base) y, al terminar, los resultados y la deformada.' }));
   if (E.jobs[kind]) pollJob(kind, status, run, stop, cfg);
   return card;
 }
@@ -896,7 +894,7 @@ function pollJob(kind, status, run, stop, cfg) {
       status.textContent = j.message || (j.done ? '' : 'Trabajando…');
       if (j.done) {
         clearInterval(E.pollers[kind]); E.pollers[kind] = null; run.disabled = false; stop.disabled = true;
-        if (j.state === 'done') { status.textContent = 'Análisis terminado.'; toast('Análisis FEM terminado', 'ok'); E.jobs[kind] = null; if (kind === 'node') { E.femDone = true; updateFemTools(); } runVerify.flush(); showFem(kind, cfg); }
+        if (j.state === 'done') { status.textContent = 'Análisis terminado.'; toast('Análisis FEM terminado', 'ok'); E.jobs[kind] = null; if (kind === 'node') E.femDone = true; else E.baseDone = true; E.femKind = kind; updateFemTools(); runVerify.flush(); showFem(kind, cfg); }
         else { status.textContent = j.state === 'cancelled' ? 'Cancelado.' : `Error: ${j.error}`; if (j.state !== 'cancelled') errorBox(new Error(j.error)); E.jobs[kind] = null; }
       }
     } catch (e) { clearInterval(E.pollers[kind]); E.pollers[kind] = null; errorBox(e); }
@@ -916,25 +914,32 @@ async function showFem(kind, cfg) {
     if (d.cbar) E.ui.fembar.append(colorbar(d.cbar));
     if (d.parts_list) st.parts = d.parts_list;
     if (d.fields) st.fields = d.fields;
-    if (kind === 'node') updateFemTools();
+    updateFemTools();
     if (d.summary) setStatus(`FEM: ${d.summary.nodes.toLocaleString('es')} nodos · |U|máx = ${S.us.q('L', d.summary.umax, 3)} · von Mises máx = ${S.us.q('S', d.summary.vmmax, 1)}`);
     if (d.message) toast(Array.isArray(d.message) ? d.message[0] : String(d.message), 'info');
   } catch (e) { errorBox(e); }
 }
-// herramientas FEM de la barra superior del visor
+// herramientas FEM de la barra superior del visor (sirven al análisis del nudo y al de la placa base)
 function updateFemTools() {
   const ui = E.ui; if (!ui || !ui.femGroup) return;
+  const done = E.femDone || E.baseDone;
   ui.femGroup.style.display = E.femStarted ? '' : 'none';
-  ui.femRes.style.display = E.femDone ? '' : 'none';
-  if (E.femStarted && !E.femDone) ui.femMeshBtn.title = 'Ver la malla de elementos finitos (el tramo que se modela)';
-  if (!E.femDone) return;
+  ui.femRes.style.display = done ? '' : 'none';
+  ui.femMeshBtn.title = 'Ver la malla de elementos finitos de todo el modelo (nudo y placa base mezclados)';
+  if (!done) return;
+  if (E.femKind === 'node' && !E.femDone) E.femKind = 'base';
+  if (E.femKind === 'base' && !E.baseDone) E.femKind = 'node';
+  const kind = E.femKind || 'node';
   E.fems = E.fems || {};
-  const st = E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  const st = E.fems[kind] = E.fems[kind] || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
   const fill = (sel, opts, value, onch) => { sel.replaceChildren(...opts.map((o) => h('option', { value: o.value, text: o.label }))); sel.value = String(value); sel.onchange = () => onch(sel.value); };
-  const cases = E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : [];
+  const cfg = E.femCfgs[kind];
+  const cases = cfg.cases();
   const fields = st.fields.length ? st.fields : [{ id: 'vm', label: 'Esfuerzo de von Mises' }, { id: 'u', label: 'Desplazamiento |U|' }, { id: 'uz', label: 'Desplazamiento vertical' }];
   const parts = [{ id: 'all', label: 'Todo el conjunto' }, ...st.parts.filter((p) => p.id !== 'all')];
-  const show = () => showFem('node', E.femCfgs.node);
+  const show = () => showFem(kind, cfg);
+  ui.femWhich.style.display = E.femDone && E.baseDone ? '' : 'none';
+  fill(ui.femWhich, [{ value: 'node', label: 'Nudo' }, { value: 'base', label: 'Placa base' }], kind, (v) => { E.femKind = v; updateFemTools(); showFem(v, E.femCfgs[v]); });
   fill(ui.femCase, cases, st.combo, (v) => { st.combo = v; show(); });
   fill(ui.femField, fields.map((f) => ({ value: f.id, label: f.label })), st.field, (v) => { st.field = v; show(); });
   fill(ui.femScale, [['0', 'Sin deformar'], ['10', 'Deformada ×10'], ['50', 'Deformada ×50'], ['200', 'Deformada ×200'], ['1000', 'Deformada ×1000']].map(([value, label]) => ({ value, label })), String(st.scale), (v) => { st.scale = parseFloat(v); show(); });
@@ -942,11 +947,8 @@ function updateFemTools() {
 }
 async function toggleFemMesh() {
   if (E.femView && E.femMeshOn) { E.femMeshOn = false; backToModel(); return; }
-  const cfg = E.femCfgs && E.femCfgs.node; if (!cfg) return;
-  E.fems = E.fems || {};
-  const st = E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
   const status = { textContent: '' };
-  await showMesh('node', cfg, status);
+  await showMeshAll(status);
   E.femMeshOn = !!E.femView;
 }
 function backToModel() { E.femView = false; E.femMeshOn = false; clear(E.ui.fembar); runMesh.flush(); applyLoads(); }

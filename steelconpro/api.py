@@ -806,12 +806,17 @@ def fem_base_mesh_scene(args) -> dict:
     kl = q.units().fl
     colors = {"plate": COLORS["plate"], "column": COLORS["column"], "stiff": COLORS["stiff"], "lug": "#a6a6a6", "washer": "#d9d9d9"}
     only = args.get("part", "all")
+    xf = None
+    if args.get("world"):                                           # en el marco del nudo (para mezclarla con la malla del nudo)
+        xf = AS.build_model(p).base_xf
     sc = Scene()
     pts = []
     for key, tris in res.parts.items():
         if only != "all" and key != only:
             continue
         faces = [[tuple(np.asarray(res.nodes[n], float) / kl) for n in t] for t in tris]
+        if xf is not None:
+            faces = [[tuple(xf[0] + xf[1] @ np.asarray(q, float)) for q in fc] for fc in faces]
         pts += [c for f in faces for c in f]
         sc.group = "mesh_" + key
         sc.add_faces(faces, FS._rgb(colors.get(key, "#bbbbbb")), 1.0, edges=True, all_edges=True)
