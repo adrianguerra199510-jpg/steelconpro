@@ -242,6 +242,7 @@ class CcxCase:
         self._build_bolts()
         self._build_welds()
         self._build_gaps()
+        self._build_ground()
         self._build_bc_loads()
         self._write_head()
 
@@ -276,7 +277,7 @@ class CcxCase:
                 rim = (np.abs(r - b.dh / 2.0) < tol_r) & (s >= s0 - 0.02) & (s <= s1 + 0.02)
                 if ip == 0:
                     rim |= (np.abs(s - s0) < 0.02) & (r <= b.rw + 0.02) & (r >= b.dh / 2.0 - tol_r)
-                if ip == len(b.grip) - 1:
+                if ip == len(b.grip) - 1 and not b.ground:
                     rim |= (np.abs(s - s1) < 0.02) & (r <= b.rw + 0.02) & (r >= b.dh / 2.0 - tol_r)
                 rim_ids = [int(n) for n in nodes[rim] if int(n) not in self.rigid_nodes]
                 if len(rim_ids) < 3:
@@ -289,8 +290,15 @@ class CcxCase:
                       f"*NSET, NSET=RIM_{_san(b.tag)}_{ip}", _wrap(rim_ids)] + self._rigid(rim_ids, ref, rot, c)
                 refs.append(ref)
                 rims.append(len(rim_ids))
-                if ip == len(b.grip) - 1 and getattr(b, "fix_nut", False):
+                if ip == len(b.grip) - 1 and getattr(b, "fix_nut", False) and not b.ground:
                     self.fix_refs += [ref, rot]
+            if b.ground > 0:                                     # anclaje: el extremo embebido es un punto fijo (el concreto no se malla)
+                gn = self.next_node
+                self.next_node += 1
+                cg = p0 + ax * b.nut_s
+                H += ["*NODE", f"{gn}, {cg[0]:.6f}, {cg[1]:.6f}, {cg[2]:.6f}"]
+                self.fix_refs.append(gn)
+                refs.append(gn)
             Ab = math.pi * b.db ** 2 / 4.0
             Lgrip = abs(b.nut_s - b.head_s) + 0.5 * b.db
             kax = self.E_ST * Ab / Lgrip
@@ -326,6 +334,43 @@ class CcxCase:
             self.gaps.append((self.next_elem, n1, n2, dof, self.kc * wt))
             self.next_elem += 1
         self.meta["contacts"] = [{"name": "contactos", "n_springs": len(self.gaps)}] if self.gaps else []
+
+    def _build_ground(self):
+        """Apoyo elastico del concreto bajo la placa base: un resorte por nodo de la cara inferior contra un nodo fijo (solo compresion: entra al conjunto activo de los contactos).
+        Rigidez = kv (kip/in3) x area tributaria del nodo."""
+        H = []
+        for g in getattr(self.mdl, "grounds", []):
+            fs = self.mesh.select(g["part"], tuple(g["box"]), tuple(g["normal"]) if g.get("normal") is not None else None)
+            if not fs:
+                raise RuntimeError(f"Apoyo elastico '{g['name']}': no se encontro la cara en la malla.")
+            nrm = np.asarray(g["normal"], float)
+            ax = int(np.argmax(np.abs(nrm)))
+            w = {}
+            for (_e, _f, nodes) in fs:
+                pa, pb, pc = (self.mesh.coord(q) for q in nodes[:3])
+                ar = 0.5 * float(np.linalg.norm(np.cross(pb - pa, pc - pa)))
+                for q in nodes[:3]:
+                    w[int(q)] = w.get(int(q), 0.0) + ar / 12.0
+                for q in nodes[3:]:
+                    w[int(q)] = w.get(int(q), 0.0) + ar / 4.0
+            n_sp = 0
+            for na, wt in w.items():
+                if na in self.rigid_nodes or wt < 1e-9:
+                    continue
+                gn = self.next_node
+                self.next_node += 1
+                c = self.mesh.coord(na)
+                H += ["*NODE", f"{gn}, {c[0]:.6f}, {c[1]:.6f}, {c[2]:.6f}"]
+                self.fix_refs.append(gn)
+                # la separacion es positiva cuando la placa se aleja del suelo: la placa esta del lado de -normal respecto del suelo
+                if nrm[ax] < 0:
+                    self.gaps.append((self.next_elem, gn, na, ax + 1, float(g["kv"]) * wt))
+                else:
+                    self.gaps.append((self.next_elem, na, gn, ax + 1, float(g["kv"]) * wt))
+                self.next_elem += 1
+                n_sp += 1
+            self.meta.setdefault("grounds", []).append({"name": g["name"], "n_springs": n_sp, "kv": float(g["kv"])})
+        self.head_ground = H
 
     def _build_bc_loads(self):
         mdl, mesh = self.mdl, self.mesh
@@ -403,7 +448,7 @@ class CcxCase:
                     fy = self.phi * pm.Fy
                     L += ["*PLASTIC", f"{fy:.4f}, 0.0", f"{fy * 1.0005:.4f}, 0.25"]
             L.append(f"*SOLID SECTION, ELSET=E_{_san(k)}, MATERIAL=M_{_san(k)}")
-        L += self.head_bolts + self.head_bc
+        L += self.head_bolts + self.head_ground + self.head_bc
         # resortes de los pernos
         for (e, n1, n2, k, ib) in self.bolt_ax:
             if bolt_on is None or ib in bolt_on:

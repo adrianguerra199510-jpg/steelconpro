@@ -178,6 +178,7 @@ class Bolt:
     grade: str = "A325-N"
     planes: int = 1                     # planos de corte (1 o 2)
     fix_nut: bool = False               # el cuerpo rigido de la tuerca (anclaje embebido en el concreto) queda empotrado
+    ground: float = 0.0                 # anclaje embebido: largo (in) del vastago hasta el empotramiento (resorte axial y de cortante a un punto fijo; el concreto no se malla)
 
 
 @dataclass
@@ -250,6 +251,7 @@ class Model3D:
     extra: list = field(default_factory=list)     # piezas ya hechas de caras en el mundo (placa base): (etiqueta, caras, color, alfa)
     generic: list = field(default_factory=list)   # entradas de las operaciones generales (placas, pernos, soldaduras) para sus verificaciones
     elems: dict = field(default_factory=dict)     # elementos con caras (miembros, placas, placa base): nombre -> datos
+    grounds: list = field(default_factory=list)  # apoyos elasticos solo-compresion contra suelo fijo: [{name, part, box, normal, kv}] (kv en kip/in3): el concreto bajo la placa base
     base_fem: bool = False                        # la placa base (y su concreto y anclajes) entra al FEM del nudo
     base_xf: tuple = None                         # (O, F) de la placa base: coordenadas de placa -> mundo (None sin placa base)
 

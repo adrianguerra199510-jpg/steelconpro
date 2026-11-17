@@ -471,10 +471,10 @@ def modelo_unico(con_malla=True):
     names = [q.name for q in mdl.parts]
     bpd = BP.derive(p, nd)
     nb = len(G.bolt_positions(bpd))
-    check(mdl.base_fem and "Placa base" in names and "Concreto" in names, "placa base y concreto dentro del modelo FEM")
+    check(mdl.base_fem and "Placa base" in names and "Concreto" not in names, "placa base dentro del modelo FEM y el concreto sin mallar")
     check(sum(1 for q in names if q.startswith("Rigidizador")) == 4, "los 4 rigidizadores son piezas del FEM")
-    check(len([b for b in mdl.bolts if b.tag.startswith("Anclaje")]) == nb and all(b.fix_nut for b in mdl.bolts if b.tag.startswith("Anclaje")), f"{nb} anclajes con la tuerca empotrada")
-    check([s_.name for s_ in mdl.supports] == ["Apoyo del concreto (cara inferior)"], "el único apoyo es la cara inferior del concreto")
+    check(len([b for b in mdl.bolts if b.tag.startswith("Anclaje")]) == nb and all(b.ground > 0 for b in mdl.bolts if b.tag.startswith("Anclaje")), f"{nb} anclajes empotrados en su extremo embebido")
+    check(not mdl.supports and len(mdl.grounds) == 1 and mdl.grounds[0]["kv"] > 0, "sin apoyos rígidos: el concreto es un apoyo elástico solo-compresión bajo la placa")
     wnames = {w.A for w in mdl.welds} | {w.B for w in mdl.welds}
     check(all(n in names for n in wnames), "todos los cordones unen piezas que existen en el modelo")
     check(not any("femcut" == (q.get("kind") if isinstance(q, dict) else None) for q in api.mesh({"connection": __import__("dataclasses").asdict(p)})["parts"]), "el visor no dibuja planos de corte del FEM")
@@ -486,9 +486,10 @@ def modelo_unico(con_malla=True):
             if npz is not None:
                 mm = ccxgen.Mesh(str(npz))
                 n_el = {k: len(mm.E[k]) for k in mm.names}
-                check(all(n_el.get(k, 0) > 0 for k in ("Placa base", "Concreto", "Columna")), "malla con columna, placa base y concreto")
+                check(all(n_el.get(k, 0) > 0 for k in ("Placa base", "Columna")) and "Concreto" not in n_el, "malla con columna y placa base; el concreto no se malla")
                 case = ccxgen.CcxCase(mdl, mm, {"plastic": True, "contacts": True})
-                check(len(case.fix_refs) == 2 * nb and len(case.gaps) > 0, f"CalculiX: {len(case.fix_refs) // 2} anclajes empotrados y {len(case.gaps)} contactos")
+                ng = case.meta["grounds"][0]["n_springs"]
+                check(ng > 100 and len([b for b in case.mdl.bolts if b.ground > 0]) == nb and len(case.bolt_ax) >= nb, f"CalculiX: {ng} resortes de apoyo bajo la placa y {nb} anclajes a punto fijo")
 
 
 if __name__ == "__main__":

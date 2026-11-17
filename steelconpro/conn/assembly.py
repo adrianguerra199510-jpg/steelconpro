@@ -2178,9 +2178,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
 
 
 def _fem_base_parts(mdl, nd, bpd, bp_place, bop) -> bool:
-    """Placa base dentro del modelo FEM del nudo (UN solo modelo): la placa con sus agujeros, los rigidizadores, el bloque de concreto bajo ella (elastico, empotrado en su cara
-    inferior, con su propio módulo) y los anclajes como pernos que atraviesan placa y concreto (resortes con la rigidez del vástago, tuerca empotrada en el fondo).  El contacto
-    placa-concreto solo comprime.  Devuelve False (y deja una nota) si la placa no se puede incluir: entonces el nudo se analiza apoyado en el extremo del principal."""
+    """Placa base dentro del modelo FEM del nudo (UN solo modelo): la placa con sus agujeros, los rigidizadores, el concreto bajo ella como apoyo elástico solo-compresión (resortes
+    contra suelo fijo: el concreto NO se malla) y los anclajes como resortes axial (EA/L del largo embebido) y de cortante hacia un punto fijo.  Devuelve False (y deja una nota) si la
+    placa no se puede incluir: entonces el nudo se analiza apoyado en el extremo del principal."""
     from . import baseplate as BP
     from .. import geometry as G
     from ..params3d import washer_radius
@@ -2209,25 +2209,24 @@ def _fem_base_parts(mdl, nd, bpd, bp_place, bop) -> bool:
     if len(outl) > 3 and math.hypot(outl[0][0] - outl[-1][0], outl[0][1] - outl[-1][1]) < 1e-9:
         outl = outl[:-1]
     mdl.parts.append(Part("Placa base", "plate", "Placa base", Fy, Fu, [poly_prism(outl, Ob, Fb[:, 0], Fb[:, 1], 0.0, tp)], t=tp))
-    # ---- concreto bajo la placa (el mortero de nivelacion se modela como concreto)
+    # ---- concreto: NO se malla; apoyo elastico solo-compresion bajo la placa (resortes contra suelo fijo) y anclajes empotrados en su extremo embebido
     xs, ys = [q[0] for q in outl], [q[1] for q in outl]
-    mg = 3.0
-    rect = [(min(xs) - mg, min(ys) - mg), (max(xs) + mg, min(ys) - mg), (max(xs) + mg, max(ys) + mg), (min(xs) - mg, max(ys) + mg)]
-    H = float(min(max(float(bpd.bolts.hef), 6.0), 18.0))
+    H = float(min(max(float(bpd.bolts.hef), 6.0), 36.0))                   # largo embebido del anclaje
     fc = float(bpd.conc.fc)
     Ec = 57.0 * math.sqrt(max(fc, 1.0) * 1000.0)                          # ACI 19.2.2.1: 57000·√f'c (psi) → ksi
-    conc = Part("Concreto", "concrete", "Concreto", 1.0e5, 1.0e5, [poly_prism(rect, W(0, 0, -H), Fb[:, 0], Fb[:, 1], 0.0, H)], t=H, stub=True, no_peeq=True, E=Ec, elastic=True)
-    mdl.parts.append(conc)
-    P = np.vstack([pr.corners() for pr in conc.prisms])
+    Lp = max(min(max(xs) - min(xs), max(ys) - min(ys)), 6.0)
+    kv = Ec / Lp                                                          # modulo de balasto (kip/in3): del orden de E/(ancho de la placa)
+    P = np.vstack([pr.corners() for pr in mdl.part("Placa base").prisms])
     lo, hi = P.min(axis=0), P.max(axis=0)
-    c0 = float(W(0, 0, -H)[ax_i])
+    c0 = float(W(0, 0, 0)[ax_i])
     lo[ax_i], hi[ax_i] = c0 - 0.05, c0 + 0.05
-    mdl.supports.append(Support("Apoyo del concreto (cara inferior)", FaceSel("Concreto", tuple(float(v) for i in range(3) for v in (lo[i], hi[i])), tuple(float(-x) for x in up)), (1, 2, 3)))
-    # ---- anclajes: del plano superior de la placa hasta el fondo del concreto
+    mdl.grounds.append({"name": "Apoyo elástico del concreto", "part": "Placa base", "box": tuple(float(v) for i in range(3) for v in (lo[i], hi[i])),
+                        "normal": tuple(float(-x) for x in up), "kv": float(kv)})
+    # ---- anclajes: de la cara superior de la placa al empotramiento (resorte axial EA/L y de cortante)
     rw = float(washer_radius(bpd))
     for k, (bx, by) in enumerate(G.bolt_positions(bpd)):
         mdl.bolts.append(Bolt(f"Anclaje {k + 1}", tuple(float(v) for v in W(bx, by, tp)), tuple(float(-x) for x in up), float(g.db), float(g.dh), rw,
-                              [("Placa base", 0.0, tp), ("Concreto", tp, tp + H)], 0.0, tp + H, "A307", 1, True))
+                              [("Placa base", 0.0, tp)], 0.0, tp + H, "A307", 1, True, H))
     # ---- rigidizadores
     st = bpd.stiff
     if st.enabled and st.count > 0 and not bpd.section.generic:
@@ -2243,8 +2242,8 @@ def _fem_base_parts(mdl, nd, bpd, bp_place, bop) -> bool:
                                   [poly_prism(prof, W(x1, y1, tp), D, up, -float(st.t) / 2.0, float(st.t) / 2.0)], t=float(st.t)))
     if getattr(bpd.lug, "enabled", False):
         mdl.notes.append("La llave de corte no se modela en el FEM del nudo: el cortante lo toman los anclajes.")
-    mdl.notes.append("Placa base dentro del FEM: concreto elástico (E = 57000·√f'c) empotrado en su cara inferior, contacto placa–concreto sin tracción y anclajes como resortes "
-                     "(rigidez del vástago, tuerca empotrada en el fondo; se verifican como pernos A307).")
+    mdl.notes.append("Placa base dentro del FEM: el concreto no se malla; bajo la placa hay resortes solo-compresión (módulo de balasto = E/ancho, E = 57000·√f'c) y los anclajes son resortes "
+                     "axiales (EA/L del largo embebido) y de cortante hacia un punto fijo (se verifican como pernos A307).")
     return True
 
 
