@@ -794,9 +794,9 @@ function renderMemory() {
 // El análisis completo se lanza con «Calcular»; la pestaña FEM solo configura, malla y muestra la malla en el visor.
 function nodeFemCfg() {
   return { title: 'Modelo FEM (miembros, placas, pernos, soldaduras y placa base)',
-    desc: 'Un solo modelo sólido con Gmsh + CalculiX. Cada miembro tiene el largo con que se dibuja (lo fija el cálculo); el lado que equilibra del principal queda empotrado y en los demás extremos se aplican las cargas del análisis nodal. '
-      + 'Con placa base, el modelo incluye la placa, los rigidizadores, los anclajes y el concreto bajo ella. Los pernos son resortes entre cuerpos rígidos, los cordones de filete unen las placas, y el acero es elasto-plástico (φ·Fy). '
-      + 'El veredicto incluye lo que sale del FEM: fuerza en los pernos, esfuerzo en las soldaduras y deformación plástica de las piezas.',
+    desc: 'Un solo modelo de PLACAS (cascarones sobre la superficie media de cada pieza, como IDEA StatiCa), mallado con Gmsh. Cada miembro tiene el largo con que se dibuja (lo fija el cálculo). '
+      + 'Con placa base, el modelo incluye la placa y sus rigidizadores; el concreto no se malla (apoyo elástico solo-compresión y anclajes como resortes). Las placas que apoyan contra otra se unen en su superficie media y los agujeros de los pernos se abren en cada placa. '
+      + 'Por ahora solo se genera la malla.',
     start: (st) => call('fem_node_start', { connection: E.conn(), force: !!(st && st.force) }), scene: (st) => call('fem_node_scene', { connection: E.conn(), case: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
     cases: () => (E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : []), caseLabel: 'Caso de carga', config: femConfig };
 }
@@ -850,7 +850,7 @@ async function showMeshAll(status) {
     E.viewer.setModel(d, { keepView: keep });
     E.viewer.setLoads([]);
     clear(E.ui.fembar);
-    status.textContent = `Malla: ${d.mesh.nodes.toLocaleString('es')} nodos · ${d.mesh.elements.toLocaleString('es')} elementos tetraédricos`;
+    status.textContent = `Malla: ${d.mesh.nodes.toLocaleString('es')} nodos · ${d.mesh.elements.toLocaleString('es')} elementos de placa`;
     setStatus(status.textContent);
   } catch (e) { status.textContent = ''; errorBox(e); }
 }

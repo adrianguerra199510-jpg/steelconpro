@@ -605,17 +605,28 @@ def fem_mesh_start(args) -> dict:
     def run():
         try:
             folder.mkdir(parents=True, exist_ok=True)
-            job["messages"].append("1/2  Armando el modelo 3D ...")
+            job["messages"].append("1/3  Armando el modelo 3D ...")
             fea = p.fea
             f = float(args.get("coarsen", 1.0))
             mdl = AS.build_model(p, {"case": i})
-            params = driver.mesh_params(mdl, fea, f)
-            job["messages"].append("2/2  Mallando con Gmsh ...")
-            npz, out = driver._mesh(mdl, params, folder, "nudo", tok)
-            if npz is None:
-                job.update(state="cancelled" if out == mesh3d.CANCELADO else "error", error=str(out), done=True)
+            from .conn.fem import shellmesh as SM
+            job["messages"].append("2/3  Reduciendo cada pieza a su placa (superficie media) ...")
+            plates, notes = SM.build_plates(mdl)
+            params = SM.shell_params(fea, mdl, f)
+            jf = folder / "placas_job.json"
+            npz = folder / "placas_malla.npz"
+            if npz.exists():
+                npz.unlink()
+            SM.write_job(plates, params, str(jf))
+            job["messages"].append("3/3  Mallando las placas con Gmsh ...")
+            rc, out, state = mesh3d._run_proc(mesh3d._self_cmd() + ["--meshs", str(jf), str(npz)], tok, 300)
+            if state == "cancelado":
+                job.update(state="cancelled", error=mesh3d.CANCELADO, done=True)
                 return
-            NODE_MESH[(sig, i)] = {"npz": str(npz), "model": mdl}
+            if not npz.exists():
+                job.update(state="error", error="Gmsh no genero la malla de placas.\n\n" + str(out)[-2000:], done=True)
+                return
+            NODE_MESH[(sig, i)] = {"npz": str(npz), "model": mdl, "notes": list(mdl.notes) + list(notes)}
             job.update(state="done", done=True)
         except Exception as e:                                                  # noqa: BLE001
             job.update(state="error", error=f"{type(e).__name__}: {e}", done=True)
@@ -626,41 +637,41 @@ def fem_mesh_start(args) -> dict:
 
 
 def fem_mesh_scene(args) -> dict:
-    """Escena de la malla de elementos finitos del nudo (piel de cada pieza con sus aristas) para el visor."""
-    from .conn.fem import ccxgen
+    """Escena de la malla de placas (cascarones) del modelo para el visor: cada placa con sus elementos y aristas."""
     from .conn.fem.model3d import COLORS
+    from .conn.fem.shellmesh import ShellMesh
     from .scene3d import Scene
     p = _prj(args["connection"])
     i = int(args.get("case", 0))
     ent = NODE_MESH.get((_node_sig(p), i))
     if ent is None or not Path(ent["npz"]).exists():
         raise ApiError("No hay una malla vigente de ese caso: genérela primero (los cambios en el nudo o en las opciones la invalidan).")
-    mesh = ccxgen.Mesh(ent["npz"])
+    sm = ShellMesh(ent["npz"])
     mdl = ent["model"]
     kinds = {pt.name: pt.kind for pt in mdl.parts}
     only = args.get("part", "all")
     sc = Scene()
-    pts, stats, total_e = [], [], 0
-    for key in mesh.names:
-        n_el = int(len(mesh.E[key]))
+    pts, stats, total_e = [], {}, 0
+    for k, part in enumerate(sm.parts):
+        n_el = len(sm.tri[k]) + len(sm.quad[k])
         total_e += n_el
-        stats.append({"id": key, "label": key, "elements": n_el, "nodes": int(len(mesh.part_nodes(key)))})
-        if only != "all" and key != only:
+        st = stats.setdefault(part, {"id": part, "label": part, "elements": 0})
+        st["elements"] += n_el
+        if only != "all" and part != only:
             continue
-        col = FS._rgb(COLORS.get(kinds.get(key, "other"), COLORS["other"]))
-        faces = []
-        for (_e, _f, nodes, _c, _n) in mesh.skin(key):
-            faces.append([tuple(mesh.coord(n)) for n in nodes[:3]])
+        faces = sm.polygons(k)
+        if not faces:
+            continue
         pts += [q for fc in faces for q in fc]
-        sc.group = "mesh_" + key
-        sc.add_faces(faces, col, 1.0, edges=True, all_edges=True)
+        sc.group = "mesh_" + part
+        sc.add_faces(faces, FS._rgb(COLORS.get(kinds.get(part, "other"), COLORS["other"])), 1.0, edges=True, all_edges=True)
     sc.group = "other"
     sc.pts = pts
     d = {"parts": [_scene_to_json(sc, "Malla", "fem")], "message": ""}
     P = np.asarray(pts, float).reshape(-1, 3) if pts else np.zeros((1, 3))
     d["bounds"] = [P.min(axis=0).tolist(), P.max(axis=0).tolist()]
-    d["mesh"] = {"nodes": int(len(mesh.node_ids)), "elements": total_e, "parts": stats}
-    d["parts_list"] = [{"id": "all", "label": "Todo el conjunto"}] + [{"id": k["id"], "label": f"{k['label']} ({k['elements']:,} elem.)"} for k in stats]
+    d["mesh"] = {"nodes": int(len(sm.node_ids)), "elements": total_e, "parts": list(stats.values()), "shells": True}
+    d["parts_list"] = [{"id": "all", "label": "Todo el conjunto"}] + [{"id": k["id"], "label": f"{k['label']} ({k['elements']:,} elem.)"} for k in stats.values()]
     return d
 
 

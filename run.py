@@ -5,6 +5,7 @@
     SteelConPro.exe --selftest            -> autopruebas del motor (sin interfaz)
     SteelConPro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
     SteelConPro.exe --meshm a.json b.npz  -> (interno) malla del modelo 3D de una conexion
+    SteelConPro.exe --meshs a.json b.npz  -> (interno) malla de placas (cascarones) de una conexion
     SteelConPro.exe proyecto.scp --pdf mem.pdf --docx s.docx
                                      --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
@@ -151,6 +152,9 @@ def main():
     args = sys.argv[1:]
     if args and args[0] == "--mesh":
         return mesh_child(args[1], args[2])
+    if args and args[0] == "--meshs":                  # (interno) malla de placas (cascarones) de una conexion
+        from steelconpro.conn.fem.shellmesh import child as shell_child
+        return shell_child(args[1], args[2])
     if args and args[0] == "--meshm":
         from steelconpro.conn.fem.mesher import child
         return child(args[1], args[2])

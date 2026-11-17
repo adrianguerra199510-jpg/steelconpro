@@ -478,18 +478,75 @@ def modelo_unico(con_malla=True):
     wnames = {w.A for w in mdl.welds} | {w.B for w in mdl.welds}
     check(all(n in names for n in wnames), "todos los cordones unen piezas que existen en el modelo")
     check(not any("femcut" == (q.get("kind") if isinstance(q, dict) else None) for q in api.mesh({"connection": __import__("dataclasses").asdict(p)})["parts"]), "el visor no dibuja planos de corte del FEM")
+    from steelconpro.conn.fem import shellmesh as SM
+    plates, nts = SM.build_plates(mdl)
+    pn = [q for q in plates if q.part == "Placa base"]
+    check(len(pn) == 1 and len(pn[0].holes) == nb, f"modelo de placas: la placa base lleva {nb} agujeros de anclaje ({len(pn[0].holes) if pn else 0})")
+    col = [q for q in plates if q.part == "Columna"]
+    check(len(col) == 3 and all(q.t > 0 for q in plates), "la columna I se reduce a 3 placas (2 alas y alma) con su espesor")
+    web = [q for q in col if abs(q.t - 0.44) < 1e-6]
+    flg = [q for q in col if abs(q.t - 0.71) < 1e-6]
+    check(len(web) == 1 and len(flg) == 2, "espesores de la columna: alma 0.44 y alas 0.71 in")
+    # el alma llega a la superficie media de las alas (arista compartida): distancia de sus bordes a la superficie media de cada ala
+    if web and flg:
+        w = web[0]
+        d = [abs(float((v - f_.c) @ f_.n)) for f_ in flg for v in w.P]
+        check(sum(1 for x in d if x < 1e-6) >= 4, "el alma de la columna llega a la superficie media de las alas (arista compartida)")
     if con_malla:
+        import subprocess
         with tempfile.TemporaryDirectory() as td:
-            params = driver.mesh_params(mdl, p.fea, 1.0)
-            npz, out = driver._mesh(mdl, params, Path(td), "t", None)
-            check(npz is not None, f"malla del modelo único: {str(out)[-120:]}")
-            if npz is not None:
-                mm = ccxgen.Mesh(str(npz))
-                n_el = {k: len(mm.E[k]) for k in mm.names}
-                check(all(n_el.get(k, 0) > 0 for k in ("Placa base", "Columna")) and "Concreto" not in n_el, "malla con columna y placa base; el concreto no se malla")
-                case = ccxgen.CcxCase(mdl, mm, {"plastic": True, "contacts": True})
-                ng = case.meta["grounds"][0]["n_springs"]
-                check(ng > 100 and len([b for b in case.mdl.bolts if b.ground > 0]) == nb and len(case.bolt_ax) >= nb, f"CalculiX: {ng} resortes de apoyo bajo la placa y {nb} anclajes a punto fijo")
+            jf, npz = os.path.join(td, "j.json"), os.path.join(td, "m.npz")
+            SM.write_job(plates, SM.shell_params(p.fea, mdl, 1.0), jf)
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "--meshs", jf, npz], capture_output=True, text=True, timeout=300)
+            check(r.returncode == 0 and os.path.exists(npz), f"malla de placas: {r.stdout[-80:] or r.stderr[-120:]}")
+            if os.path.exists(npz):
+                sm = SM.ShellMesh(npz)
+                check(set(sm.parts) >= {"Columna", "Placa base"} and "Concreto" not in sm.parts and sm.n_elems > 500, f"malla con columna y placa base, sin concreto ({sm.n_elems} elementos, {len(sm.node_ids)} nodos)")
+                # conforme: el alma y las alas comparten nodos
+                ids = {}
+                for k_, q in enumerate(plates):
+                    s_ = set()
+                    for row in list(sm.tri[k_]) + list(sm.quad[k_]):
+                        s_.update(int(x) for x in row)
+                    ids[q.key] = s_
+                shared = ids[web[0].key] & (ids[flg[0].key] | ids[flg[1].key]) if web and flg else set()
+                check(len(shared) > 10, f"malla conforme: el alma comparte {len(shared)} nodos con las alas")
+
+
+def placas_ejemplos():
+    """Modelo de placas de TODOS los ejemplos: se arma sin excepciones y una muestra se malla (Gmsh en proceso hijo, 1 hilo)."""
+    print("\n== modelo de placas (cascarones) de los ejemplos ==")
+    import subprocess
+    import tempfile
+    from steelconpro.conn.fem import shellmesh as SM
+    files = sorted(glob.glob(os.path.join(ROOT, "ejemplos", "*.scp")))
+    malos, mallados, fallos = [], 0, []
+    with tempfile.TemporaryDirectory() as td:
+        for n, f in enumerate(files):
+            try:
+                p = load_book(f)[0]
+                mdl = AS.build_model(p, {"case": 0})
+                plates, _nt = SM.build_plates(mdl)
+                if not plates or any(len(q.P) < 3 or not np.isfinite(q.P).all() for q in plates):
+                    malos.append(os.path.basename(f))
+                    continue
+                if n % 6 == 0:
+                    jf, npz = os.path.join(td, "j.json"), os.path.join(td, "m.npz")
+                    SM.write_job(plates, SM.shell_params(p.fea, mdl, 1.0), jf)
+                    try:
+                        r = subprocess.run([sys.executable, os.path.join(ROOT, "run.py"), "--meshs", jf, npz], capture_output=True, text=True, timeout=120)
+                        ok = r.returncode == 0 and os.path.exists(npz) and SM.ShellMesh(npz).n_elems > 0
+                    except subprocess.TimeoutExpired:
+                        ok = False
+                    mallados += 1
+                    if not ok:
+                        fallos.append(os.path.basename(f))
+                    if os.path.exists(npz):
+                        os.remove(npz)
+            except Exception as e:                                       # noqa: BLE001
+                malos.append(f"{os.path.basename(f)}: {type(e).__name__}: {e}")
+    check(not malos, f"{len(files)} ejemplos: modelo de placas armado sin excepciones" + (f" (fallan {malos[:3]})" if malos else ""))
+    check(not fallos, f"{mallados} ejemplos mallados como placas" + (f" (fallan {fallos[:3]})" if fallos else ""))
 
 
 if __name__ == "__main__":
@@ -502,6 +559,8 @@ if __name__ == "__main__":
     api_mesh()
     placa_base()
     modelo_unico(con_malla=not RAPIDO)
+    if not RAPIDO:
+        placas_ejemplos()
     if not RAPIDO:
         mallador()
         barrido_conexiones()
