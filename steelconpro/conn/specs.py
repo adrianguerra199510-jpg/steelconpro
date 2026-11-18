@@ -129,6 +129,7 @@ class Member:
     L: float = 48.0              # largo libre dibujado del miembro, in
     roll: float = 0.0            # giro del miembro sobre su eje, grados
     gap: float = 0.0             # desplazamiento del miembro sobre su propio eje, in (+ lo aleja del principal, − lo acerca)
+    attach_to: str = ""           # miembro al que llega (vacío = el principal): `pos`, `off` y `off2` se miden desde el INICIO de ese miembro y en sus ejes
     rel_auto: bool = True        # rotaciones liberadas en el extremo del nudo: automáticas según la conexión (corte y diagonales articuladas, momento empotradas)
     rel_T: bool = False          # (si rel_auto es falso) giro alrededor del eje del miembro liberado: el miembro no transmite torsión al nudo
     rel_My: bool = False         # giro alrededor de su eje local y liberado (flexión por cortante vertical Vz)
@@ -362,13 +363,50 @@ class Nodo:
         puntos donde llegan los miembros, según como termina el principal."""
         k = self.end_index
         L = self.auto_len()
-        pos = [float(m.pos) for m in self.members] or [0.0]
+        pos = [float(m.pos) for m in self.members if not self.parent_name(m)] or [0.0]
         neg = L + max(0.0, -min(pos))
         up = L + max(0.0, max(pos))
         return (neg if k != 2 else 0.0, up if k != 1 else 0.0)
 
     def member_named(self, name):
         return next((m for m in self.members if m.name == name), None)
+
+    def parent_name(self, m) -> str:
+        """Nombre del miembro al que llega `m` ("" = el principal): vacío también si `attach_to` no existe, es él mismo o forma un ciclo."""
+        seen = {m.name}
+        cur = m
+        while cur.attach_to:
+            p = self.member_named(cur.attach_to)
+            if p is None or p.name in seen:
+                return "" if cur is m or p is None or p.name in seen else m.attach_to
+            seen.add(p.name)
+            cur = p
+        return m.attach_to if m.attach_to and self.member_named(m.attach_to) is not None else ""
+
+    def is_child(self, name) -> bool:
+        """El miembro `name` llega a otro miembro (no al principal)."""
+        m = self.member_named(name)
+        return m is not None and bool(self.parent_name(m))
+
+    def member_order(self) -> list:
+        """Miembros con cada padre antes que sus hijos (los que llegan al principal, primero)."""
+        out, done = [], set()
+
+        def add(m, depth=0):
+            if m.name in done or depth > len(self.members):
+                return
+            p = self.parent_name(m)
+            if p:
+                add(self.member_named(p), depth + 1)
+            if m.name not in done:
+                done.add(m.name)
+                out.append(m)
+        for m in self.members:
+            add(m)
+        return out
+
+    def children_of(self, name) -> list:
+        return [m for m in self.members if self.parent_name(m) == name]
 
     def releases(self, name):
         """Rotaciones liberadas (T, My, Mz) del extremo del miembro `name` en el nudo.  Automático: las conexiones de corte (placa simple, doble ángulo, asiento) y las de diagonal
@@ -460,6 +498,9 @@ class Nodo:
         return True
 
     def rename_member(self, old, new):
+        for m_ in self.members:
+            if m_.attach_to == old:
+                m_.attach_to = new
         for o in self.operations:
             if o.member == old:
                 o.member = new

@@ -437,22 +437,36 @@ def _rounded_rect(w, h, r, n=6):
 
 
 def g22_torre_cuatro_tubos_sobre_placa() -> Project:
-    """Torre de cuatro tubos redondos HSS2.375X0.218 (cordones de 12 in entre ejes) sobre una placa 32×32×1/2 con esquinas redondeadas (polígono libre).  Un tubo es el miembro
-    principal y los otros tres son miembros paralelos desplazados (off/off2); la placa se suelda al principal y los otros tres tubos se sueldan a ella con operaciones de soldadura.
-    Cuatro anclajes atraviesan la placa hacia un bloque de concreto.  No lleva el arriostramiento entre los tubos: los miembros solo se conectan al principal."""
+    """Torre de cuatro cordones de tubo redondo HSS2.375X0.218 (12 in entre ejes) sobre una placa 32×32×1/2 con esquinas redondeadas (polígono libre), con anclajes a un pedestal y
+    dos aros de travesaños horizontales (Pipe 3/4 XS) a 14 y 46 in de la placa.  Un cordón es el miembro principal y los otros tres son miembros paralelos desplazados (off/off2);
+    cada travesaño llega a un cordón (`Member.attach_to`: `pos`, `off` y `off2` se miden desde el inicio de ese cordón y en sus ejes) y se recorta contra el volumen del cordón vecino y se
+    suelda en su contorno.  Solo se modela la soldadura del extremo libre (el de llegada apoya sobre su cordón).  Las diagonales también se pueden colocar (az/el), pero su recorte contra
+    un tubo redondo aún no deja el cordón sobre la superficie: no se incluyen."""
     shape = "HSS2.375X0.218"
     nd = column(shape=shape, length=60.0, end=2)
     a = 12.0
-    for k, (dx, dy) in enumerate([(a, 0.0), (a, a), (0.0, a)], 1):
-        nd.members.append(Member(name=f"T{k}", shape=shape, steel=nd.main_steel, az=0.0, el=90.0, pos=0.0, off=dx, off2=dy, L=60.0, gap=-0.5))
+    chords = [(nd.main_name, 0.0, 0.0), ("T1", a, 0.0), ("T2", a, -a), ("T3", 0.0, -a)]
+    for nm, x, y in chords[1:]:
+        nd.members.append(Member(name=nm, shape=shape, steel=nd.main_steel, az=0.0, el=90.0, pos=0.0, off=x, off2=-y, L=60.0, gap=-0.5))
+    # cada cara se une con un travesaño que llega a un cordón (su padre) y se recorta contra el cordón vecino: (padre, azimut hacia el vecino, vecino)
+    faces = [("T1", 180.0, nd.main_name), ("T1", -90.0, "T2"), ("T2", 180.0, "T3"), ("T3", 90.0, nd.main_name)]
+    levels = (14.0, 46.0)
+    ties = []
+    for f, (par, az, nb) in enumerate(faces):
+        for j, z in enumerate(levels):
+            name = f"H{j + 1}{f + 1}"
+            nd.members.append(Member(name=name, shape="Pipe3.4XS", steel=nd.main_steel, az=az, el=0.0, pos=z, L=60.0, gap=-0.05, attach_to=par))
+            ties.append((name, par, nb))
     gen(nd, OP_BLOCK, name="PEDESTAL", wp_x=6.0, wp_y=-6.0, wp_z=-0.5 - 12.0, blk_L=36.0, blk_W=36.0, blk_H=24.0)
     gen(nd, OP_PLATE, name="PB", parent=nd.main_name, face=F_END0, shape=FREE, pts=_rounded_rect(32.0, 32.0, 3.5), pl_L=32.0, pl_W=32.0, pl_s=7.19, pl_u=-6.0,
         plate_t=0.5, plate_steel=A36, weld_size=0.125)
     for k in range(3):
         gen(nd, OP_FILLET, weld_main=f"T{k + 1}", weld_to=[["PB", "Cara superior"]], weld_all=True, weld_size=0.125)
     gen(nd, OP_BOLTS, name="ANC", parent="PB", face="Cara −", targets=["PEDESTAL"], rows=2, cols=2, bolt_s=26.0, bolt_g=26.0, pl_s=16.0, pl_u=0.0, bolt_size="3/4", bolt_grade="A307")
+    for name, par, nb in ties:
+        gen(nd, OP_TRIM, targets=[name], parent=nb, trim_mode=M_VOL, trim_gap=-0.05, trim_end="Fin", trim_weld=True, weld_size=0.125)             # extremo libre, contra el cordón vecino
     nd.loads = [Load("Caso 1", nd.main_name, N=-4.0, side=1)]
-    return project("TP-G22", "torre de cuatro tubos redondos sobre placa con esquinas redondeadas y anclajes", nd)
+    return project("TP-G22", "torre de cuatro cordones tubulares sobre placa con esquinas redondeadas y aros de travesaños (miembro a miembro)", nd)
 
 
 EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atornillado),

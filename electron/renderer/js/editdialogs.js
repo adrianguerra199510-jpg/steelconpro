@@ -11,6 +11,18 @@ function formCtx(E, obj, onChange) {
   return { us: E.us(), get: () => obj, onChange, hide: () => false, sectionPicker: (it, val, set) => sectionPicker(val, set) };
 }
 
+// Miembros que llegan (directa o indirectamente) al miembro `name`: no pueden ser su apoyo (ciclo).
+export function descendantsOf(nd, name) {
+  const out = new Set(); const stack = [name];
+  while (stack.length) { const cur = stack.pop(); for (const m of nd.members) if (m.attach_to === cur && !out.has(m.name)) { out.add(m.name); stack.push(m.name); } }
+  return out;
+}
+// Al eliminar un miembro, los que llegan a él pasan a llegar al apoyo del eliminado (su posición ya no se mide desde el mismo punto: conviene revisarla).
+export function reparentChildren(nd, name) {
+  const m = nd.members.find((x) => x.name === name); const up = m ? (m.attach_to || '') : '';
+  for (const c of nd.members) if (c.attach_to === name) c.attach_to = up;
+}
+
 // Sustituye un nombre de elemento en todas las referencias del nudo (miembros, operaciones, cargas).
 // rotaciones liberadas (T, My, Mz) del extremo de un miembro en el nudo: automáticas según su conexión (corte y diagonales articuladas) o las marcadas a mano
 export function releasesOf(nd, name) {
@@ -25,7 +37,7 @@ export function releasesOf(nd, name) {
 export function renameRefs(nd, old, nw) {
   const K = S.C.op;
   if (nd.main_name === old) nd.main_name = nw;
-  for (const m of nd.members) if (m.name === old) m.name = nw;
+  for (const m of nd.members) { if (m.name === old) m.name = nw; if (m.attach_to === old) m.attach_to = nw; }
   for (const o of nd.operations) {
     if (o.member === old) o.member = nw;
     if (o.parent === old) o.parent = nw;
@@ -65,8 +77,11 @@ export async function openMember(E, name) {
   if (isMain) {
     items.push({ path: 'main_end', label: 'Extremo', type: 'combo', items: C.end_labels });
   } else {
-    items.push(num('Posición sobre el principal', 'pos', 'L', -4000, 4000, null, null, 'Medida desde el nudo, a lo largo del eje del principal.'), num('Desplazamiento (peralte del principal)', 'off', 'L', -400, 400),
-      num('Desplazamiento (ancho del principal)', 'off2', 'L', -400, 400), num('Desplazamiento sobre su eje (+ hacia atrás)', 'gap', 'L', -120, 240));
+    const banned = descendantsOf(nd, name); banned.add(name);
+    items.push({ type: 'custom', render: () => field('Se une a', selectInput({ value: m.attach_to || '', options: [{ value: '', label: `El principal «${nd.main_name}»` }, ...nd.members.filter((x) => !banned.has(x.name)).map((x) => ({ value: x.name, label: `El miembro «${x.name}»` }))],
+      onChange: (v) => { m.attach_to = v; ctx.onChange(); } })) });
+    items.push(num('Posición sobre el miembro al que llega', 'pos', 'L', -4000, 4000, null, null, 'Medida desde el nudo (principal) o desde el INICIO del miembro al que llega, a lo largo de su eje.'), num('Desplazamiento (peralte del apoyo)', 'off', 'L', -400, 400),
+      num('Desplazamiento (ancho del apoyo)', 'off2', 'L', -400, 400), num('Desplazamiento sobre su eje (+ hacia atrás)', 'gap', 'L', -120, 240));
   }
   body.append(h('div', { class: 'card-sec' }, h('h4', { text: isMain ? 'Miembro principal' : 'Miembro conectado' }), h('div', { class: 'form-grid' }, field('Nombre', nameInp)),
     h('div', { style: { height: '10px' } }), renderItems(items, ctx)));
@@ -104,6 +119,7 @@ export async function openMember(E, name) {
         const deps = nd.operations.filter((o) => o.member === name || o.parent === name || (o.targets || []).includes(name));
         if (!(await confirmBox(`¿Eliminar el miembro «${name}»?`, { danger: true, ok: 'Eliminar', detail: deps.length ? `También se quitarán ${deps.length} operación(es) que lo usan.` : '' }))) return;
         const idx = nd.members.findIndex((x) => x.name === name);
+        reparentChildren(nd, name);
         nd.members.splice(idx, 1);
         for (const o of deps) { const i = nd.operations.indexOf(o); if (i >= 0) await E.removeOperation(i, { silent: true }); }
         nd.loads = nd.loads.filter((l) => l.member !== name);

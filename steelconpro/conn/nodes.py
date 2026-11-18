@@ -112,10 +112,14 @@ def draw_scheme(fig, nd, title="", us=None):
         shp = AS.shape_of(m.shape)
         dv = AS.member_dir(m)
         _, sx, sy = AS.member_frame(m)
-        P0, o2 = AS.attach_point(nd, m, (A, msx, msy))
-        d2 = (float(np.dot(dv, msx)), float(np.dot(dv, msy)))
-        s_ex = AS.exit_dist(ext, o2, d2)
-        Q = P0 + dv * (s_ex or 0.0)
+        if nd.parent_name(m):                                                 # llega a otro miembro: se dibuja desde su punto de llegada
+            P0, o2, s_ex = AS.attach_global(nd, m), (0.0, 0.0), 0.0
+            Q = P0
+        else:
+            P0, o2 = AS.attach_point(nd, m, (A, msx, msy))
+            d2 = (float(np.dot(dv, msx)), float(np.dot(dv, msy)))
+            s_ex = AS.exit_dist(ext, o2, d2)
+            Q = P0 + dv * (s_ex or 0.0)
         items.append((m.name, _silhouette(shp, Q + dv * __import__('steelconpro.conn.assembly', fromlist=['gap_eff']).gap_eff(m), sx, sy, dv, 0.0, max(m.L, 1.0)), "#9dc3e6", "#1f3864", False))
     allp = np.vstack([it[1] for it in items])
     fmt = FuncFormatter(lambda v, _p: f"{v / fl:g}")

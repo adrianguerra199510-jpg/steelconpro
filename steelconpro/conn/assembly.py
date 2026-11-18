@@ -73,6 +73,28 @@ def attach_point(nd, m, frm=None):
     return A * m.pos + msx * m.off2 + msy * m.off, (float(m.off2), float(m.off))
 
 
+def attach_global(nd, m, _depth=0):
+    """Punto GLOBAL del eje de `m` donde llega a su apoyo.  Para un miembro que llega a otro miembro, el inicio del padre se estima con su separación (`gap`): es exacto
+    cuando el padre no lleva conexión de catálogo (lo usa el análisis nodal para los brazos de las cargas)."""
+    par = nd.parent_name(m)
+    if not par or _depth > 20:
+        return attach_point(nd, m)[0]
+    p = nd.member_named(par)
+    P0p = attach_global(nd, p, _depth + 1)
+    dp = member_dir(p)
+    s_p = 0.0
+    if not nd.parent_name(p):
+        try:
+            s_p = float(attach_info(nd, p).get("s") or 0.0) + gap_eff(p)
+        except Exception:                                                         # noqa: BLE001
+            s_p = 0.0
+    else:
+        s_p = float(p.gap)
+    start = P0p + dp * s_p
+    _, psx, psy = member_frame(p)
+    return start + dp * m.pos + psx * m.off2 + psy * m.off
+
+
 def member_dir(m):
     a, e = math.radians(m.az), math.radians(m.el)
     return unit([math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e)])
@@ -1941,31 +1963,41 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                          "faces": member_faces(mshape, A * (-lneg), A * lpos, A, msx, msy)}
     free_ends, frames = {}, {}                          # nombre -> (inicio, fin, direccion) y nombre -> marco de la seccion, para la placa base
     axes = []                                           # (nombre, inicio, fin, punto sobre el eje principal, posicion) de cada miembro conectado, para las cotas
-    for i, m in enumerate(nd.members):
+    for i, m in enumerate(nd.member_order()):
+        par = nd.parent_name(m) if nd.parent_name(m) in free_ends else ""              # miembro al que llega (ya armado: los padres van primero); "" = el principal
+        if par:
+            _ps, _pe, _pd = free_ends[par]
+            sA, ssx, ssy, sshape, sO = np.asarray(_pd, float), frames[par][1], frames[par][2], shapes_by_name[par], np.asarray(_ps, float)
+            sext = outer_extent(sshape)
+        else:
+            sA, ssx, ssy, sshape, sO, sext = A, msx, msy, mshape, np.zeros(3), ext
         shp = shape_of(m.shape)
         dirv = member_dir(m)
         _, sx, sy = member_frame(m)
-        sn_m = flat_support_normal(nd, m)                       # normal de la cara plana del principal en la que llega (None si no es plana o llega casi paralelo)
-        P0, o2 = attach_point(nd, m, (A, msx, msy))
-        d2 = (float(np.dot(dirv, msx)), float(np.dot(dirv, msy)))
-        s_ex = exit_dist(ext, o2, d2)
+        sn_m = None if par else flat_support_normal(nd, m)      # normal de la cara plana del principal en la que llega (None si no es plana o llega casi paralelo)
+        P0, o2 = attach_point(nd, m, (sA, ssx, ssy))
+        P0 = P0 + sO                                                # la posición se mide desde el inicio del miembro al que llega
+        d2 = (float(np.dot(dirv, ssx)), float(np.dot(dirv, ssy)))
+        s_ex = exit_dist(sext, o2, d2)
         if s_ex is None:
-            mdl.notes.append(f"{m.name}: su eje no toca al miembro principal (revise el azimut, la elevación o la posición).")
+            mdl.notes.append(f"{m.name}: su eje no toca al miembro «{par or nd.main_name}» (revise el azimut, la elevación o la posición).")
             s_ex = 0.0
         Q = P0 + dirv * s_ex
         Lm = max(nd.member_len(m), 1.0)
         ops = nd.ops_of(m.name)
-        conns = [o for o in ops if o.is_connection] if hw else []
+        conns = [o for o in ops if o.is_connection] if (hw and not par) else []
+        if par and hw and any(o.is_connection for o in ops):
+            mdl.notes.append(f"{m.name}: llega al miembro «{par}»; las conexiones de catálogo («{next(o.kind for o in ops if o.is_connection)}») solo se arman contra el principal: use placas, ángulos, pernos y soldaduras (operaciones generales).")
         conn_op = conns[0] if conns else None
         diag = abs(m.el) >= DIAG_MIN
         ctxs_m, mss = [], []
         align = None
         for k, cop in enumerate(conns or [None]):                 # cada operacion de conexion del miembro se arma en el orden de la lista
-            c = _Ctx(m, cop, shp, P0, Q, dirv, sx, sy, mshape, mshape.d)
-            c.sup_t = _support_wall(nd, m, mshape)
+            c = _Ctx(m, cop, shp, P0, Q, dirv, sx, sy, sshape, sshape.d)
+            c.sup_t = _support_wall(nd, m, sshape)
             c.partname = m.name
-            c.main_name = nd.main_name
-            c.mfr = (A, msx, msy)
+            c.main_name = "" if par else nd.main_name
+            c.mfr = (sA, ssx, ssy)
             c.sn = sn_m
             tag = m.name if k == 0 else f"{m.name}.{k + 1}"
             kind = cop.kind if cop else None
@@ -1991,11 +2023,11 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 align = (unit(sn_m), k)
                 mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
                                  f"la viga se corta en ángulo contra la cara y sus alas se sueldan a ella.")
-            if cop is not None and mshape.is_round and s_ex is not None and shp.kind != 'GEN':
-                rq_ = Q - A * float(np.dot(Q, A))
-                if kind == OP_TAB and abs(float(np.dot(rq_, rq_)) - (mshape.d / 2.0) ** 2) < 0.05 * (mshape.d / 2.0) ** 2:
-                    c.saddle = (mshape.d / 2.0, np.asarray(A, float), np.asarray(rq_, float))        # placa simple sobre un tubo redondo: borde con silla
-                    c.ret = _clear_of_main(shp, Q + dirv * gap_eff(m), dirv, sx, sy, ext, msx, msy)               # la viga no debe entrar en el tubo
+            if cop is not None and sshape.is_round and s_ex is not None and shp.kind != 'GEN':
+                rq_ = Q - sA * float(np.dot(Q, sA))
+                if kind == OP_TAB and abs(float(np.dot(rq_, rq_)) - (sshape.d / 2.0) ** 2) < 0.05 * (sshape.d / 2.0) ** 2:
+                    c.saddle = (sshape.d / 2.0, np.asarray(sA, float), np.asarray(rq_, float))        # placa simple sobre un tubo redondo: borde con silla
+                    c.ret = _clear_of_main(shp, Q + dirv * gap_eff(m), dirv, sx, sy, sext, ssx, ssy)               # la viga no debe entrar en el tubo
                 elif kind in (OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD):
                     mdl.notes.append(f"{m.name}: «{kind}» no se puede apoyar en un principal redondo (cara curva): se dibuja contra el plano tangente y queda separado del tubo; use placa simple (con silla) o una placa propia.")
             if cop is not None and kind in (OP_TAB, OP_DANG, OP_SEAT) and c.oblique and not c.aligned:
@@ -2003,14 +2035,14 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 if c.ret > 0.05:
                     mdl.notes.append(f"{m.name}: llega esviado al apoyo ({math.degrees(math.acos(min(float(np.dot(dirv, sn_m)), 1.0))):.0f}° respecto de la normal): "
                                      f"la placa se apoya en la cara y el extremo de la viga se retrasa {c.ret:.2f} in para librarla.")
-            if cop is not None and kind in (OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD) and c.oblique and mshape.kind == W_SHAPE and attach_info(nd, m).get("face") == "alma":
+            if cop is not None and kind in (OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD) and c.oblique and sshape.kind == W_SHAPE and attach_info(nd, m).get("face") == "alma":
                 mdl.notes.append(f"{m.name}: llega esviado al alma de «{nd.main_name}», dentro de sus alas: la viga choca con ellas y «{kind}» no se corta; use placa simple o doble ángulo (se cortan las alas de la viga) o «hasta el interior de las alas».")
             ms_k = None                                           # distancia que exige esta operacion desde Q hasta el inicio del miembro (sin el desplazamiento del usuario)
             if kind == OP_TAB:
                 c.extra = tab_extra(nd, m, cop)
-                c.dmain_axis = A
+                c.dmain_axis = sA
                 if c.extra > 0 and c.oblique:                      # la viga tambien debe librar los bordes de las alas del principal
-                    c.ret = max(c.ret, _clear_of_main(shp, Q + dirv * (0.5 + c.extra), dirv, sx, sy, ext, msx, msy))
+                    c.ret = max(c.ret, _clear_of_main(shp, Q + dirv * (0.5 + c.extra), dirv, sx, sy, sext, ssx, ssy))
                 _tab_geometry(c, tag)
                 if c.extra > 0:
                     ms_k = 0.5 + c.extra + c.ret                  # la viga queda fuera de las alas del principal
@@ -2034,9 +2066,11 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         rigid = any(c_.op.kind in (OP_EP_FLUSH, OP_EP_EXT, OP_WELD) for c_ in ctxs_m if c_.op is not None)
         if rigid and abs(float(m.gap)) > 1e-9:
             mdl.notes.append(f"{m.name}: el desplazamiento sobre el eje no se aplica a la placa extrema ni a las alas soldadas (el miembro va soldado a la placa o al soporte).")
-        ms = (max(mss) + (0.0 if rigid else float(m.gap))) if mss else gap_eff(m) + max(c_.ret for c_ in ctxs_m)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
+        ms = (max(mss) + (0.0 if rigid else float(m.gap))) if mss else gap_eff(m) + max(c_.ret for c_ in ctxs_m)
+        if par:
+            ms = float(m.gap)                                       # sin conexión de catálogo: el extremo empieza en la superficie del miembro (gap lo separa o lo hunde)       # el desplazamiento sobre el eje (m.gap) mueve el miembro hacia atrás (+) o hacia adelante (−)
         if any(c_.op.kind in GUSSET_OPS for c_ in ctxs_m if c_.op is not None):
-            push = _clear_of_main(shp, Q + dirv * ms, dirv, sx, sy, ext, msx, msy)
+            push = _clear_of_main(shp, Q + dirv * ms, dirv, sx, sy, sext, ssx, ssy)
             if push > 1e-6:                                         # la esquina de la sección del miembro inclinado penetra en el principal: se retrasa el miembro
                 ms += push
                 for c_ in ctxs_m:
@@ -2045,8 +2079,8 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                         c_.op_gl_push = push
         tag = m.name
         for o in ops:
-            if o.kind == OP_CONT and hw:
-                pl = _continuity(c, nd, tag, (A, msx, msy), mshape, o.cont_t, o.weld_size, mdl.welds)
+            if o.kind == OP_CONT and hw and not par:
+                pl = _continuity(c, nd, tag, (sA, ssx, ssy), sshape, o.cont_t, o.weld_size, mdl.welds)
                 if not pl:
                     mdl.notes.append(f"{m.name}: las placas de continuidad solo se dibujan en una columna I a la que llega el miembro por la cara del ala.")
                 mdl.parts += pl
@@ -2098,7 +2132,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
         end = Q + dirv * (ms + Lm)
         mdl.tags.append((tuple(map(float, end)), m.name))
         fem_ends[m.name] = (end, dirv, max(shp.d, shp.bf) / 2.0 + 1.0)
-        axes.append((m.name, Q + dirv * ms, end, P0, float(m.pos)))
+        axes.append((m.name, Q + dirv * ms, end, P0, 0.0 if par else float(m.pos)))
         free_ends[m.name], frames[m.name] = (Q + dirv * ms, end, dirv), (dirv, sx, sy)
         shapes_by_name[m.name] = shp
         reg[m.name] = {"type": "miembro", "part": m.name, "t": shp.tw, "Fy": Fy_m, "Fu": Fu_m, "faces": member_faces(shp, Q + dirv * ms, end, dirv, sx, sy)}

@@ -58,7 +58,7 @@ def _node_point(nd: Nodo, name: str):
     if name == nd.main_name:
         return np.zeros(3)
     m = nd.member_named(name)
-    return AS.attach_point(nd, m)[0]
+    return AS.attach_global(nd, m)
 
 
 def balance(nd: Nodo, loads: list) -> dict:
@@ -132,7 +132,8 @@ def _base_cases(prj, nd: Nodo):
     else:
         side = 0
         A_in0, sx0, sy0 = AS.member_frame(m)
-        P0, o2 = AS.attach_point(nd, m)
+        P0 = AS.attach_global(nd, m)
+        o2 = (float(m.off2), float(m.off))
         ext = AS.outer_extent(AS.shape_of(nd.main_shape))
         d2 = (float(np.dot(A_in0, msx)), float(np.dot(A_in0, msy)))
         s_ex = AS.exit_dist(ext, o2, d2) or 0.0

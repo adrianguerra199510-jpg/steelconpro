@@ -6,7 +6,7 @@ import { h, svg, btn, iconBtn, menu, modal, toast, errorBox, confirmBox, promptB
 import { Viewer } from './viewer.js';
 import { native } from './native.js';
 import { openOperation, OP_ICON, opColor, groupOf } from './opdialog.js';
-import { openMember, openLoads, openProject, renameRefs } from './editdialogs.js';
+import { openMember, openLoads, openProject, renameRefs, reparentChildren } from './editdialogs.js';
 import { openSections, openMaterials, openTemplates } from './libraries.js';
 import { renderItems } from './forms.js';
 import { pickTypology } from './typology.js';
@@ -350,7 +350,7 @@ function renderTree() {
   // ---- miembros
   const sec = (title, ic, action) => h('div', { class: 'ph' }, svg(ic, 15), h('h3', { text: title }), action || null);
   box.append(sec('Miembros', 'component', iconBtn('plus', 'Agregar miembro', addMember)));
-  const members = [{ name: nd.main_name, shape: nd.main_shape, main: true }, ...nd.members.map((m) => ({ name: m.name, shape: m.shape }))];
+  const members = [{ name: nd.main_name, shape: nd.main_shape, main: true }, ...nd.members.map((m) => ({ name: m.name, shape: m.shape + (m.attach_to && nd.members.some((x) => x.name === m.attach_to) ? ` · llega a ${m.attach_to}` : '') }))];
   const ml = h('div', { class: 'sect' });
   for (const m of members) ml.append(item({ ic: 'component', name: m.name, sub: m.shape, star: m.main, sel: E.sel === `m:${m.name}`,
     onClick: () => select(`m:${m.name}`),
@@ -473,7 +473,7 @@ function contextMenu(name, part, ev) {
       } }, '-', { label: 'Eliminar miembro', icon: 'trash', danger: true, onClick: async () => {
         const deps = nd.operations.filter((o) => o.member === name || o.parent === name || (o.targets || []).includes(name));
         if (!(await confirmBox(`¿Eliminar el miembro «${name}»?`, { danger: true, ok: 'Eliminar', detail: deps.length ? `También se quitarán ${deps.length} operación(es) que lo usan.` : '' }))) return;
-        E.snap(); nd.members.splice(nd.members.findIndex((x) => x.name === name), 1);
+        E.snap(); reparentChildren(nd, name); nd.members.splice(nd.members.findIndex((x) => x.name === name), 1);
         for (const o of deps) { const i = nd.operations.indexOf(o); if (i >= 0) await E.removeOperation(i, { silent: true }); }
         nd.loads = nd.loads.filter((l) => l.member !== name); E.sel = null; E.changed({ structure: true });
       } });
@@ -513,7 +513,9 @@ async function createOperation(kind) {
   if (C.ops.connection.includes(kind) || kind === K.COPE || kind === K.CONT) {
     if (!nd.members.length) { toast('Agregue primero un miembro conectado al principal.', 'info', 5000); return; }
     const sel = E.sel && E.sel.startsWith('m:') ? E.sel.slice(2) : '';
-    params.member = nd.members.find((m) => m.name === sel)?.name || nd.members[0].name;
+    const hijo = (n) => { const mm = nd.members.find((x) => x.name === n); return !!(mm && mm.attach_to && nd.members.some((x) => x.name === mm.attach_to)); };
+    params.member = nd.members.find((m) => m.name === sel)?.name || (nd.members.find((m) => !hijo(m.name)) || nd.members[0]).name;
+    if (C.ops.connection.includes(kind) && hijo(params.member)) { toast(`«${params.member}» llega a otro miembro: las conexiones de catálogo solo se arman contra el principal. Use placas, ángulos, pernos y soldaduras (operaciones generales).`, 'info', 7000); return; }
   } else if (kind === K.BASE && nd.operations.some((o) => o.kind === K.BASE)) {
     toast('La conexión ya tiene una placa base: edítela o elimínela para cambiarla.', 'info', 5000); return;
   } else if (kind === K.ALIGN) {

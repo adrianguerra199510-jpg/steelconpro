@@ -78,7 +78,7 @@ def build_items(nd: Nodo):
     items, warns = [], []
     mshape = CATALOG.get(nd.main_shape)
     for op in nd.operations:
-        if not op.is_connection:
+        if not op.is_connection or nd.is_child(op.member):          # las conexiones de catálogo solo se arman (y se verifican) contra el principal
             continue
         m = nd.member_named(op.member)
         if m is None:
