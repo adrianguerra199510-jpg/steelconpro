@@ -2281,6 +2281,57 @@ def _fem_base_parts(mdl, nd, bpd, bp_place, bop) -> bool:
     return True
 
 
+def _saddle_trim(mdl, i, o, tgt, mem, oth, frc, part, es, hw):
+    """Recorte «boca de pez»: el tubo redondo `part` se corta por el cilindro del tubo redondo `oth` (su extremo `es` = −1 inicio / +1 fin): cada generatriz del tubo se recorta donde
+    cruza el cilindro, el extremo se alarga lo necesario para que la boca llegue al cilindro y la soldadura de contorno sigue la curva de intersección (queda sobre las dos superficies)."""
+    from .fem.model3d import cyl_roots
+    start_c, _end_c, d_c, _sx, _sy, shp_c = frc
+    R = float(shp_c.d) / 2.0 + float(o.trim_gap)                                    # holgura positiva = separa; negativa = penetra
+    cut = (tuple(map(float, start_c)), tuple(map(float, d_c)), float(R), int(es))
+    th = 2.0 * math.pi * np.arange(48) / 48
+    lines = []
+    ok_any = False
+    for pr in part.prisms:
+        ro = float(pr.circle[0])
+        u, v = ro * np.cos(th), ro * np.sin(th)
+        s1, s2, ok = cyl_roots(pr, u, v, cut)
+        if not ok.any():
+            continue
+        ok_any = True
+        w0, w1 = (pr.w0, pr.w1) if pr.w0 <= pr.w1 else (pr.w1, pr.w0)
+        if es < 0:
+            need = float(w0 - s2[ok].min())                                          # el inicio debe quedar dentro del cilindro para todas las generatrices
+            if need > 0:
+                pr.w0 = w0 - min(need, 2.0 * R) - 0.05
+        else:
+            need = float(s1[ok].max() - w1)
+            if need > 0:
+                pr.w1 = w1 + min(need, 2.0 * R) + 0.05
+        pr.cut_cyls = list(pr.cut_cyls) + [cut]
+        s1, s2, ok = cyl_roots(pr, u, v, cut)
+        wc = s2 if es < 0 else s1                                                    # w de la boca de cada generatriz
+        a_c, d_u = np.asarray(cut[0], float), np.asarray(cut[1], float)
+        d_u = d_u / max(float(np.linalg.norm(d_u)), 1e-12)
+        pts = [np.asarray(pr.to_global(float(u[k]), float(v[k]), float(wc[k])), float) if ok[k] else None for k in range(len(th))]
+        Uv, Vv = np.asarray(pr.U, float), np.asarray(pr.V, float)
+        for k in range(len(th)):
+            j = (k + 1) % len(th)
+            if pts[k] is None or pts[j] is None:
+                continue
+            am = 0.5 * (th[k] + th[j]) if j > k else 0.5 * (th[k] + th[j] + 2.0 * math.pi)
+            nA = math.cos(am) * Uv + math.sin(am) * Vv
+            pm = 0.5 * (pts[k] + pts[j])
+            rel = pm - a_c
+            nB = rel - float(rel @ d_u) * d_u
+            nB = nB / max(float(np.linalg.norm(nB)), 1e-12)
+            lines.append((pts[k], pts[j], nA, nB, 0))
+    if not ok_any:
+        mdl.notes.append(f"Operación {i + 1}: el eje del tubo «{tgt}» no cruza el cilindro de «{o.parent}»; no se recorta.")
+        return
+    if o.trim_weld and hw:
+        OPS.add_trim_weld(mdl, i, o, tgt, mem, o.parent, oth, lines, hw, None)
+
+
 def _apply_trims(mdl, nd, reg, hw=True):
     """Recortes de un miembro contra otro elemento: plano de la cara del elemento (con holgura) o plano de inglete entre dos miembros."""
     from .specs import OP_TRIM, TRIM_MODES
@@ -2305,6 +2356,10 @@ def _apply_trims(mdl, nd, reg, hw=True):
                 continue
             pieces = PL_.cutter_pieces(oth, mdl)
             es = -1.0 if o.trim_end == "Inicio" else 1.0
+            frc = oth.get("frame_full")
+            if (oth.get("type") == "miembro" and frc is not None and frc[5].is_round and all(pr.circle is not None for pr in part.prisms) and part.prisms):
+                _saddle_trim(mdl, i, o, tgt, mem, oth, frc, part, es, hw)                     # tubo redondo contra tubo redondo: boca de pez (corte por el cilindro)
+                continue
             res = [PL_.trim_prism_volume(pr, pieces, float(o.trim_gap), es) for pr in part.prisms]
             if not any(r[0] for r in res):
                 mdl.notes.append(f"Operación {i + 1}: el volumen de «{o.parent}» " + ("no toca al miembro." if res and res[0][1] == "no toca" else "se llevaría todo el miembro; no se recorta."))

@@ -224,7 +224,7 @@ def check_prism(pr, n_pts=1500, seed=1, nseg=36, mismatch_max=0.012, faces=None)
         from .fem.prismmesh import _ring_pts
         ro, ri = pr.circle
         ref = Prism(poly=_ring_pts(ro, nseg), o=pr.o, U=pr.U, V=pr.V, w0=pr.w0, w1=pr.w1, holes=[_ring_pts(ri, nseg)] if ri > 0 else [],
-                    cut_planes=list(pr.cut_planes), holes_extra=list(pr.holes_extra))
+                    cut_planes=list(pr.cut_planes), holes_extra=list(pr.holes_extra), cut_cyls=list(pr.cut_cyls))
     mk = GC.prism_mask(ref, X)
     mism = ins != mk
     # los puntos casi sobre la superficie (|w − 0.5| pequeño) no cuentan

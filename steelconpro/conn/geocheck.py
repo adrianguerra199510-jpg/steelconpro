@@ -15,6 +15,8 @@ import math
 
 import numpy as np
 
+from .fem.model3d import cyl_roots
+
 TOL_TOUCH = 0.1          # in: un cordón «toca» una pieza si queda a menos de esto de su material
 TOL_CLASH = 0.05          # in: penetración admitida entre piezas que no están unidas entre sí
 EMBED_OK = 0.42           # in: penetración admitida entre piezas unidas (las placas se empotran 0.35 in en el soporte para el dibujo)
@@ -79,6 +81,10 @@ def prism_mask(pr, P, holes_extra=True):
                     m &= ~_in_poly(u, v, h)
     for (pt, nrm) in pr.cut_planes:
         m &= ((P - np.asarray(pt, float)) @ np.asarray(nrm, float)) <= 1e-9
+    for cut in getattr(pr, "cut_cyls", None) or []:                       # boca de pez: se quita lo que queda antes de la salida (inicio) o después de la entrada (final)
+        s1, s2, ok = cyl_roots(pr, u, v, cut)
+        gone = ok & ((w < s2 - 1e-9) if int(cut[3]) < 0 else (w > s1 + 1e-9))
+        m &= ~gone
     return m
 
 
@@ -141,6 +147,13 @@ def prism_dist(pr, p):
         s = float((np.asarray(p, float) - np.asarray(pt, float)) @ np.asarray(nrm, float))
         if s > 0:
             d = max(d, s)
+    for cut in getattr(pr, "cut_cyls", None) or []:
+        s1, s2, ok = cyl_roots(pr, np.array([u]), np.array([v]), cut)
+        if bool(ok[0]) and ((w < float(s2[0]) - 1e-9) if int(cut[3]) < 0 else (w > float(s1[0]) + 1e-9)):
+            a_, d_ = np.asarray(cut[0], float), np.asarray(cut[1], float)
+            d_ = d_ / max(float(np.linalg.norm(d_)), 1e-12)
+            rel = np.asarray(p, float) - a_
+            d = max(d, float(cut[2]) - float(np.linalg.norm(rel - (rel @ d_) * d_)))
     return d
 
 

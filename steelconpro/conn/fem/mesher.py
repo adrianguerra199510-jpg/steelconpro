@@ -17,6 +17,16 @@ from .model3d import model_from_dict, weld_prism, unit, Prism
 def _prism_vol(occ, pr: Prism):
     """Crea el volumen del prisma en coordenadas globales (ya recortado por sus `cut_planes`) y devuelve su (3, tag), o None si el recorte se lo lleva."""
     dt = _prism_vol0(occ, pr)
+    for (a, d, R, _end) in getattr(pr, "cut_cyls", None) or []:                  # boca de pez: se resta el cilindro del tubo contra el que se recorta
+        C = pr.corners()
+        S = 4.0 * float(np.linalg.norm(C.max(axis=0) - C.min(axis=0))) + 10.0
+        d = unit(d)
+        tool = (3, occ.addCylinder(*(np.asarray(a, float) - d * S), *(d * 2.0 * S), float(R)))
+        res, _ = occ.cut([dt], [tool])
+        res = [r for r in res if r[0] == 3]
+        if not res:
+            return None
+        dt = res[0]
     planes = [(np.asarray(pt, float), unit(nrm)) for pt, nrm in getattr(pr, "cut_planes", [])]
     if not planes:
         return dt

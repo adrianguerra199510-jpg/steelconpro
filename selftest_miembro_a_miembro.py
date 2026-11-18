@@ -82,8 +82,9 @@ def run():
     EG.gen(nd, OP_TRIM, targets=["H1"], parent="T2", trim_mode=TRIM_MODES[2], trim_gap=-0.05, trim_end="Fin")
     nd.members[1].az = -90.0 + 0.0
     mt = AS.build_nodo(nd)
-    ht = mt.part("H1").bbox()
-    check(float(ht[0][1]) > -11.0 and float(ht[0][1]) < -9.0, f"H1 (az −90°) se recorta contra el volumen de T2: y mín = {float(ht[0][1]):.2f}")
+    ph = mt.part("H1")
+    Fh = np.array([q for pr in ph.prisms for f_ in pr.faces(48) for q in f_])
+    check(any(pr.cut_cyls for pr in ph.prisms) and -11.2 < float(Fh[:, 1].min()) < -10.7, f"H1 (az −90°) se corta en boca de pez contra el cilindro de T2: y mín = {float(Fh[:, 1].min()):.2f} (cresta a −10.81)")
 
     # ---------------------------------------------------------------- análisis nodal: el brazo de una carga en un miembro que llega a otro
     nd = tower_node()
@@ -92,6 +93,46 @@ def run():
     Pn = NOD._node_point(nd, "H1")
     check(np.allclose(Pn, [12.0, 0.0, 14.0]), "el nodal usa el punto global de llegada como brazo")
     check(abs(sum(bal["sum_F"]) + 0.0) >= 0.0 and abs(bal["R"][2] - 10.0) < 1e-6, f"equilibrio global: la reacción del principal equilibra la carga ({np.round(bal['R'], 3)})")
+
+    # ---------------------------------------------------------------- boca de pez: tubo redondo contra el cilindro de otro tubo redondo
+    from steelconpro.conn import meshcheck as MC
+    from steelconpro.conn.fem.model3d import Prism, cyl_roots
+    from steelconpro.conn.specs import OP_TRIM as _TR
+    for az, el, label in ((-90.0, 0.0, "horizontal"), (-90.0, 52.0, "inclinada 52°"), (-90.0, -25.0, "descendente 25°")):
+        nd = tower_node()
+        nd.members.append(Member(name="T2", shape="HSS2.375X0.218", steel=nd.main_steel, az=0.0, el=90.0, pos=0.0, off=12.0, off2=12.0, L=60.0, gap=-0.5))
+        h1 = nd.members[1]
+        h1.az, h1.el, h1.gap = az, el, 0.0
+        EG.gen(nd, _TR, targets=["H1"], parent="T1", trim_mode=TRIM_MODES[2], trim_gap=0.0, trim_end="Inicio", trim_weld=True, weld_size=0.125)
+        EG.gen(nd, _TR, targets=["H1"], parent="T2", trim_mode=TRIM_MODES[2], trim_gap=0.0, trim_end="Fin", trim_weld=True, weld_size=0.125)
+        mb = AS.build_nodo(nd)
+        ph = mb.part("H1")
+        pr = ph.prisms[0]
+        check(len(pr.cut_cyls) == 2, f"boca de pez ({label}): el tubo lleva dos cortes por cilindro (inicio y fin)")
+        rep = MC.check_faces(pr.faces(36))
+        check(rep["ok"], f"boca de pez ({label}): superficie cerrada y orientada {rep['errors'][:1]}")
+        # los puntos de la curva de soldadura están sobre las dos superficies: a ro del eje del tubo y a R del eje del cordón
+        ws = [w for w in mb.welds if w.A == "H1"]
+        ro = float(pr.circle[0])
+        axis_m = np.asarray(pr.W, float)
+        bad = 0
+        for w in ws:
+            for q in (w.p0, w.p1):
+                q = np.asarray(q, float)
+                rel = q - np.asarray(pr.o, float)
+                dm = float(np.linalg.norm(rel - (rel @ axis_m) * axis_m))
+                cuts = [c for c in pr.cut_cyls if abs(np.linalg.norm(((q - np.asarray(c[0], float)) - ((q - np.asarray(c[0], float)) @ (np.asarray(c[1], float) / np.linalg.norm(c[1]))) * (np.asarray(c[1], float) / np.linalg.norm(c[1])))) - c[2]) < 1e-6]
+                if abs(dm - ro) > 1e-6 or not cuts:
+                    bad += 1
+        check(len(ws) >= 60 and bad == 0, f"boca de pez ({label}): {len(ws)} tramos de soldadura sobre la curva de intersección (puntos en las dos superficies; fuera de ellas: {bad})")
+        g = GC.summary(GC.check(mb))
+        check(g["errors"] == 0, f"boca de pez ({label}): el revisor no ve choques ni cordones flotando {g}")
+    # el material quitado: un punto dentro del cordón, sobre la boca, no está en el tubo; uno fuera de él, sí
+    pr = Prism(poly=[], o=(12.0, 0.0, 14.0), U=(0, 0, 1), V=(0, 1, 0), w0=-0.5, w1=60.0, circle=(0.525, 0.4))
+    pr.cut_cyls = [((12.0, 0.0, 0.0), (0, 0, 1), 1.1875, -1)]
+    inside = np.array([[11.2, 0.45, 14.0]])                     # a 0.8 in del eje del cordón: dentro del cilindro
+    outside = np.array([[9.0, 0.45, 14.0]])
+    check(not bool(GC.prism_mask(pr, inside)[0]) and bool(GC.prism_mask(pr, outside)[0]), "el material del tubo dentro del cilindro del cordón se quita; fuera queda")
 
     # ---------------------------------------------------------------- guardado y lectura
     p = EG.g22_torre_cuatro_tubos_sobre_placa()
@@ -105,7 +146,7 @@ def run():
     ex = load_book(os.path.join(ROOT, "ejemplos", "TP-G22_torre_cuatro_tubos_sobre_placa.scp"))[0]
     g = GC.summary(GC.check(AS.build_model(ex)))
     check(g["errors"] == 0 and g["warnings"] == 0, f"TP-G22: revisor sin errores ni avisos ({g})")
-    check(sum(1 for m in ex.node.members if m.attach_to) == 8, "TP-G22: ocho travesaños llegan a un cordón")
+    check(sum(1 for m in ex.node.members if m.attach_to) == 12, "TP-G22: 8 travesaños y 4 diagonales llegan a un cordón")
 
 
 if __name__ == "__main__":

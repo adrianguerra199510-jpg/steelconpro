@@ -56,6 +56,8 @@ class Prism:
     holes: list = field(default_factory=list)         # solo para tubos poligonales (mismo numero de vertices que el exterior)
     cut_planes: list = field(default_factory=list)    # recortes planos [(punto, normal)]: se conserva n·(x − punto) ≤ 0 (solo dibujo)
     holes_extra: list = field(default_factory=list)   # agujeros de cualquier forma (poligonos en (u, v)): pernos, huecos y aberturas de las placas
+    cut_cyls: list = field(default_factory=list)      # recortes por un CILINDRO (boca de pez de un tubo contra otro): [(punto del eje, eje, radio, extremo)]; extremo −1 = se quita lo que queda
+                                                      # antes de la salida de cada generatriz del cilindro (w0), +1 = lo que queda después de su entrada (w1)
 
     @property
     def W(self):
@@ -84,6 +86,28 @@ class Prism:
         recortes planos (`cut_planes`); ver `prismmesh` (cada recorte cierra su seccion con la tapa correcta: anillo en un tubo, contorno concavo en un perfil I)."""
         from .prismmesh import prism_faces
         return prism_faces(self, nseg)
+
+
+def cyl_roots(pr, u, v, cut):
+    """Cruce de las generatrices (u, v) del prisma (rectas paralelas a W) con el cilindro de corte `cut` = (punto del eje, eje, radio, extremo).
+    -> (entrada, salida, valido): `w` (a lo largo de W) donde la recta entra y sale del cilindro; arreglos del tamaño de u / v."""
+    u, v = np.asarray(u, float), np.asarray(v, float)
+    o, U, V, W = (np.asarray(x, float) for x in (pr.o, pr.U, pr.V, pr.W))
+    a, d = np.asarray(cut[0], float), unit(cut[1])
+    R = float(cut[2])
+    c0 = o[None, :] + u[..., None] * U + v[..., None] * V - a
+    q = c0 - (c0 @ d)[..., None] * d
+    wv = W - float(W @ d) * d
+    A = float(wv @ wv)
+    if A < 1e-12:
+        z = np.zeros(u.shape)
+        return z, z, np.zeros(u.shape, bool)
+    B = 2.0 * (q @ wv)
+    C = (q * q).sum(axis=-1) - R * R
+    disc = B * B - 4.0 * A * C
+    ok = disc >= 0.0
+    sq = np.sqrt(np.where(ok, disc, 0.0))
+    return (-B - sq) / (2.0 * A), (-B + sq) / (2.0 * A), ok
 
 
 def box_prism(c, size, axes=((1, 0, 0), (0, 1, 0), (0, 0, 1))):
@@ -335,6 +359,7 @@ def model_from_dict(d: dict) -> Model3D:
         x["poly"] = [tuple(q) for q in x.get("poly", [])]
         x["holes"] = [[tuple(q) for q in h] for h in x.get("holes", [])]
         x["holes_extra"] = [[tuple(q) for q in h] for h in x.get("holes_extra", [])]
+        x["cut_cyls"] = [(tuple(c[0]), tuple(c[1]), float(c[2]), int(c[3])) for c in x.get("cut_cyls", [])]
         for k in ("o", "U", "V"):
             x[k] = tuple(x[k])
         if x.get("circle") is not None:

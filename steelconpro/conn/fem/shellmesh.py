@@ -352,10 +352,20 @@ def _prism_plates(part, ip, pr, notes):
         out.append(Plate(f"{part.name}#{ip}.{k}", part.name, part.kind, P, float(t), unit(n), [np.asarray(h, float) for h in holes]))
 
     def facets(cx, cy, rm, t, ns=24, k0=0):                                          # cilindro de radio medio rm como facetas planas
+        ang = 2 * math.pi * np.arange(ns + 1) / ns
+        lo, hi = np.full(ns + 1, w0), np.full(ns + 1, w1)
+        for cut in getattr(pr, "cut_cyls", None) or []:                              # boca de pez: cada arista de faceta se recorta donde cruza el cilindro de corte
+            from .model3d import cyl_roots
+            s1, s2, ok = cyl_roots(pr, cx + rm * np.cos(ang), cy + rm * np.sin(ang), cut)
+            if int(cut[3]) < 0:
+                lo = np.where(ok, np.maximum(lo, s2), lo)
+            else:
+                hi = np.where(ok, np.minimum(hi, s1), hi)
+        hi = np.maximum(hi, lo)
         for k in range(ns):
-            a0, a1 = 2 * math.pi * k / ns, 2 * math.pi * (k + 1) / ns
-            p00, p10 = g(cx + rm * math.cos(a0), cy + rm * math.sin(a0), w0), g(cx + rm * math.cos(a1), cy + rm * math.sin(a1), w0)
-            p11, p01 = g(cx + rm * math.cos(a1), cy + rm * math.sin(a1), w1), g(cx + rm * math.cos(a0), cy + rm * math.sin(a0), w1)
+            a0, a1 = ang[k], ang[k + 1]
+            p00, p10 = g(cx + rm * math.cos(a0), cy + rm * math.sin(a0), lo[k]), g(cx + rm * math.cos(a1), cy + rm * math.sin(a1), lo[k + 1])
+            p11, p01 = g(cx + rm * math.cos(a1), cy + rm * math.sin(a1), hi[k + 1]), g(cx + rm * math.cos(a0), cy + rm * math.sin(a0), hi[k])
             am = 0.5 * (a0 + a1)
             add(k0 + k, [p00, p10, p11, p01], t, math.cos(am) * U + math.sin(am) * V)
 
@@ -462,7 +472,9 @@ def build_plates(mdl):
     for pl in plates:                                                                # tras el ajuste pueden quedar vertices repetidos o placas colapsadas
         P = _clean(pl.P)
         if P is None:
-            notes.append(f"{pl.part}: una placa quedó degenerada y se omite del modelo de placas.")
+            msg = f"{pl.part}: una placa quedó degenerada y se omite del modelo de placas."
+            if msg not in notes:
+                notes.append(msg)
             continue
         pl.P = P
         out.append(pl)

@@ -642,6 +642,8 @@ def prism_faces(pr, nseg=36):
     out = []
     if abs(w1 - w0) < 1e-12:
         return out
+    if pr.circle is not None and getattr(pr, "cut_cyls", None):
+        return _cyl_cut_faces(pr, max(nseg, 24))
     # ¿el prisma entero queda de un lado de cada plano?
     if planes:
         C = pr.corners() if pr.circle is None else _circle_corners(pr)
@@ -722,6 +724,84 @@ def prism_faces(pr, nseg=36):
                 for (F, tag) in clipped[pi]:
                     if tag == 0:
                         out.append([tuple(q) for q in F])
+    return out
+
+
+def _cyl_cut_faces(pr, n):
+    """Tubo (o barra) redondo con sus extremos cortados por cilindros (boca de pez): cada generatriz se recorta donde cruza el cilindro de corte; la tapa del extremo es la
+    franja de la superficie del cilindro entre la curva exterior y la interior.  Superficie cerrada con normales hacia afuera (triangulos)."""
+    from .model3d import cyl_roots
+    ro, ri = pr.circle
+    o = np.asarray(pr.o, float)
+    U, V = np.asarray(pr.U, float), np.asarray(pr.V, float)
+    W = np.cross(U, V)
+    w0, w1 = float(pr.w0), float(pr.w1)
+    if w1 < w0:
+        w0, w1 = w1, w0
+    th = 2.0 * math.pi * np.arange(n) / n
+
+    def limits(r):
+        u, v = r * np.cos(th), r * np.sin(th)
+        lo, hi = np.full(n, w0), np.full(n, w1)
+        for cut in pr.cut_cyls:
+            s1, s2, ok = cyl_roots(pr, u, v, cut)
+            if int(cut[3]) < 0:
+                lo = np.where(ok, np.maximum(lo, s2), lo)
+            else:
+                hi = np.where(ok, np.minimum(hi, s1), hi)
+        hi = np.maximum(hi, lo)
+        return u, v, lo, hi
+
+    def pt(u, v, w):
+        return tuple(o + u * U + v * V + w * W)
+    out = []
+
+    def tri(a, b, c):
+        if float(np.linalg.norm(np.cross(np.asarray(b) - np.asarray(a), np.asarray(c) - np.asarray(a)))) > 1e-12:
+            out.append([a, b, c])
+    uo, vo, loo, hio = limits(ro)
+    rings = [(uo, vo, loo, hio, False)]
+    if ri > 0:
+        ui, vi, loi, hii = limits(ri)
+        rings.append((ui, vi, loi, hii, True))
+    for (u, v, lo, hi, inner) in rings:                                           # paredes: exterior hacia afuera, interior hacia el eje
+        for k in range(n):
+            j = (k + 1) % n
+            p0, p1, p2, p3 = pt(u[k], v[k], lo[k]), pt(u[j], v[j], lo[j]), pt(u[j], v[j], hi[j]), pt(u[k], v[k], hi[k])
+            if inner:
+                p0, p1, p2, p3 = p0, p3, p2, p1
+                tri(p0, p1, p2)
+                tri(p0, p2, p3)
+            else:
+                tri(p0, p1, p2)
+                tri(p0, p2, p3)
+    if ri > 0:                                                                    # tapas anulares del extremo inicial (normal −W) y final (+W)
+        for k in range(n):
+            j = (k + 1) % n
+            a0, a1 = pt(uo[k], vo[k], loo[k]), pt(uo[j], vo[j], loo[j])
+            b0, b1 = pt(ui[k], vi[k], loi[k]), pt(ui[j], vi[j], loi[j])
+            tri(a0, b0, b1)
+            tri(a0, b1, a1)
+            c0, c1 = pt(uo[k], vo[k], hio[k]), pt(uo[j], vo[j], hio[j])
+            d0, d1 = pt(ui[k], vi[k], hii[k]), pt(ui[j], vi[j], hii[j])
+            tri(c0, c1, d1)
+            tri(c0, d1, d0)
+    else:                                                                         # barra maciza: abanico hacia el centro
+        zero = np.zeros(1)
+        lo_c, hi_c = float(w0), float(w1)
+        for cut in pr.cut_cyls:
+            s1, s2, ok = cyl_roots(pr, zero, zero, cut)
+            if bool(ok[0]):
+                if int(cut[3]) < 0:
+                    lo_c = max(lo_c, float(s2[0]))
+                else:
+                    hi_c = min(hi_c, float(s1[0]))
+        hi_c = max(hi_c, lo_c)
+        cl, ch = pt(0.0, 0.0, lo_c), pt(0.0, 0.0, hi_c)
+        for k in range(n):
+            j = (k + 1) % n
+            tri(pt(uo[k], vo[k], loo[k]), cl, pt(uo[j], vo[j], loo[j]))
+            tri(pt(uo[k], vo[k], hio[k]), pt(uo[j], vo[j], hio[j]), ch)
     return out
 
 
