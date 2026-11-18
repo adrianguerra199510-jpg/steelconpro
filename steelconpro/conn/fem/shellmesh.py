@@ -110,6 +110,227 @@ def _is_rect(poly):
 
 
 # ---------------------------------------------------------------------------------------------- prismas -> placas
+def _oriented_rect(poly, tol=1e-6):
+    """Si el poligono (u, v) es un rectangulo (con cualquier giro): (centro, e1, a, e2, b) con lados a (a lo largo de e1) y b (a lo largo de e2); si no, None."""
+    if len(poly) != 4:
+        return None
+    P = [np.asarray(q, float) for q in poly]
+    e = [P[(i + 1) % 4] - P[i] for i in range(4)]
+    L = [float(np.linalg.norm(x)) for x in e]
+    if min(L) < 1e-9:
+        return None
+    for i in range(4):
+        if abs(float(e[i] @ e[(i + 1) % 4])) > 1e-5 * L[i] * L[(i + 1) % 4] + tol:
+            return None
+    return (sum(P) / 4.0, e[0] / L[0], L[0], e[1] / L[1], L[1])
+
+
+def _skeleton(poly):
+    """Linea media de un poligono delgado (u, v): [(p0, p1, espesor)].  Diagrama de Voronoi del contorno muestreado; se descartan las ramas que salen hacia las esquinas
+    (aristas entre muestras vecinas del contorno), se podan los ramales cortos, se simplifican las cadenas y se prolongan los extremos libres hasta el borde."""
+    from scipy.spatial import Voronoi, cKDTree
+    from matplotlib.path import Path
+    P = np.asarray(poly, float)
+    n = len(P)
+    A = 0.5 * abs(sum(P[i][0] * P[(i + 1) % n][1] - P[(i + 1) % n][0] * P[i][1] for i in range(n)))
+    per = sum(float(np.linalg.norm(P[(i + 1) % n] - P[i])) for i in range(n))
+    if A < 1e-9 or per < 1e-9:
+        return []
+    t_est = 2.0 * A / per
+    ds = max(t_est / 5.0, per / 900.0)
+    pts = []
+    for i in range(n):
+        a, b = P[i], P[(i + 1) % n]
+        k = max(1, int(math.ceil(float(np.linalg.norm(b - a)) / ds)))
+        for j in range(k):
+            pts.append(a + (b - a) * j / k)
+    pts = np.array(pts)
+    m = len(pts)
+    if m < 8:
+        return []
+    vor = Voronoi(pts)
+    inside = Path(np.vstack([P, P[0]])).contains_points(vor.vertices)
+    tree = cKDTree(pts)
+    rad = tree.query(vor.vertices)[0]
+    min_sep = 10                                                                   # muestras (~2 espesores) de separacion a lo largo del contorno
+    edges = {}
+    for (i, j), (v0, v1) in zip(vor.ridge_points, vor.ridge_vertices):
+        if v0 < 0 or v1 < 0 or not inside[v0] or not inside[v1]:
+            continue
+        d = abs(int(i) - int(j))
+        d = min(d, m - d)
+        if d <= min_sep:
+            continue
+        edges.setdefault(int(v0), set()).add(int(v1))
+        edges.setdefault(int(v1), set()).add(int(v0))
+    if not edges:
+        return []
+    V = vor.vertices
+
+    def length(a, b):
+        return float(np.linalg.norm(V[a] - V[b]))
+    # poda de ramales cortos: desde cada hoja se recorre la cadena hasta un nodo de bifurcacion; si mide menos de 1.5 veces el espesor local se elimina
+    changed = True
+    while changed:
+        changed = False
+        for leaf in [u for u, nb in edges.items() if len(nb) == 1]:
+            if leaf not in edges or len(edges[leaf]) != 1:
+                continue
+            chain, prev, cur, L = [leaf], None, leaf, 0.0
+            while True:
+                nxt = [x for x in edges[cur] if x != prev]
+                if not nxt:
+                    break
+                prev, cur = cur, nxt[0]
+                L += length(prev, cur)
+                if len(edges[cur]) != 2:
+                    break
+                chain.append(cur)
+            if len(edges[cur]) >= 3 and L < 1.5 * 2.0 * float(rad[cur]):
+                for v in chain:
+                    for w in list(edges[v]):
+                        edges[w].discard(v)
+                    del edges[v]
+                changed = True
+    for v in [u for u, nb in edges.items() if not nb]:
+        del edges[v]
+    if not edges:
+        return []
+    # cadenas entre nodos de grado distinto de 2
+    seen, chains = set(), []
+    nodes = [v for v, nb in edges.items() if len(nb) != 2]
+    starts = nodes if nodes else [next(iter(edges))]
+    for s0 in starts:
+        for nb in edges[s0]:
+            if (s0, nb) in seen:
+                continue
+            chain, prev, cur = [s0], s0, nb
+            seen.add((s0, nb))
+            while True:
+                chain.append(cur)
+                if len(edges[cur]) != 2 or cur == s0:
+                    break
+                nxt = [x for x in edges[cur] if x != prev][0]
+                seen.add((cur, nxt))
+                prev, cur = cur, nxt
+            seen.add((chain[-1], chain[-2]))
+            chains.append(chain)
+
+    def dp(idx, tol):                                                                  # Douglas–Peucker sobre los indices de una cadena
+        if len(idx) < 3:
+            return idx
+        a, b = V[idx[0]], V[idx[-1]]
+        ab = b - a
+        L = float(np.linalg.norm(ab))
+        best, bi = -1.0, 0
+        for k in range(1, len(idx) - 1):
+            q = V[idx[k]] - a
+            dist = abs(float(ab[0] * q[1] - ab[1] * q[0])) / L if L > 1e-12 else float(np.linalg.norm(q))
+            if dist > best:
+                best, bi = dist, k
+        if best <= tol:
+            return [idx[0], idx[-1]]
+        return dp(idx[:bi + 1], tol)[:-1] + dp(idx[bi:], tol)
+    deg = {v: len(nb) for v, nb in edges.items()}
+    segs = []
+    for ch in chains:
+        rm = float(np.mean([rad[v] for v in ch]))
+        simp = dp(ch, 0.25 * 2.0 * rm)
+        for a, b in zip(simp[:-1], simp[1:]):
+            ia, ib = ch.index(a), ch.index(b)
+            rr = float(np.mean([rad[v] for v in ch[min(ia, ib):max(ia, ib) + 1]]))
+            p0, p1 = V[a].copy(), V[b].copy()
+            d = p1 - p0
+            Ld = float(np.linalg.norm(d))
+            if Ld < 1e-9:
+                continue
+            d /= Ld
+            if deg[a] == 1:                                                           # extremo libre: se prolonga hasta el borde
+                p0 = p0 - d * float(rad[a])
+            if deg[b] == 1:
+                p1 = p1 + d * float(rad[b])
+            segs.append([p0, p1, 2.0 * rr])
+    return _join_segments(segs)
+
+
+def _join_segments(segs):
+    """Une las placas de la linea media: quita los tramos cortos de las esquinas, lleva a la interseccion los extremos que quedan cerca de otro tramo (esquina en L) y
+    parte el otro tramo donde llega un extremo libre (union en T), de modo que las placas compartan arista."""
+    segs = [[np.asarray(a, float), np.asarray(b, float), float(t)] for a, b, t in segs]
+
+    def seglen(sg):
+        return float(np.linalg.norm(sg[1] - sg[0]))
+
+    def line_x(p, d, q, e):                                   # interseccion de las rectas p + s d y q + u e (None si son casi paralelas)
+        den = d[0] * e[1] - d[1] * e[0]
+        if abs(den) < 1e-6:
+            return None
+        w = q - p
+        return float((w[0] * e[1] - w[1] * e[0]) / den), float((w[0] * d[1] - w[1] * d[0]) / den)
+    # 1. tramos cortos de esquina: se eliminan si algun otro tramo termina cerca de cada uno de sus extremos
+    changed = True
+    while changed:
+        changed = False
+        for i, sg in enumerate(segs):
+            if seglen(sg) < 1.7 * sg[2] and len(segs) > 2:
+                segs.pop(i)
+                changed = True
+                break
+    # 2. esquinas en L: extremos cercanos de dos tramos no paralelos -> a la interseccion de sus rectas
+    for i in range(len(segs)):
+        for j in range(i + 1, len(segs)):
+            A, B = segs[i], segs[j]
+            dA, dB = unit(A[1] - A[0]), unit(B[1] - B[0])
+            if abs(float(dA[0] * dB[1] - dA[1] * dB[0])) < 0.2:
+                continue
+            for ka in (0, 1):
+                for kb in (0, 1):
+                    if float(np.linalg.norm(A[ka] - B[kb])) < 2.2 * max(A[2], B[2]):
+                        r = line_x(A[ka], dA, B[kb], dB)
+                        if r is None:
+                            continue
+                        X = A[ka] + r[0] * dA
+                        if float(np.linalg.norm(X - A[ka])) < 3.0 * max(A[2], B[2]) and float(np.linalg.norm(X - B[kb])) < 3.0 * max(A[2], B[2]):
+                            A[ka], B[kb] = X.copy(), X.copy()
+    # 3. extremos libres que llegan a otro tramo: se prolongan hasta el y se parte el otro tramo (union en T)
+    def free(p, skip):
+        return all(float(np.linalg.norm(p - q)) > 1e-6 for k, sg in enumerate(segs) if k != skip for q in (sg[0], sg[1]))
+    for i in range(len(segs)):
+        for ka in (0, 1):
+            A = segs[i]
+            p = A[ka]
+            if not free(p, i):
+                continue
+            d = unit(A[ka] - A[1 - ka])
+            best = None
+            for j, B in enumerate(segs):
+                if j == i:
+                    continue
+                e = B[1] - B[0]
+                Lb = float(np.linalg.norm(e))
+                r = line_x(p, d, B[0], e / Lb)
+                if r is None:
+                    continue
+                s_, u_ = r
+                if -0.2 * A[2] <= s_ <= 2.5 * (A[2] + B[2]) and -0.3 * B[2] <= u_ <= Lb + 0.3 * B[2]:
+                    if best is None or s_ < best[0]:
+                        best = (s_, j, u_, Lb)
+            if best is not None:
+                s_, j, u_, Lb = best
+                B = segs[j]
+                X = p + s_ * d
+                A[ka] = X.copy()
+                u_ = min(max(u_, 0.0), Lb)
+                if 0.4 * B[2] < u_ < Lb - 0.4 * B[2]:
+                    segs.append([X.copy(), B[1].copy(), B[2]])
+                    B[1] = X.copy()
+                elif u_ <= 0.4 * B[2]:
+                    B[0] = X.copy()
+                else:
+                    B[1] = X.copy()
+    return [(a, b, t) for a, b, t in segs if float(np.linalg.norm(b - a)) > 1e-6]
+
+
 def _prism_plates(part, ip, pr, notes):
     U, V, W = (np.asarray(x, float) for x in (pr.U, pr.V, pr.W))
     o = np.asarray(pr.o, float)
@@ -130,43 +351,44 @@ def _prism_plates(part, ip, pr, notes):
             return
         out.append(Plate(f"{part.name}#{ip}.{k}", part.name, part.kind, P, float(t), unit(n), [np.asarray(h, float) for h in holes]))
 
-    if pr.circle is not None:                                                         # cilindro / tubo redondo: facetas sobre el radio medio
-        ro, ri = pr.circle
-        t = (ro - ri) if ri > 0 else max(min(ro, 0.5), 1e-3)
-        rm = ro - t / 2.0
-        ns = 24
+    def facets(cx, cy, rm, t, ns=24, k0=0):                                          # cilindro de radio medio rm como facetas planas
         for k in range(ns):
             a0, a1 = 2 * math.pi * k / ns, 2 * math.pi * (k + 1) / ns
-            p00, p10 = g(rm * math.cos(a0), rm * math.sin(a0), w0), g(rm * math.cos(a1), rm * math.sin(a1), w0)
-            p11, p01 = g(rm * math.cos(a1), rm * math.sin(a1), w1), g(rm * math.cos(a0), rm * math.sin(a0), w1)
+            p00, p10 = g(cx + rm * math.cos(a0), cy + rm * math.sin(a0), w0), g(cx + rm * math.cos(a1), cy + rm * math.sin(a1), w0)
+            p11, p01 = g(cx + rm * math.cos(a1), cy + rm * math.sin(a1), w1), g(cx + rm * math.cos(a0), cy + rm * math.sin(a0), w1)
             am = 0.5 * (a0 + a1)
-            add(k, [p00, p10, p11, p01], t, math.cos(am) * U + math.sin(am) * V)
+            add(k0 + k, [p00, p10, p11, p01], t, math.cos(am) * U + math.sin(am) * V)
+
+    if pr.circle is not None:                                                         # cilindro / tubo redondo: facetas sobre el radio medio
+        ro, ri = pr.circle
+        cx0, cy0 = 0.0, 0.0
+        if ri > 0:
+            facets(cx0, cy0, ro - (ro - ri) / 2.0, ro - ri)
+        else:                                                                           # barra maciza: tubo equivalente de igual area (rm = ro/2, t = ro)
+            notes.append(f"{part.name}: barra maciza; se modela como un tubo de igual área (las placas no representan un sólido).")
+            facets(cx0, cy0, ro / 2.0, ro)
         return out
     poly = [(float(q[0]), float(q[1])) for q in pr.poly]
     if pr.holes:                                                                       # tubo poligonal: paredes entre exterior e interior
         inner = [(float(q[0]), float(q[1])) for q in pr.holes[0]]
         mid = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in zip(poly, inner)]
-        for k in range(len(mid)):
-            (u0, v0), (u1, v1) = mid[k], mid[(k + 1) % len(mid)]
-            t = 0.5 * (math.hypot(poly[k][0] - inner[k][0], poly[k][1] - inner[k][1]) + math.hypot(poly[(k + 1) % len(mid)][0] - inner[(k + 1) % len(mid)][0], poly[(k + 1) % len(mid)][1] - inner[(k + 1) % len(mid)][1])) / 1.0
+        N = len(mid)
+        for k in range(N):
+            (u0, v0), (u1, v1) = mid[k], mid[(k + 1) % N]
             e = np.array([u1 - u0, v1 - v0])
             if float(np.linalg.norm(e)) < 1e-9:
                 continue
-            nn = unit(np.array([e[1], -e[0]])[0] * U + np.array([e[1], -e[0]])[1] * V)
-            add(k, [g(u0, v0, w0), g(u1, v1, w0), g(u1, v1, w1), g(u0, v0, w1)], t / 1.4142, nn)
+            t = 0.5 * (math.hypot(poly[k][0] - inner[k][0], poly[k][1] - inner[k][1]) + math.hypot(poly[(k + 1) % N][0] - inner[(k + 1) % N][0], poly[(k + 1) % N][1] - inner[(k + 1) % N][1])) / 1.4142
+            nn = unit(e[1] * U - e[0] * V)
+            add(k, [g(u0, v0, w0), g(u1, v1, w0), g(u1, v1, w1), g(u0, v0, w1)], t, nn)
         return out
-    rc = _is_rect(poly)
-    L = float(len(poly))
+    rc = _oriented_rect(poly)
     if rc is not None:
-        u0, u1, v0, v1 = rc
-        du, dv = u1 - u0, v1 - v0
-        if min(du, dv) < tw * 0.999:                                                    # delgado en su propio plano (ala, alma, pared)
-            if du <= dv:
-                um = 0.5 * (u0 + u1)
-                add(0, [g(um, v0, w0), g(um, v1, w0), g(um, v1, w1), g(um, v0, w1)], du, U)
-            else:
-                vm = 0.5 * (v0 + v1)
-                add(0, [g(u0, vm, w0), g(u1, vm, w0), g(u1, vm, w1), g(u0, vm, w1)], dv, V)
+        c, e1, a, e2, b = rc
+        if min(a, b) < tw * 0.999:                                                      # delgado en su propio plano (ala, alma, pared), con cualquier giro
+            e_thin, e_long, t, Ll = (e1, e2, a, b) if a <= b else (e2, e1, b, a)
+            p0, p1 = c - e_long * Ll / 2.0, c + e_long * Ll / 2.0
+            add(0, [g(p0[0], p0[1], w0), g(p1[0], p1[1], w0), g(p1[0], p1[1], w1), g(p0[0], p0[1], w1)], t, e_thin[0] * U + e_thin[1] * V)
             return out
     elif len(poly) == 6:                                                                # perfil L (angulo): dos piernas
         us = sorted({round(q[0], 7) for q in poly})
@@ -178,15 +400,25 @@ def _prism_plates(part, ip, pr, notes):
             add(0, [g(t / 2, 0, w0), g(t / 2, leg_a, w0), g(t / 2, leg_a, w1), g(t / 2, 0, w1)], t, U)
             add(1, [g(t / 2, tv / 2, w0), g(leg_b, tv / 2, w0), g(leg_b, tv / 2, w1), g(t / 2, tv / 2, w1)], tv, V)
             return out
+    area = 0.5 * abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1] for i in range(len(poly))))
+    per = sum(math.hypot(poly[i][0] - poly[(i + 1) % len(poly)][0], poly[i][1] - poly[(i + 1) % len(poly)][1]) for i in range(len(poly)))
+    t_in = 2.0 * area / max(per, 1e-9)
+    if t_in < tw * 0.999:                                                               # poligono delgado en su plano (perfil libre): linea media con su espesor
+        segs = _skeleton(poly)
+        if segs:
+            for k, (p0, p1, t) in enumerate(segs):
+                d = p1 - p0
+                add(k, [g(p0[0], p0[1], w0), g(p1[0], p1[1], w0), g(p1[0], p1[1], w1), g(p0[0], p0[1], w1)], t, unit(d[1] * U - d[0] * V))
+            return out
+        ro_eq = math.sqrt(area / math.pi)                                                # compacto (poligono macizo): tubo equivalente de igual area
+        cu, cv = sum(q[0] for q in poly) / len(poly), sum(q[1] for q in poly) / len(poly)
+        notes.append(f"{part.name}: sección maciza; se modela como un tubo de igual área (las placas no representan un sólido).")
+        facets(cu, cv, ro_eq / 2.0, ro_eq)
+        return out
     # placa plana: el poligono a mitad del espesor
     holes = []
     for h in pr.holes_extra:
         holes.append([g(float(q[0]), float(q[1]), 0.5 * (w0 + w1)) for q in h])
-    area = 0.5 * abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1] for i in range(len(poly))))
-    per = sum(math.hypot(poly[i][0] - poly[(i + 1) % len(poly)][0], poly[i][1] - poly[(i + 1) % len(poly)][1]) for i in range(len(poly)))
-    t_in = 2.0 * area / max(per, 1e-9)
-    if t_in < 0.45 * tw and rc is None:
-        notes.append(f"{part.name}: su sección no se pudo reducir a placas (perfil libre); se modela como placa plana.")
     add(0, [g(u, v, 0.5 * (w0 + w1)) for (u, v) in poly], tw, W, holes)
     return out
 

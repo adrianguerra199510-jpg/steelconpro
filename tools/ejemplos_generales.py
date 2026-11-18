@@ -425,6 +425,36 @@ def g21_placa_base_soldadura_por_operacion() -> Project:
     return p
 
 
+def _rounded_rect(w, h, r, n=6):
+    """Contorno de un rectángulo w×h con esquinas redondeadas de radio r (puntos [u, v] respecto del centro)."""
+    import math
+    pts = []
+    for cx, cy, a0 in ((w / 2 - r, h / 2 - r, 0), (-w / 2 + r, h / 2 - r, 90), (-w / 2 + r, -h / 2 + r, 180), (w / 2 - r, -h / 2 + r, 270)):
+        for k in range(n + 1):
+            a = math.radians(a0 + 90.0 * k / n)
+            pts.append([round(cx + r * math.cos(a), 4), round(cy + r * math.sin(a), 4)])
+    return pts
+
+
+def g22_torre_cuatro_tubos_sobre_placa() -> Project:
+    """Torre de cuatro tubos redondos HSS2.375X0.218 (cordones de 12 in entre ejes) sobre una placa 32×32×1/2 con esquinas redondeadas (polígono libre).  Un tubo es el miembro
+    principal y los otros tres son miembros paralelos desplazados (off/off2); la placa se suelda al principal y los otros tres tubos se sueldan a ella con operaciones de soldadura.
+    Cuatro anclajes atraviesan la placa hacia un bloque de concreto.  No lleva el arriostramiento entre los tubos: los miembros solo se conectan al principal."""
+    shape = "HSS2.375X0.218"
+    nd = column(shape=shape, length=60.0, end=2)
+    a = 12.0
+    for k, (dx, dy) in enumerate([(a, 0.0), (a, a), (0.0, a)], 1):
+        nd.members.append(Member(name=f"T{k}", shape=shape, steel=nd.main_steel, az=0.0, el=90.0, pos=0.0, off=dx, off2=dy, L=60.0, gap=-0.5))
+    gen(nd, OP_BLOCK, name="PEDESTAL", wp_x=6.0, wp_y=-6.0, wp_z=-0.5 - 12.0, blk_L=36.0, blk_W=36.0, blk_H=24.0)
+    gen(nd, OP_PLATE, name="PB", parent=nd.main_name, face=F_END0, shape=FREE, pts=_rounded_rect(32.0, 32.0, 3.5), pl_L=32.0, pl_W=32.0, pl_s=7.19, pl_u=-6.0,
+        plate_t=0.5, plate_steel=A36, weld_size=0.125)
+    for k in range(3):
+        gen(nd, OP_FILLET, weld_main=f"T{k + 1}", weld_to=[["PB", "Cara superior"]], weld_all=True, weld_size=0.125)
+    gen(nd, OP_BOLTS, name="ANC", parent="PB", face="Cara −", targets=["PEDESTAL"], rows=2, cols=2, bolt_s=26.0, bolt_g=26.0, pl_s=16.0, pl_u=0.0, bolt_size="3/4", bolt_grade="A307")
+    nd.loads = [Load("Caso 1", nd.main_name, N=-4.0, side=1)]
+    return project("TP-G22", "torre de cuatro tubos redondos sobre placa con esquinas redondeadas y anclajes", nd)
+
+
 EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atornillado),
             ("TP-G02_empalme_viga_atornillado.scp", g02_empalme_viga_atornillado),
             ("TP-G03_empalme_columna_hss.scp", g03_empalme_columna_hss),
@@ -445,7 +475,8 @@ EXAMPLES = [("TP-G01_empalme_columna_atornillado.scp", g01_empalme_columna_atorn
             ("TP-G18_posicion_referenciada.scp", g18_posicion_referenciada),
             ("TP-G19_recortes_con_soldadura.scp", g19_recortes_con_soldadura),
             ("TP-G20_placa_base_cordones_modelados.scp", g20_placa_base_cordones_modelados),
-            ("TP-G21_placa_base_soldadura_por_operacion.scp", g21_placa_base_soldadura_por_operacion)]
+            ("TP-G21_placa_base_soldadura_por_operacion.scp", g21_placa_base_soldadura_por_operacion),
+            ("TP-G22_torre_cuatro_tubos_sobre_placa.scp", g22_torre_cuatro_tubos_sobre_placa)]
 
 
 def main(revisa=False):
