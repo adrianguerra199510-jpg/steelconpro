@@ -446,6 +446,65 @@ except Exception as _e_:
     FAIL.append(f"sismo/modelo: {type(_e_).__name__}: {_e_}")
 
 
+try:
+    # --- generador de combinaciones ASCE 7-05 y limite por capacidad AISC 341-22 D2.6
+    from placabase import seismic as SE
+    _g = Project(); _g.seis.enabled = True; _g.seis.prune = False
+    _g.seis.cases = [[100.0, 0, 0, 0, 0], [50.0, 0, 0, 0, 0], [0.0] * 5,
+                     [0.0, 1000.0, 0, 0, 20.0], [0.0] * 5]
+    _cs = SE.generate(_g)
+    _k = [c.kind for c in _cs]
+    _E = [c for c in _cs if c.kind == "E"]; _O = [c for c in _cs if c.kind == "Ωo"]
+    if (len(_cs), _k.count(""), len(_E), len(_O)) != (11, 3, 4, 4):
+        FAIL.append(f"sismo/generador: se esperaban 11 combinaciones (3 G, 4 E, 4 Ω), hay "
+                    f"{len(_cs)} ({_k.count('')}, {len(_E)}, {len(_O)})")
+    _e1 = [c for c in _E if abs(c.Pu - 190.0) < 1e-6]
+    if len(_e1) != 2 or sorted(c.Mux for c in _e1) != [-1000.0, 1000.0]:
+        FAIL.append("sismo/generador: (1.2+0.2SDS)D + ρQE + f1L debe dar Pu = 190, Mux = ±1000")
+    elif not (_e1[0].e_known and abs(_e1[0].PE - 20.0) < 1e-6 and abs(abs(_e1[0].MxE) - 1000.0) < 1e-6):
+        FAIL.append("sismo/generador: parte E de la combinacion = Ev 0.2·SDS·D + ρ·QE")
+    if not any(abs(c.Pu - 70.0) < 1e-6 for c in _E):
+        FAIL.append("sismo/generador: (0.9 − 0.2SDS)D debe dar Pu = 70")
+    if sorted({round(abs(c.Mux), 6) for c in _O}) != [3000.0]:
+        FAIL.append("sismo/generador: Ωo·QE con Ωo = 3 debe dar |Mux| = 3000 (bajo el limite por capacidad)")
+    if abs(SE.ry_of("ASTM A992") - 1.1) > 1e-9 or abs(SE.ry_of("ASTM A36") - 1.5) > 1e-9 \
+            or abs(SE.ry_of("ASTM A500 Gr.B (HSS rect.)") - 1.4) > 1e-9:
+        FAIL.append("sismo/generador: Ry de AISC 341-22 Tabla A3.2")
+    _lim = SE.capacity_limits(_g)
+    if abs(_lim["Mx"] - 1.1 * 1.1 * 50.0 * _g.section.eff().Zx) > 1e-6 \
+            or abs(_lim["Vy"] - 2.0 * 1.1 * 50.0 * _g.section.eff().Zx / _g.seis.H) > 1e-6:
+        FAIL.append("sismo/generador: limites 1.1·Ry·Fy·Zx y 2·Ry·Fy·Zx/H")
+    _g.seis.cases[3] = [0.0, 10000.0, 0, 0, 20.0]
+    _Oc = [c for c in SE.generate(_g) if c.kind == "Ωo"]
+    if any(abs(abs(c.Mux) - _lim["Mx"]) > 1e-6 for c in _Oc) or any(abs(c.MxE + 0.0) < 1e-9 for c in _Oc):
+        FAIL.append("sismo/generador: Ωo·QE = 30000 debe quedar limitado a 1.1·Ry·Mp")
+    _g.seis.cap_limit = False
+    if max(abs(c.Mux) for c in SE.generate(_g) if c.kind == "Ωo") < 29999.0:
+        FAIL.append("sismo/generador: sin limite por capacidad debe quedar Ωo·QE completo")
+    _g.seis.cap_limit = True; _g.section.rotation = 90.0
+    _l90 = SE.capacity_limits(_g)
+    if abs(_l90["Mx"] - _lim["My"]) > 1e-6 or abs(_l90["My"] - _lim["Mx"]) > 1e-6:
+        FAIL.append("sismo/generador: con rotacion 90° se intercambian los limites de Mx y My")
+    _g.section.rotation = 0.0
+    _g.seis.ortho = True; _g.seis.cases[4] = [0.0, 0, 500.0, 15.0, 0]
+    _co = SE.generate(_g)
+    if len(_co) != 35:
+        FAIL.append(f"sismo/generador: con 100 % + 30 % se esperaban 35 combinaciones, hay {len(_co)}")
+    _pr = SE.prune(_g, _co)
+    if not (0 < len(_pr) <= len(_co)) or any(c not in _co for c in _pr):
+        FAIL.append("sismo/generador: prune debe devolver un subconjunto no vacio")
+    if len(SE.prune(_g, _co[:1])) != 1:
+        FAIL.append("sismo/generador: prune con una sola combinacion la conserva")
+    _z = Project(); _z.seis.enabled = True
+    if len(SE.generate(_z)) < 1:
+        FAIL.append("sismo/generador: con cargas en cero debe devolver al menos una combinacion")
+    print(f"{'sismo: generador ASCE 7-05':34} {len(_cs)} comb. (100/30: {len(_co)}, tras prune {len(_pr)})  "
+          f"1.1RyMp = {_lim['Mx']:.0f} kip·in")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/generador: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile
