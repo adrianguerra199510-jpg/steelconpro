@@ -420,6 +420,32 @@ except Exception as _e_:
     FAIL.append(f"columna descentrada: {type(_e_).__name__}: {_e_}")
 
 
+# ================================================================ SISMO (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
+print()
+print("SISMO")
+try:
+    # --- modelo: migracion de la casilla vieja, guardado y firma 3D
+    _sp = Project(); _sp.conc.seismic = True
+    _sp.combos.append(__import__("placabase.model", fromlist=["LoadCombo"]).LoadCombo("Comb 2", 300, 900, 0, 20, 0))
+    _sp.normalize()
+    if not (_sp.seis.enabled and all(c.kind == "E" for c in _sp.combos) and not _sp.conc.seismic):
+        FAIL.append("sismo/modelo: la casilla vieja conc.seismic no se migro")
+    _sp.seis.cases[3] = [0.0, 1000.0, 0.0, 0.0, 20.0]
+    _sq = Project.from_json(_sp.to_json())
+    if _sq.seis.cases[3][1] != 1000.0 or _sq.combos[1].kind != "E" or not _sq.seis.enabled:
+        FAIL.append("sismo/modelo: guardar/abrir no conserva los datos sismicos")
+    _s1 = _sp.sig3d(); _sp.seis.SDS = 1.7
+    if _sp.sig3d() != _s1:
+        FAIL.append("sismo/modelo: cambiar datos sismicos no debe invalidar el 3D")
+    _nb = _sp.combo_loads_noE(1)
+    if abs(_nb.loads.Pu) > 1e-9:
+        FAIL.append("sismo/modelo: combinacion E sin parte conocida debe quedar en cero sin E")
+    print(f"{'sismo: modelo y migracion':34} ok")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/modelo: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile
