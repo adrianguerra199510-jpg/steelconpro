@@ -13,6 +13,7 @@ from . import materials as MAT
 from .explain import Recorder
 from .design import Check, Bearing
 from .ubar import ubar
+from .seismic import seismic_state
 
 
 def _sqrt_fc_psi(fc_ksi: float) -> float:
@@ -74,7 +75,8 @@ def anchor_checks(prj: Project, br: Bearing,
     phi_s_t = 0.75 if mat.ductile else 0.65
     phi_s_v = 0.65 if mat.ductile else 0.60
     phi_c = 0.75 if c.cond_A_eff else 0.70
-    k_seis = 0.75 if c.seismic else 1.0
+    st = seismic_state(prj)
+    k_seis = st.k_t                  # ACI 17.10.5.4: 0.75 solo en los modos de concreto en TRACCION (fN > 20 %)
 
     # ---- anclaje postinstalado con adhesivo (ACI 318-19 17.6.5)
     adh = b.adhesive
@@ -207,9 +209,11 @@ def anchor_checks(prj: Project, br: Bearing,
                 "elemento " + ("ductil" if mat.ductile else "fragil"))
         rec.add("φ concreto", "condicion " + ("A" if c.cond_A_eff else "B"),
                 f"{phi_c:.2f}", None, "-", "ACI Tabla 17.5.3(c)")
-        if c.seismic:
-            rec.add("factor sismico", "0.75 sobre la resistencia del concreto",
-                    "", None, "-", "ACI 17.10.5.2")
+        if st.active:
+            rec.add("factor sismico", f"{k_seis:g} sobre arrancamiento, extraccion, desprendimiento lateral y adherencia"
+                    " en traccion; el cortante no se reduce",
+                    f"traccion sismica = {st.fN:.0%} del total " + ("> 20 %" if st.fN > 0.2 else "<= 20 %"),
+                    None, "-", "ACI 17.10.5.1 / 17.10.5.4 / 17.10.6")
 
     # ================================================ ACI 17.6.1 acero traccion
     Nsa = g.Ase * futa
@@ -336,7 +340,7 @@ def anchor_checks(prj: Project, br: Bearing,
         if table and b.sustained > 0:
             t_cr_d *= 0.4; t_uncr_d *= 0.4
             f_red = "×0.4 por traccion sostenida"
-        if table and c.seismic:
+        if table and st.bond:
             t_cr_d *= 0.8; t_uncr_d *= 0.4
             f_red += (" ; " if f_red else "") + "τcr×0.8, τuncr×0.4 por sismo (SDC C-F)"
         tau = t_cr_d if c.cracked else t_uncr_d
@@ -456,12 +460,14 @@ def anchor_checks(prj: Project, br: Bearing,
                      "ACI 318-19 17.6.3", note, skip=skip))
 
     # ============================= ACI 17.6.4 desprendimiento lateral
+    Nsb_n = None
     if b.atype.startswith("Con cabeza") and ca_min < 0.4 * hef:
         Nsb = 160.0 * ca_min * math.sqrt(Abrg) * c.lam * fcp / 1000.0
         if ca_x2 < 3.0 * ca_min:
             Nsb *= (1.0 + ca_x2 / ca_min) / 4.0
+        Nsb_n = Nsb
         out.append(Check("aci_nsb", "Anclaje — desprendimiento lateral (side-face blowout)",
-                         Nua_b, phi_c * Nsb, "kip", "ACI 318-19 17.6.4",
+                         Nua_b, phi_c * k_seis * Nsb, "kip", "ACI 318-19 17.6.4",
                          f"Aplica porque ca_min = {u.q('L', ca_min)} < 0.4·hef = {u.q('L', 0.4*hef)}"))
 
     # ==================================== ACI 17.7.1 acero en cortante
@@ -515,10 +521,10 @@ def anchor_checks(prj: Project, br: Bearing,
                 f"({Avc/Avco:.3f})·1.00·{psi_edV:.3f}·{psi_cV:.2f}·"
                 f"{psi_hV:.3f}·{rec.n('F', Vb)}", Vcbg, "F")
         rec.check("Arrancamiento del concreto en cortante", Vua,
-                  phi_c * k_seis * Vcbg, "F",
-                  Vua / (phi_c * k_seis * Vcbg) if Vcbg > 0 else 0,
-                  Vua <= phi_c * k_seis * Vcbg, "ACI 17.7.2")
-    cap_vcb = phi_c * k_seis * Vcbg
+                  phi_c * Vcbg, "F",
+                  Vua / (phi_c * Vcbg) if Vcbg > 0 else 0,
+                  Vua <= phi_c * Vcbg, "ACI 17.7.2")
+    cap_vcb = phi_c * Vcbg
     if ub is not None:
         cap_vcb = max(cap_vcb, ub["phi"] * ub["Nrs"])           # ACI 17.7.2.5: refuerzo de anclaje en cortante
     out.append(Check("aci_vcb", "Anclaje — arrancamiento del concreto en cortante"
@@ -532,7 +538,7 @@ def anchor_checks(prj: Project, br: Bearing,
     Ncp = min(Ncbg, Nag) if adh and Nag is not None else Ncbg   # ACI 17.7.3.1.1
     Vcpg = kcp * Ncp
     out.append(Check("aci_vcp", "Anclaje — desprendimiento por cabeceo (pryout)",
-                     Vua, phi_c * k_seis * Vcpg, "kip", "ACI 318-19 17.7.3",
+                     Vua, phi_c * Vcpg, "kip", "ACI 318-19 17.7.3",
                      f"kcp = {kcp:.0f}"))
 
     if rec:
@@ -540,9 +546,9 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.add("Vcpg", "kcp · min(Ncbg ; Nag)" if adh else "kcp · Ncbg",
                 f"{kcp:.0f} · {rec.n('F', Ncp)}", Vcpg, "F",
                 "ACI Ec. 17.7.3.1")
-        rec.check("Pryout", Vua, phi_c * k_seis * Vcpg, "F",
-                  Vua / (phi_c * k_seis * Vcpg) if Vcpg > 0 else 0,
-                  Vua <= phi_c * k_seis * Vcpg, "ACI 17.7.3")
+        rec.check("Pryout", Vua, phi_c * Vcpg, "F",
+                  Vua / (phi_c * Vcpg) if Vcpg > 0 else 0,
+                  Vua <= phi_c * Vcpg, "ACI 17.7.3")
 
     if ub is not None:
         nm = "Omega" if ub["kind"] == "OMEGA" else "U"
@@ -572,6 +578,31 @@ def anchor_checks(prj: Project, br: Bearing,
             out.append(Check("aci_ubar_cover", "Refuerzo Omega — recubrimiento lateral de la cola del gancho", 1.5,
                              max(ub["cover"], 0.0), "in", "ACI 318-19 20.5.1",
                              f"cola {u.q('L', ub['tail'])} hacia afuera; recubrimiento que queda {u.q('L', ub['cover'])}, minimo 1.5 in"))
+
+    # ===================== ACI 17.10.5.3(a): anclaje ductil (la fluencia del acero precede a la falla del concreto)
+    if st.active and prj.seis.ductile and Nua > 1e-9:
+        r_s = Nua_b / (1.2 * Nsa) if Nsa > 0 else 99.0
+        modes = [("arrancamiento", Nua / Ncbg if Ncbg > 0 else 99.0)]
+        if Np > 0:
+            modes.append(("extraccion", Nua_b / (psi_cp_p * Np)))
+        elif not adh:
+            modes.append(("extraccion", 99.0))
+        if Nsb_n:
+            modes.append(("desprendimiento lateral", Nua_b / Nsb_n))
+        if adh and Nag:
+            modes.append(("adherencia", Nua / Nag))
+        gov_m, r_c = max(modes, key=lambda t: t[1])
+        out.append(Check("seis_duct_ratio", "Sismo — anclaje ductil: el acero fluye antes que el concreto",
+                         r_c, r_s, "-", "ACI 318-19 17.10.5.3(a)",
+                         f"Nua,perno/(1.2·Nsa) = {r_s:.3f} debe ser >= Nua/N concreto = {r_c:.3f} ({gov_m}); "
+                         "resistencias nominales (sin φ)"))
+        if rec:
+            rec.add("r acero", "Nua,perno / (1.2·Nsa)", f"{rec.n('F', Nua_b)} / (1.2·{rec.n('F', Nsa)})", r_s, "-",
+                    "ACI 17.10.5.3(a)(i)")
+            rec.add("r concreto", "max( Nua/Ncbg ; Nua,perno/Npn ; Nua,perno/Nsb ; Nua/Nag )",
+                    " ; ".join(f"{m} {v:.3f}" for m, v in modes), r_c, "-", "ACI 17.10.5.3(a)(ii)")
+            rec.check("Anclaje ductil (r concreto <= r acero)", r_c, r_s, "-",
+                      r_c / r_s if r_s > 0 else 99.0, r_c <= r_s, "ACI 17.10.5.3(a)")
 
     # ============================================= ACI 17.8 interaccion
     rN = max([ch.ratio for ch in out if ch.key in ("aci_nsa", "aci_ncb", "aci_np", "aci_nsb", "aci_na")] + [0.0])

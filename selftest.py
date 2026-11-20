@@ -402,6 +402,187 @@ except Exception as _e_:
     FAIL.append(f"columna descentrada: {type(_e_).__name__}: {_e_}")
 
 
+# ================================================================ SISMO (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
+print()
+print("SISMO")
+try:
+    # --- modelo: migracion de la casilla vieja, guardado y firma 3D
+    _sp = Project(); _sp.conc.seismic = True
+    _sp.combos.append(__import__("steelconpro.model", fromlist=["LoadCombo"]).LoadCombo("Comb 2", 300, 900, 0, 20, 0))
+    _sp.normalize()
+    if not (_sp.seis.enabled and all(c.kind == "E" for c in _sp.combos) and not _sp.conc.seismic):
+        FAIL.append("sismo/modelo: la casilla vieja conc.seismic no se migro")
+    _sp.seis.cases[3] = [0.0, 1000.0, 0.0, 0.0, 20.0]
+    _sq = Project.from_json(_sp.to_json())
+    if _sq.seis.cases[3][1] != 1000.0 or _sq.combos[1].kind != "E" or not _sq.seis.enabled:
+        FAIL.append("sismo/modelo: guardar/abrir no conserva los datos sismicos")
+    _s1 = _sp.sig3d(); _sp.seis.SDS = 1.7
+    if _sp.sig3d() != _s1:
+        FAIL.append("sismo/modelo: cambiar datos sismicos no debe invalidar el 3D")
+    _nb = _sp.combo_loads_noE(1)
+    if abs(_nb.loads.Pu) > 1e-9:
+        FAIL.append("sismo/modelo: combinacion E sin parte conocida debe quedar en cero sin E")
+    print(f"{'sismo: modelo y migracion':34} ok")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/modelo: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- generador de combinaciones ASCE 7-05 y limite por capacidad AISC 341-22 D2.6
+    from steelconpro import seismic as SE
+    _g = Project(); _g.seis.enabled = True; _g.seis.prune = False
+    _g.seis.cases = [[100.0, 0, 0, 0, 0], [50.0, 0, 0, 0, 0], [0.0] * 5,
+                     [0.0, 1000.0, 0, 0, 20.0], [0.0] * 5]
+    _cs = SE.generate(_g)
+    _k = [c.kind for c in _cs]
+    _E = [c for c in _cs if c.kind == "E"]; _O = [c for c in _cs if c.kind == "Ωo"]
+    if (len(_cs), _k.count(""), len(_E), len(_O)) != (11, 3, 4, 4):
+        FAIL.append(f"sismo/generador: se esperaban 11 combinaciones (3 G, 4 E, 4 Ω), hay "
+                    f"{len(_cs)} ({_k.count('')}, {len(_E)}, {len(_O)})")
+    _e1 = [c for c in _E if abs(c.Pu - 190.0) < 1e-6]
+    if len(_e1) != 2 or sorted(c.Mux for c in _e1) != [-1000.0, 1000.0]:
+        FAIL.append("sismo/generador: (1.2+0.2SDS)D + ρQE + f1L debe dar Pu = 190, Mux = ±1000")
+    elif not (_e1[0].e_known and abs(_e1[0].PE - 20.0) < 1e-6 and abs(abs(_e1[0].MxE) - 1000.0) < 1e-6):
+        FAIL.append("sismo/generador: parte E de la combinacion = Ev 0.2·SDS·D + ρ·QE")
+    if not any(abs(c.Pu - 70.0) < 1e-6 for c in _E):
+        FAIL.append("sismo/generador: (0.9 − 0.2SDS)D debe dar Pu = 70")
+    if sorted({round(abs(c.Mux), 6) for c in _O}) != [3000.0]:
+        FAIL.append("sismo/generador: Ωo·QE con Ωo = 3 debe dar |Mux| = 3000 (bajo el limite por capacidad)")
+    if abs(SE.ry_of("ASTM A992") - 1.1) > 1e-9 or abs(SE.ry_of("ASTM A36") - 1.5) > 1e-9 \
+            or abs(SE.ry_of("ASTM A500 Gr.B (HSS rect.)") - 1.4) > 1e-9:
+        FAIL.append("sismo/generador: Ry de AISC 341-22 Tabla A3.2")
+    _lim = SE.capacity_limits(_g)
+    if abs(_lim["Mx"] - 1.1 * 1.1 * 50.0 * _g.section.eff().Zx) > 1e-6 \
+            or abs(_lim["Vy"] - 2.0 * 1.1 * 50.0 * _g.section.eff().Zx / _g.seis.H) > 1e-6:
+        FAIL.append("sismo/generador: limites 1.1·Ry·Fy·Zx y 2·Ry·Fy·Zx/H")
+    _g.seis.cases[3] = [0.0, 10000.0, 0, 0, 20.0]
+    _Oc = [c for c in SE.generate(_g) if c.kind == "Ωo"]
+    if any(abs(abs(c.Mux) - _lim["Mx"]) > 1e-6 for c in _Oc) or any(abs(c.MxE + 0.0) < 1e-9 for c in _Oc):
+        FAIL.append("sismo/generador: Ωo·QE = 30000 debe quedar limitado a 1.1·Ry·Mp")
+    _g.seis.cap_limit = False
+    if max(abs(c.Mux) for c in SE.generate(_g) if c.kind == "Ωo") < 29999.0:
+        FAIL.append("sismo/generador: sin limite por capacidad debe quedar Ωo·QE completo")
+    _g.seis.cap_limit = True; _g.section.rotation = 90.0
+    _l90 = SE.capacity_limits(_g)
+    if abs(_l90["Mx"] - _lim["My"]) > 1e-6 or abs(_l90["My"] - _lim["Mx"]) > 1e-6:
+        FAIL.append("sismo/generador: con rotacion 90° se intercambian los limites de Mx y My")
+    _g.section.rotation = 0.0
+    _g.seis.ortho = True; _g.seis.cases[4] = [0.0, 0, 500.0, 15.0, 0]
+    _co = SE.generate(_g)
+    if len(_co) != 35:
+        FAIL.append(f"sismo/generador: con 100 % + 30 % se esperaban 35 combinaciones, hay {len(_co)}")
+    _pr = SE.prune(_g, _co)
+    if not (0 < len(_pr) <= len(_co)) or any(c not in _co for c in _pr):
+        FAIL.append("sismo/generador: prune debe devolver un subconjunto no vacio")
+    if len(SE.prune(_g, _co[:1])) != 1:
+        FAIL.append("sismo/generador: prune con una sola combinacion la conserva")
+    _z = Project(); _z.seis.enabled = True
+    if len(SE.generate(_z)) < 1:
+        FAIL.append("sismo/generador: con cargas en cero debe devolver al menos una combinacion")
+    print(f"{'sismo: generador ASCE 7-05':34} {len(_cs)} comb. (100/30: {len(_co)}, tras prune {len(_pr)})  "
+          f"1.1RyMp = {_lim['Mx']:.0f} kip·in")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/generador: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- ACI 318-19 17.10: regla del 20 % y factor 0.75 solo en traccion
+    from steelconpro import seismic as SE
+    from steelconpro.model import LoadCombo as _LC
+
+    def _sc(kind, PE=0.0, MxE=0.0, VxE=0.0, Pu=400.0, Mux=5200.0, Vux=30.0, sdc="D", known=True):
+        q = Project(); q.seis.enabled = True; q.seis.sdc = sdc
+        c = _LC("t", Pu, Mux, 0.0, Vux, 0.0); c.kind = kind
+        c.PE, c.MxE, c.VxE, c.e_known = PE, MxE, VxE, known
+        q.combos = [c]; q.apply_combo(0)
+        return q
+
+    _ck = lambda q: {c.key: c for c in solve(q).checks}
+    _qE = _sc("E", MxE=5200.0)
+    _st = SE.seismic_state(_qE)
+    _g0, _gE = _ck(_sc("")), _ck(_qE)
+    if not (_st.active and _st.fN > 0.99 and abs(_st.k_t - 0.75) < 1e-12):
+        FAIL.append(f"sismo/ACI 17.10: traccion 100 % sismica debe dar k = 0.75 (fN = {_st.fN:.2f})")
+    if abs(_gE["aci_ncb"].capacity - 0.75 * _g0["aci_ncb"].capacity) > 1e-6 \
+            or abs(_gE["aci_np"].capacity - 0.75 * _g0["aci_np"].capacity) > 1e-6:
+        FAIL.append("sismo/ACI 17.10.5.4: arrancamiento y extraccion deben llevar 0.75")
+    if abs(_gE["aci_vcb"].capacity - _g0["aci_vcb"].capacity) > 1e-9 \
+            or abs(_gE["aci_vcp"].capacity - _g0["aci_vcp"].capacity) > 1e-9:
+        FAIL.append("sismo/ACI 17.10.6: el cortante NO lleva el factor 0.75")
+    _qs = _sc("E", MxE=200.0)
+    _ss = SE.seismic_state(_qs)
+    if not (_ss.fN <= 0.20 and _ss.k_t == 1.0):
+        FAIL.append(f"sismo/ACI 17.10.5.1: traccion sismica <= 20 % no lleva factor (fN = {_ss.fN:.3f})")
+    _qc = _sc("E", MxE=0.0, Mux=0.0, Pu=900.0)
+    if SE.seismic_state(_qc).fN != 0.0:
+        FAIL.append("sismo/ACI 17.10: sin traccion la fraccion sismica debe ser 0")
+    if SE.seismic_state(_sc("E", MxE=5200.0, sdc="B")).active:
+        FAIL.append("sismo/ACI 17.10.1: en SDC B no aplica 17.10")
+    if SE.seismic_state(_sc("E", known=False)).fN != 1.0:
+        FAIL.append("sismo/ACI 17.10: parte E desconocida debe tomarse como 100 % sismica")
+    _qv = _sc("E", VxE=30.0, MxE=0.0)
+    if SE.seismic_state(_qv).fV < 0.99:
+        FAIL.append("sismo/ACI 17.10.6: fraccion sismica del cortante")
+    print(f"{'sismo: ACI 17.10 (20 %, 0.75)':34} fN = {_st.fN:.2f} -> k = {_st.k_t}   fN = {_ss.fN:.3f} -> k = {_ss.k_t}")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/ACI 17.10: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- verificaciones sismicas: anclaje ductil (17.10.5.3(a)), barras de refuerzo (17.10.4) y memoria
+    from steelconpro.model import LoadCombo as _LC2
+
+    def _sd(**mut):
+        q = Project(); q.seis.enabled = True; q.seis.sdc = "D"; q.seis.ductile = True
+        c = _LC2("E", 400.0, 5200.0, 0.0, 30.0, 0.0); c.kind = "E"; c.MxE = 5200.0; c.e_known = True
+        q.combos = [c]; q.apply_combo(0)
+        for path, val in mut.items():
+            o = q
+            for part in path.split(".")[:-1]:
+                o = getattr(o, part)
+            setattr(o, path.split(".")[-1], val)
+        R = solve(q)
+        return R, {c.key: c for c in R.checks}
+
+    _R105, _c105 = _sd(**{"bolts.steel": "ASTM F1554 Gr.105"})
+    _R36, _c36 = _sd(**{"bolts.steel": "ASTM F1554 Gr.36"})
+    _Rup, _cup = _sd(**{"bolts.steel": "ASTM F1554 Gr.105", "seis.upset": True})
+    if "seis_futa" not in _c105 or _c105["seis_futa"].ok:
+        FAIL.append("sismo/ductil: F1554 Gr.105 (futa/fya = 1.19) no cumple 17.10.5.3(a)(v)")
+    if not _c36.get("seis_futa") or not _c36["seis_futa"].ok:
+        FAIL.append("sismo/ductil: F1554 Gr.36 cumple futa/fya >= 1.3")
+    if not _cup.get("seis_futa") or not _cup["seis_futa"].skip:
+        FAIL.append("sismo/ductil: con rosca recalcada no se exige futa/fya")
+    if _c36["seis_stretch"].ok or abs(_c36["seis_stretch"].demand - 10.0) > 1e-9 \
+            or abs(_c36["seis_stretch"].capacity - 3.5) > 1e-9:
+        FAIL.append("sismo/ductil: estiramiento 8·da = 10 in contra 0 + 1.5 + 0 + 2 = 3.5 in debe fallar")
+    _Rsl, _csl = _sd(**{"seis.sleeve": 8.0})
+    if not _csl["seis_stretch"].ok:
+        FAIL.append("sismo/ductil: con camisa de 8 in el estiramiento cumple")
+    if "seis_duct_ratio" not in _c36 or "seis_duct_mat" not in _c36:
+        FAIL.append("sismo/ductil: faltan las verificaciones de anclaje ductil")
+    _Rrb, _crb = _sd(**{"conc.u_on": True, "conc.u_fy": 75.0})
+    if "seis_rebar" not in _crb or _crb["seis_rebar"].ok:
+        FAIL.append("sismo/ACI 17.10.4: barra de fy = 75 ksi no es Gr.60/80")
+    if not _sd(**{"conc.u_on": True, "conc.u_fy": 60.0})[1]["seis_rebar"].ok:
+        FAIL.append("sismo/ACI 17.10.4: barra Gr.60 cumple")
+    if "REQUISITOS SISMICOS" not in _R36.rec.to_html():
+        FAIL.append("sismo/memoria: falta la seccion de requisitos sismicos")
+    if not any("Ωo" in w for w in _R36.warnings):
+        FAIL.append("sismo/avisos: traccion > 20 % sin combinaciones Ωo debe avisar")
+    _Rb, _cb = _sd(**{"seis.sdc": "B"})
+    if any(k.startswith("seis_") for k in _cb) or not any("17.10" in w for w in _Rb.warnings):
+        FAIL.append("sismo/SDC B: sin verificaciones de 17.10 y con aviso")
+    print(f"{'sismo: ductil / refuerzo / memoria':34} futa/fya Gr.105 D/C = {_c105['seis_futa'].ratio:.2f}  "
+          f"estiramiento D/C = {_c36['seis_stretch'].ratio:.2f}  r_c/r_s = {_c36['seis_duct_ratio'].ratio:.2f}")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/verificaciones: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

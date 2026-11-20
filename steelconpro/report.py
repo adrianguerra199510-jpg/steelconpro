@@ -76,6 +76,14 @@ def input_rows(prj: Project, us: UnitSet) -> list[tuple[str, str]]:
                                f"Vux = {q('F', prj.loads.Vux)}, Vuy = {q('F', prj.loads.Vuy)}, "
                                f"Mux = {q('M', prj.loads.Mux)}, Muy = {q('M', prj.loads.Muy)}")
                               if prj.loads.tilted else "no (perpendicular a la placa)"),
+        ("Diseno sismico", (f"ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10 — {prj.seis.system}, SDC {prj.seis.sdc}, "
+                            f"Ωo = {prj.seis.Omega0:g}, ρ = {prj.seis.rho:g}, SDS = {prj.seis.SDS:g}, "
+                            f"H = {q('L', prj.seis.H)}"
+                            + (", limite por capacidad D2.6" if prj.seis.cap_limit else "")
+                            + (", anclaje ductil 17.10.5.3(a)" if prj.seis.ductile else "")
+                            + (f"; combinacion {prj.combos[prj.combo_idx].kind or 'de gravedad'}"
+                               if prj.combos and 0 <= prj.combo_idx < len(prj.combos) else ""))
+                           if prj.seis.enabled else "No"),
     ]
 
 

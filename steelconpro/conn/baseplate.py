@@ -21,7 +21,7 @@ import numpy as np
 
 from .specs import (CT_BASEPLATE, CT_NODE, END_LABELS, OP_BASE, Nodo, Operation)
 
-PROJECT_BLOCKS = ("section", "plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea")
+PROJECT_BLOCKS = ("section", "plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea", "seis")
 
 
 def base_member(nd: Nodo, op: Operation):
