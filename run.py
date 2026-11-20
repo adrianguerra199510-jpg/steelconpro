@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Punto de entrada de PlacaBasePro.
+"""Punto de entrada de SteelConPro.
 
-    PlacaBasePro.exe                       -> interfaz grafica
-    PlacaBasePro.exe --selftest            -> autopruebas del motor (sin interfaz)
-    PlacaBasePro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
-    PlacaBasePro.exe proyecto.pbase --pdf mem.pdf --docx s.docx
+    SteelConPro.exe --serve [--port N]    -> motor local de la aplicacion Electron (HTTP en 127.0.0.1)
+    SteelConPro.exe --selftest            -> autopruebas del motor (sin interfaz)
+    SteelConPro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
+    SteelConPro.exe --meshm a.json b.npz  -> (interno) malla del modelo 3D de una conexion
+    SteelConPro.exe --meshs a.json b.npz  -> (interno) malla de placas (cascarones) de una conexion
+    SteelConPro.exe proyecto.scp --pdf mem.pdf --docx s.docx
                                      --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
-                                              (--3d corre Gmsh + CalculiX y verifica con sus resultados)
+                                              (--3d escribe las imagenes del modelo 3D y, si la conexion lleva la operacion
+                                               de placa base, corre Gmsh + CalculiX y verifica con sus resultados;
+                                               --geo escribe la geometria de la placa base para el mallador)
 """
 import os
 import sys
@@ -29,16 +33,82 @@ def resolve(p):
 
 
 def batch(argv):
-    import tempfile
-    from placabase.model import Project
-    from placabase.solver import solve
-    from placabase import report, mesh3d
+    """Calcula TODAS las conexiones del archivo (un .scp es un libro, como lo guarda la interfaz).
+    Con varias conexiones, los archivos de --pdf / --docx / --geo llevan el nombre de la conexion al final."""
+    from steelconpro.model import load_book
+    book = load_book(resolve(argv[0]))
+    rc = 0
+    for i, prj in enumerate(book):
+        suf = "" if len(book) == 1 else "_" + "".join(
+            ch if ch.isalnum() or ch in "-_" else "_" for ch in (prj.element or f"conexion{i + 1}"))
+        rc = max(rc, batch_one(prj, argv, suf))
+    return rc
 
-    prj = Project.load(resolve(argv[0]))
-    fem = None
+
+def _out(argv, flag, suf):
+    p = argv[argv.index(flag) + 1]
+    if not suf:
+        return p
+    base, ext = os.path.splitext(p)
+    return base + suf + ext
+
+
+def batch_node(prj, argv, suf=""):
+    """Modulos de nudo: verificaciones por codigo (AISC 360-22) de todas las operaciones; --3d carpeta escribe las imagenes del modelo y el esquema."""
+    import tempfile
+    from steelconpro import conn, report
+    mod = conn.module_for(prj.ctype)
+    fem_map = {}
+    if prj.node.base_op() is not None and ("--3d" in argv or "--geo" in argv):        # placa base de la conexion: analisis 3D (Gmsh + CalculiX) y/o geometria para el mallador
+        from steelconpro import mesh3d
+        from steelconpro.conn import baseplate as BP
+        bp = BP.derive(prj)
+        if "--3d" in argv:
+            from steelconpro.rep3d import make_fem
+            for i in range(len(bp.combo_list())):
+                q = bp.with_combo(i)
+                r3, msg = mesh3d.full_3d(q, os.path.join(_out(argv, "--3d", suf), f"placa_base_comb{i + 1}"))
+                print(f"  placa base, combinacion {i + 1}: {msg}")
+                if r3 is not None:
+                    f = make_fem(q, r3)
+                    f.sig = q.sig3d()
+                    fem_map[i] = f
+        if "--geo" in argv:
+            g, d = mesh3d.export_3d(bp, _out(argv, "--geo", suf), bp.fea.mesh3d)
+            print("  ->", g)
+            print("  ->", d)
+    res = conn.solve_conn(prj, fem_map=fem_map)
+    gov = res.governing
+    print(f"{prj.element}: {mod.label(prj)}")
+    print(f"{prj.element}: {'CUMPLE' if res.ok else 'NO CUMPLE'}   D/C max = {res.max_ratio:.3f}" + (f"   gobierna: {gov.title}" if gov else ""))
+    for w in res.warnings:
+        print("  aviso:", w)
     if "--3d" in argv:
-        from placabase.rep3d import make_fem
-        r3, msg = mesh3d.full_3d(prj, argv[argv.index("--3d") + 1])
+        for p in conn.save_figures(prj, res, _out(argv, "--3d", suf)):
+            print("  ->", p)
+    figs = None
+    if any(f in argv for f in ("--docx", "--pdf")):
+        figs = conn.save_figures(prj, res, tempfile.mkdtemp(prefix="scp_"))
+    if "--pdf" in argv:
+        print("  ->", report.export_pdf(prj, res, _out(argv, "--pdf", suf), figs))
+    if "--docx" in argv:
+        print("  ->", report.export_docx(prj, res, _out(argv, "--docx", suf), figs))
+    if "--geo" in argv and prj.node.base_op() is None:
+        print("  aviso: --geo (malla 3D) solo esta disponible para la operacion de placa base.")
+    return 0 if res.ok else 2
+
+
+def batch_one(prj, argv, suf=""):
+    import tempfile
+    from steelconpro.conn.specs import CT_BASEPLATE
+    if prj.ctype != CT_BASEPLATE:
+        return batch_node(prj, argv, suf)
+    from steelconpro.solver import solve
+    from steelconpro import report, mesh3d
+    fem = None
+    if "--3d" in argv and prj.ctype == CT_BASEPLATE:
+        from steelconpro.rep3d import make_fem
+        r3, msg = mesh3d.full_3d(prj, _out(argv, "--3d", suf))
         print("  3D:", msg)
         fem = make_fem(prj, r3) if r3 is not None else None
     res = solve(prj, fem=fem)
@@ -50,13 +120,13 @@ def batch(argv):
 
     figs = None
     if any(f in argv for f in ("--docx", "--pdf")):
-        figs = report.save_figures(prj, res, tempfile.mkdtemp(prefix="pbase_"))
+        figs = report.save_figures(prj, res, tempfile.mkdtemp(prefix="scp_"))
     if "--pdf" in argv:
-        print("  ->", report.export_pdf(prj, res, argv[argv.index("--pdf") + 1], figs))
+        print("  ->", report.export_pdf(prj, res, _out(argv, "--pdf", suf), figs))
     if "--docx" in argv:
-        print("  ->", report.export_docx(prj, res, argv[argv.index("--docx") + 1], figs))
-    if "--geo" in argv:
-        g, d = mesh3d.export_3d(prj, argv[argv.index("--geo") + 1], prj.fea.mesh3d)
+        print("  ->", report.export_docx(prj, res, _out(argv, "--docx", suf), figs))
+    if "--geo" in argv and prj.ctype == CT_BASEPLATE:
+        g, d = mesh3d.export_3d(prj, _out(argv, "--geo", suf), prj.fea.mesh3d)
         print("  ->", g)
         print("  ->", d)
     return 0 if res.ok else 2
@@ -82,6 +152,15 @@ def main():
     args = sys.argv[1:]
     if args and args[0] == "--mesh":
         return mesh_child(args[1], args[2])
+    if args and args[0] == "--meshs":                  # (interno) malla de placas (cascarones) de una conexion
+        from steelconpro.conn.fem.shellmesh import child as shell_child
+        return shell_child(args[1], args[2])
+    if args and args[0] == "--meshm":
+        from steelconpro.conn.fem.mesher import child
+        return child(args[1], args[2])
+    if args and args[0] == "--serve":                  # motor para la aplicacion Electron
+        from steelconpro.server import main as serve_main
+        return serve_main(args[1:])
     if args and args[0] == "--selftest":
         import runpy
         st = os.path.join(BUNDLE, "selftest.py")
@@ -90,8 +169,8 @@ def main():
         return 0
     if args and not args[0].startswith("-"):
         return batch(args)
-    from placabase.ui import main as gui
-    return gui()
+    sys.stderr.write("SteelConPro: la interfaz es la aplicacion Electron; este programa es su motor (use --serve) o calcula por lotes: run.py proyecto.scp --pdf memoria.pdf\n")
+    return 1
 
 
 if __name__ == "__main__":

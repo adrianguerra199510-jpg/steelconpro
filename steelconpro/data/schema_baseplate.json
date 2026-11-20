@@ -1,0 +1,1905 @@
+[
+ {
+  "title": "Cargas",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Combinaciones de carga factorizadas (LRFD)",
+    "items": [
+     {
+      "type": "custom",
+      "id": "tbl_cb",
+      "label": ""
+     },
+     {
+      "type": "custom",
+      "id": "",
+      "label": ""
+     },
+     {
+      "type": "note",
+      "text": "Cada fila es una combinacion (por ejemplo 1.2D+1.6L, 1.2D+1.0E, 0.9D+1.0W). El boton CALCULAR corre el analisis 3D de TODAS las combinaciones y el veredicto es el de la mas desfavorable; el combo 'Combinacion' de la barra superior elige cual se dibuja y se detalla."
+     },
+     {
+      "type": "note",
+      "text": "CONVENCION DE SIGNOS — Pu positivo en compresion (negativo = traccion o levantamiento).  Mux positivo tracciona el lado +Y, que es el borde superior del dibujo en planta; si su momento tracciona el lado opuesto, cambie el signo o gire la placa 180°.  Vux y Vuy son las componentes del cortante en los ejes de la placa.  Todos son valores YA FACTORIZADOS (LRFD).  Muy entra en el perfil, la soldadura y el 3D; el equilibrio cerrado de DG1 es uniaxial (usa Mux)."
+     },
+     {
+      "type": "note",
+      "text": "La INCLINACION DE LA COLUMNA se define en la pestaña Perfil. Si esta inclinada, estas cargas se ingresan en los ejes de la columna."
+     }
+    ]
+   },
+   {
+    "title": "Friccion",
+    "items": [
+     {
+      "path": "loads.friction",
+      "label": "Descontar friccion placa-mortero del cortante en pernos",
+      "help": "Descontar friccion placa-mortero del cortante en pernos\nPermite restar el producto del coeficiente de friccion por Pu del cortante que llega a los anclajes. Uselo solo si puede garantizar la compresion permanente y el estado de la interfaz.",
+      "type": "check"
+     },
+     {
+      "path": "loads.mu_fric",
+      "label": "Coeficiente μ",
+      "help": "Coeficiente μ\nCoeficiente de friccion entre la placa y el mortero. Valores habituales de 0.40 a 0.55.",
+      "type": "num",
+      "lo": 0.2,
+      "hi": 0.9,
+      "step": 0.05,
+      "dec": 2,
+      "suffix": "",
+      "uk": null
+     },
+     {
+      "type": "custom",
+      "id": "lbl_si",
+      "label": "Combinacion activa"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Perfil",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Catalogo AISC (1,660 perfiles) y secciones propias",
+    "items": [
+     {
+      "type": "custom",
+      "id": "cb_kind",
+      "label": "Familia"
+     },
+     {
+      "path": "section.label",
+      "label": "Perfil",
+      "help": "Perfil\nPerfiles de la AISC Shapes Database: W, M, S, HP, C, MC, L, WT, MT, ST, HSS y tuberias. Las secciones creadas con 'Nueva seccion' aparecen en la familia 'Secciones personalizadas'.",
+      "type": "combo",
+      "items": [
+       "W44X408",
+       "W44X368",
+       "W44X335",
+       "W40X655",
+       "W44X290",
+       "W44X262",
+       "W36X925",
+       "W36X853",
+       "W40X593",
+       "W44X230",
+       "W36X802",
+       "W40X503",
+       "W36X723",
+       "W40X392",
+       "W40X431",
+       "W36X652",
+       "W40X397",
+       "W40X331",
+       "W40X327",
+       "W40X372",
+       "W40X362",
+       "W40X294",
+       "W40X324",
+       "W40X278",
+       "W40X264",
+       "W36X529",
+       "W40X297",
+       "W40X277",
+       "W40X235",
+       "W40X249",
+       "W40X211",
+       "W36X487",
+       "W36X387",
+       "W40X215",
+       "W40X183",
+       "W36X441",
+       "W40X199",
+       "W36X350",
+       "W40X167",
+       "W36X395",
+       "W36X318",
+       "W40X149",
+       "W36X361",
+       "W36X286",
+       "W36X330",
+       "W36X256",
+       "W36X302",
+       "W36X282",
+       "W36X232",
+       "W36X262",
+       "W36X247",
+       "W36X210",
+       "W36X231",
+       "W36X194",
+       "W36X182",
+       "W36X170",
+       "W33X387",
+       "W36X160",
+       "W36X150",
+       "W33X354",
+       "W36X135",
+       "W33X318",
+       "W33X291",
+       "W33X263",
+       "W33X241",
+       "W33X221",
+       "W33X169",
+       "W33X201",
+       "W33X152",
+       "W33X141",
+       "W30X391",
+       "W33X130",
+       "W33X118",
+       "W30X357",
+       "W27X539",
+       "W30X326",
+       "W30X292",
+       "W30X261",
+       "W30X235",
+       "W30X211",
+       "W30X191",
+       "W30X148",
+       "W30X173",
+       "W27X368",
+       "W30X132",
+       "W30X124",
+       "W27X336",
+       "W30X116",
+       "W30X108",
+       "W30X99",
+       "W27X307",
+       "W30X90",
+       "W27X281",
+       "W27X258",
+       "W27X235",
+       "W27X217",
+       "W27X194",
+       "W24X370",
+       "W27X178",
+       "W27X161",
+       "W27X129",
+       "W24X335",
+       "W27X146",
+       "W27X114",
+       "W24X306",
+       "W27X102",
+       "W27X94",
+       "W24X279",
+       "W27X84",
+       "W24X250",
+       "W24X229",
+       "W24X207",
+       "W24X192",
+       "W24X176",
+       "W24X162",
+       "W24X146",
+       "W24X131",
+       "W24X103",
+       "W24X117",
+       "W24X94",
+       "W21X275",
+       "W24X104",
+       "W24X84",
+       "W24X76",
+       "W21X248",
+       "W24X68",
+       "W24X62",
+       "W14X873",
+       "W24X55",
+       "W21X223",
+       "W21X201",
+       "W14X808",
+       "W21X182",
+       "W21X166",
+       "W14X730",
+       "W18X311",
+       "W21X147",
+       "W18X283",
+       "W21X132",
+       "W21X122",
+       "W14X665",
+       "W21X93",
+       "W21X111",
+       "W18X258",
+       "W21X101",
+       "W21X83",
+       "W21X73",
+       "W18X234",
+       "W21X68",
+       "W21X57",
+       "W21X62",
+       "W14X605",
+       "W21X55",
+       "W21X50",
+       "W18X211",
+       "W21X44",
+       "W21X48",
+       "W18X192",
+       "W14X550",
+       "W18X175",
+       "W18X158",
+       "W14X500",
+       "W18X143",
+       "W18X130",
+       "W14X455",
+       "W18X119",
+       "W14X426",
+       "W18X106",
+       "W18X97",
+       "W18X71",
+       "W18X86",
+       "W18X65",
+       "W14X398",
+       "W18X76",
+       "W18X60",
+       "W18X55",
+       "W18X46",
+       "W18X50",
+       "W14X370",
+       "W18X40",
+       "W18X35",
+       "W14X342",
+       "W14X311",
+       "W16X100",
+       "W12X336",
+       "W16X89",
+       "W14X283",
+       "W16X77",
+       "W14X257",
+       "W16X57",
+       "W12X305",
+       "W16X67",
+       "W16X50",
+       "W16X45",
+       "W14X233",
+       "W16X40",
+       "W12X279",
+       "W16X36",
+       "W16X31",
+       "W14X211",
+       "W16X26",
+       "W14X193",
+       "W12X252",
+       "W14X176",
+       "W12X230",
+       "W14X159",
+       "W14X145",
+       "W14X132",
+       "W12X210",
+       "W14X120",
+       "W12X190",
+       "W14X109",
+       "W14X82",
+       "W14X99",
+       "W14X74",
+       "W14X38",
+       "W14X90",
+       "W12X170",
+       "W14X68",
+       "W14X34",
+       "W14X61",
+       "W14X53",
+       "W14X26",
+       "W14X48",
+       "W14X30",
+       "W12X152",
+       "W14X43",
+       "W14X22",
+       "W12X136",
+       "W12X120",
+       "W12X106",
+       "W12X96",
+       "W12X87",
+       "W12X35",
+       "W12X79",
+       "W12X72",
+       "W12X30",
+       "W12X22",
+       "W12X58",
+       "W12X50",
+       "W12X26",
+       "W12X19",
+       "W12X65",
+       "W12X53",
+       "W12X45",
+       "W12X16",
+       "W12X40",
+       "W12X14",
+       "W10X112",
+       "W10X100",
+       "W10X88",
+       "W10X77",
+       "W10X30",
+       "W10X68",
+       "W10X26",
+       "W10X60",
+       "W10X22",
+       "W10X19",
+       "W10X54",
+       "W10X45",
+       "W10X17",
+       "W10X49",
+       "W10X15",
+       "W10X39",
+       "W10X12",
+       "W10X33",
+       "W8X67",
+       "W8X58",
+       "W8X48",
+       "W8X21",
+       "W8X40",
+       "W8X18",
+       "W8X35",
+       "W8X15",
+       "W8X28",
+       "W8X31",
+       "W8X13",
+       "W8X24",
+       "W8X10",
+       "W6X25",
+       "W6X16",
+       "W6X20",
+       "W6X12",
+       "W6X15",
+       "W6X9",
+       "W6X8.5",
+       "W5X19",
+       "W5X16",
+       "W4X13"
+      ],
+      "editable": false
+     },
+     {
+      "type": "custom",
+      "id": "",
+      "label": ""
+     },
+     {
+      "type": "custom",
+      "id": "lbl_shape",
+      "label": ""
+     },
+     {
+      "path": "section.steel",
+      "label": "Acero",
+      "help": "Acero\nGrado del acero del perfil. Define Fy y Fu para la verificacion del propio perfil y del metal base de la soldadura.",
+      "type": "combo",
+      "items": [
+       "ASTM A992",
+       "ASTM A36",
+       "ASTM A572 Gr.50",
+       "ASTM A500 Gr.B (HSS rect.)",
+       "ASTM A500 Gr.B (HSS red.)",
+       "ASTM A500 Gr.C (HSS rect.)",
+       "ASTM A500 Gr.C (HSS red.)",
+       "ASTM A53 Gr.B (Pipe)",
+       "ASTM A1085"
+      ],
+      "editable": false
+     }
+    ]
+   },
+   {
+    "title": "Seccion doble",
+    "items": [
+     {
+      "path": "section.double",
+      "label": "Doble, espalda con espalda",
+      "help": "Doble, espalda con espalda\nDos piezas iguales espalda con espalda (por ejemplo 2L o 2C), simetricas respecto al eje Y. Se calculan A, Ix, Sx y Zx dobles, e Iy, Sy y Zy con la separacion real. La soldadura se verifica como grupo en todo el contorno. No aplica a secciones redondas.",
+      "type": "check"
+     },
+     {
+      "path": "section.gap",
+      "label": "Separacion entre piezas",
+      "help": "Separacion entre piezas\nDistancia libre entre las espaldas de las dos piezas (espesor de la cartela o del separador). En dobles angulos AISC tabula 0, 3/8 y 3/4 in.",
+      "type": "num",
+      "lo": 0,
+      "hi": 12,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     }
+    ]
+   },
+   {
+    "title": "Orientacion respecto a la placa",
+    "items": [
+     {
+      "path": "section.rotation",
+      "label": "Rotacion",
+      "help": "Rotacion\nGiro del perfil respecto a la placa. 0° = eje fuerte paralelo a N, de modo que Mux flexiona el perfil en su eje fuerte. 90° = eje debil. Con angulos intermedios las formulas cerradas de DG1 usan el rectangulo envolvente; el modelo 3D usa la geometria real.",
+      "type": "num",
+      "lo": -180,
+      "hi": 180,
+      "step": 15.0,
+      "dec": 1,
+      "suffix": "°",
+      "uk": null
+     },
+     {
+      "path": "section.cx",
+      "label": "Desplazamiento de la columna en X",
+      "help": "Desplazamiento de la columna en X\nPosicion del centro de la columna respecto al centro de la placa, en la direccion X (positivo hacia +X). Los pernos y la placa no se mueven. Las cargas se ingresan en el eje de la columna: el programa las traslada al centro de la placa (Mux' = Mux − Pu·cy, Muy' = Muy + Pu·cx) y el modelo 3D las aplica en el eje real de la columna. Los voladizos de la placa se toman del lado mas largo.",
+      "type": "num",
+      "lo": -1000,
+      "hi": 1000,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "section.cy",
+      "label": "Desplazamiento de la columna en Y",
+      "help": "Desplazamiento de la columna en Y\nPosicion del centro de la columna respecto al centro de la placa, en la direccion Y (positivo hacia +Y, el lado traccionado con Mux > 0). 0 = columna centrada.",
+      "type": "num",
+      "lo": -1000,
+      "hi": 1000,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "type": "note",
+      "text": "0° = eje fuerte paralelo a N (Y).  90° = eje debil paralelo a N.  Con angulos distintos de 0/90 las formulas de DG1 usan el rectangulo envolvente; el modelo 3D usa la geometria real."
+     }
+    ]
+   },
+   {
+    "title": "Inclinacion de la columna (respecto a la normal de la placa)",
+    "items": [
+     {
+      "path": "loads.tilt_x",
+      "label": "Giro alrededor de X",
+      "help": "Giro alrededor de X\nInclinacion de la columna respecto a la normal de la placa, girando alrededor del eje X (la columna se inclina hacia +Y/-Y). 0° = perpendicular. Con inclinacion, Pu, Vux, Vuy, Mux y Muy se ingresan en los ejes de la COLUMNA (Pu = axial, V = transversal) y el programa los proyecta a los ejes de la placa para todas las verificaciones.",
+      "type": "num",
+      "lo": -85,
+      "hi": 85,
+      "step": 1.0,
+      "dec": 2,
+      "suffix": "°",
+      "uk": null
+     },
+     {
+      "path": "loads.tilt_y",
+      "label": "Giro alrededor de Y",
+      "help": "Giro alrededor de Y\nInclinacion de la columna respecto a la normal de la placa, girando alrededor del eje Y (la columna se inclina hacia +X/-X). 0° = perpendicular. Puede combinarse con el giro alrededor de X.",
+      "type": "num",
+      "lo": -85,
+      "hi": 85,
+      "step": 1.0,
+      "dec": 2,
+      "suffix": "°",
+      "uk": null
+     },
+     {
+      "type": "custom",
+      "id": "lbl_tilt",
+      "label": "En ejes de la placa"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Placa",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Geometria",
+    "items": [
+     {
+      "path": "plate.shape",
+      "label": "Forma",
+      "help": "Forma\nRectangular o circular. En placa circular las formulas cerradas usan el cuadrado equivalente de igual area (Leq = 0.8862·Dp); el modelo 3D modela el circulo real.",
+      "type": "combo",
+      "items": [
+       "Rectangular",
+       "Circular"
+      ],
+      "editable": false
+     },
+     {
+      "path": "plate.N",
+      "label": "N (largo, dir. Y)",
+      "help": "N (largo, dir. Y)\nDimension de la placa en la direccion Y, que es la direccion en que actua el momento Mux. Es el lado que gobierna el equilibrio de aplastamiento.",
+      "type": "num",
+      "lo": 1,
+      "hi": 200,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "plate.B",
+      "label": "B (ancho, dir. X)",
+      "help": "B (ancho, dir. X)\nDimension de la placa en la direccion X, perpendicular a Mux. Es el ancho sobre el que se reparte la presion de contacto.",
+      "type": "num",
+      "lo": 1,
+      "hi": 200,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "plate.Dp",
+      "label": "Dp (si es circular)",
+      "help": "Dp (si es circular)\nDiametro de la placa. Solo se usa cuando la forma es Circular.",
+      "type": "num",
+      "lo": 1,
+      "hi": 200,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "plate.tp",
+      "label": "tp (espesor)",
+      "help": "tp (espesor)\nEspesor propuesto de la placa. El programa calcula el espesor requerido por las lineas de fluencia y lo compara contra este valor.",
+      "type": "num",
+      "lo": 0.25,
+      "hi": 12,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "plate.grout",
+      "label": "Mortero de nivelacion",
+      "help": "Mortero de nivelacion\nEspesor del mortero de nivelacion bajo la placa. Reduce la altura embebida util de la llave de corte y, si no hay llave, aplica el factor 0.80 al cortante del anclaje (ACI 17.7.1.2.1).",
+      "type": "num",
+      "lo": 0,
+      "hi": 6,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     }
+    ]
+   },
+   {
+    "title": "Material",
+    "items": [
+     {
+      "path": "plate.steel",
+      "label": "Acero de placa",
+      "help": "Acero de placa\nGrado del acero de la placa base. Su Fy gobierna el espesor requerido.",
+      "type": "combo",
+      "items": [
+       "ASTM A36",
+       "ASTM A572 Gr.50",
+       "ASTM A572 Gr.55",
+       "ASTM A572 Gr.60",
+       "ASTM A572 Gr.65",
+       "ASTM A588 Gr.50",
+       "ASTM A709 Gr.50",
+       "ASTM A709 Gr.50W",
+       "ASTM A709 Gr.HPS70W",
+       "ASTM A514 Gr.B"
+      ],
+      "editable": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Pernos",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Varilla de anclaje",
+    "items": [
+     {
+      "path": "bolts.size",
+      "label": "Diametro",
+      "help": "Diametro\nDiametro nominal del anclaje en pulgadas. De el se derivan Ab, el area de esfuerzo Ase de rosca UNC, el diametro de agujero en la placa segun AISC Tabla 14-2 y el area de apoyo de la tuerca hexagonal pesada.",
+      "type": "combo",
+      "items": [
+       "1/2",
+       "5/8",
+       "3/4",
+       "7/8",
+       "1",
+       "1-1/8",
+       "1-1/4",
+       "1-3/8",
+       "1-1/2",
+       "1-3/4",
+       "2",
+       "2-1/4",
+       "2-1/2",
+       "2-3/4",
+       "3"
+      ],
+      "editable": false
+     },
+     {
+      "type": "custom",
+      "id": "lbl_bolt",
+      "label": ""
+     },
+     {
+      "path": "bolts.steel",
+      "label": "Material",
+      "help": "Material\nGrado de la varilla de anclaje. Ademas de Fy y Fu define si el elemento es ductil, lo que decide el factor de reduccion de ACI Tabla 17.5.3.",
+      "type": "combo",
+      "items": [
+       "ASTM F1554 Gr.36",
+       "ASTM F1554 Gr.55",
+       "ASTM F1554 Gr.105",
+       "ASTM A307 Gr.C",
+       "ASTM A36 (varilla)",
+       "ASTM F3125 Gr.A325 (d<=1)",
+       "ASTM F3125 Gr.A325 (d>1)",
+       "ASTM F3125 Gr.A490",
+       "ASTM A449 (d<=1)",
+       "ASTM A449 (1<d<=1.5)",
+       "ASTM A193 Gr.B7 (d<=2.5)",
+       "ASTM A354 Gr.BD"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.atype",
+      "label": "Tipo de anclaje",
+      "help": "Tipo de anclaje\nCon cabeza: la extraccion se calcula con 8·Abrg·f'c. Gancho L o J: con 0.9·f'c·eh·da. Recto: ACI no le reconoce resistencia a la extraccion y el programa lo marca como no valido si hay traccion.",
+      "type": "combo",
+      "items": [
+       "Con cabeza (hex pesada)",
+       "Gancho en L",
+       "Gancho en J",
+       "Recto (sin cabeza)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.install",
+      "label": "Instalacion (varilla recta)",
+      "help": "Instalacion (varilla recta)\nSolo se usa con varilla recta. Preinstalada (vaciada en sitio): ACI no le reconoce resistencia a la extraccion y no es valida a traccion. Postinstalada con adhesivo (epoxico): se diseña por adherencia segun ACI 318-19 17.6.5, con kc = 17 en el arrancamiento y el factor φ de la categoria del producto.",
+      "type": "combo",
+      "items": [
+       "Preinstalado (vaciado en sitio)",
+       "Postinstalado adhesivo (epoxico)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.hef",
+      "label": "hef (embebido efectivo)",
+      "help": "hef (embebido efectivo)\nProfundidad efectiva de embebido, desde la superficie del concreto hasta el plano de apoyo de la cabeza o del gancho. Es el parametro que mas pesa en el arrancamiento del concreto.",
+      "type": "num",
+      "lo": 2,
+      "hi": 120,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "bolts.eh",
+      "label": "eh gancho (0 = 3·db)",
+      "help": "eh gancho (0 = 3·db)\nLongitud del gancho medida desde el eje de la varilla. ACI la limita a 3·db <= eh <= 4.5·db. Deje 0 para que el programa use 3·db.",
+      "type": "num",
+      "lo": 0,
+      "hi": 20,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "bolts.hole_rule",
+      "label": "Criterio del agujero",
+      "help": "Criterio del agujero\nLa Tabla 14-2 del Manual AISC (= Tabla 2.3 de la DG1) da los diametros MAXIMOS recomendados: son muy holgados a proposito para absorber la tolerancia de colocacion de los anclajes en el concreto, y obligan a cubrirlos con arandela de placa. Ejemplo: Ø5/8 in lleva agujero de 1-3/16 in = 30.2 mm. Si el grupo se coloca con plantilla se justifica uno menor: la regla F844 (nota al pie de la tabla) da db+5/16 hasta 1 in, y la ajustada db+1/16.",
+      "type": "combo",
+      "items": [
+       "AISC Tabla 14-2 (maximo recomendado)",
+       "Arandela F844: db + 5/16, 1/2, 1",
+       "Ajustado: db + 1/16 (plantilla o camisa)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.washer_d",
+      "label": "Diametro de arandela (0 = automatico)",
+      "help": "Diametro de arandela (0 = automatico)\nDiametro exterior de la arandela o de la zona donde la tuerca apoya sobre la placa. 0 = automatico: el mayor entre el ancho de la tuerca hex pesada y 2.2 veces el diametro del perno. (Solo modelo solido; el de placas aplica la carga en el anillo del perno.) El modelo 3D aplica la carga del perno sobre esa corona (no en el borde del agujero).",
+      "type": "num",
+      "lo": 0,
+      "hi": 20,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "bolts.washer_t",
+      "label": "Espesor de arandela (-1 = auto, 0 = sin)",
+      "help": "Espesor de arandela (-1 = auto, 0 = sin)\nEspesor de la arandela del modelo 3D, unida a la placa: rigidiza la zona del agujero y reparte la carga del perno. -1 = automatico (0.25·db); 0 = sin arandela (la carga entra en la corona de la propia placa). Una arandela de placa gruesa se acerca a una zona rigida.",
+      "type": "num",
+      "lo": -1,
+      "hi": 5,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "bolts.standoff",
+      "label": "Separacion libre placa-concreto (stand-off)",
+      "help": "Separacion libre placa-concreto (stand-off)\nAltura libre entre la superficie del concreto (o del mortero) y la cara inferior de la placa cuando esta se apoya en tuercas de nivelacion. El tramo libre del perno es stand-off + espesor de mortero: si supera medio diametro (un mortero delgado lo cubre el factor 0.80 de ACI 17.7.1.2.1) el cortante flexiona el perno y se verifica la flexion y la interaccion traccion-flexion (AISC F11 / H1). Tambien aumenta el brazo del cortante en el 3D. 0 con mortero delgado = sin flexion.",
+      "type": "num",
+      "lo": 0,
+      "hi": 24,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "bolts.fixity",
+      "label": "Condicion de apoyo del perno",
+      "help": "Condicion de apoyo del perno\nDoble empotramiento: la placa, sujeta por las dos tuercas, no gira y el perno trabaja en doble curvatura (M = V·l/2). Voladizo: la placa puede girar y el perno es un voladizo (M = V·l), mas conservador. l = stand-off + mortero + tp/2.",
+      "type": "combo",
+      "items": [
+       "Doble empotramiento (placa restringida)",
+       "Voladizo (placa libre de girar)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.Abrg_user",
+      "label": "Abrg manual (0 = hex pesada)",
+      "help": "Abrg manual (0 = hex pesada)\nArea neta de aplastamiento de la cabeza. Deje 0 para que se calcule de la tuerca hexagonal pesada; indique un valor si usa una placa de anclaje soldada en la punta.",
+      "type": "num",
+      "lo": 0,
+      "hi": 100,
+      "step": 0.1,
+      "dec": 3,
+      "suffix": "mm²",
+      "uk": "A"
+     }
+    ]
+   },
+   {
+    "title": "Anclaje adhesivo (postinstalado)",
+    "items": [
+     {
+      "path": "bolts.adh_env",
+      "label": "Adherencia caracteristica",
+      "help": "Adherencia caracteristica\nSin datos del producto, ACI 318-19 Tabla 17.6.5.2.5 da valores minimos: interior seco τcr = 300 psi, τuncr = 1000 psi; exterior 200 / 650 psi. El programa aplica los factores de la tabla (0.4 si hay traccion sostenida; 0.8 y 0.4 con sismo). Con 'Datos del producto' use los valores del reporte ESR/ICC-ES, que ya traen sus propios factores.",
+      "type": "combo",
+      "items": [
+       "Interior, concreto seco (Tabla 17.6.5.2.5)",
+       "Exterior, seco a saturado (Tabla 17.6.5.2.5)",
+       "Datos del producto (ESR / ICC-ES)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.tau_cr",
+      "label": "τcr (concreto fisurado)",
+      "help": "τcr (concreto fisurado)\nEsfuerzo de adherencia caracteristico en concreto fisurado, del reporte del producto. Solo se usa con 'Datos del producto'.",
+      "type": "num",
+      "lo": 0.01,
+      "hi": 5,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "MPa",
+      "uk": "S"
+     },
+     {
+      "path": "bolts.tau_uncr",
+      "label": "τuncr (concreto no fisurado)",
+      "help": "τuncr (concreto no fisurado)\nEsfuerzo de adherencia caracteristico en concreto no fisurado. Tambien define la distancia critica cNa = 10·da·√(τuncr/1100).",
+      "type": "num",
+      "lo": 0.01,
+      "hi": 5,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "MPa",
+      "uk": "S"
+     },
+     {
+      "path": "bolts.adh_cat",
+      "label": "Categoria del anclaje",
+      "help": "Categoria del anclaje\nCategoria de sensibilidad a la instalacion segun ACI 355.4, dada por el reporte del producto. Define φ en traccion: cat. 1 = 0.75/0.65, cat. 2 = 0.65/0.55, cat. 3 = 0.55/0.45 (condicion A/B).",
+      "type": "combo",
+      "items": [
+       "Categoria 1",
+       "Categoria 2",
+       "Categoria 3"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.sustained",
+      "label": "Fraccion de traccion sostenida",
+      "help": "Fraccion de traccion sostenida\nParte de la traccion que actua de forma permanente (peso propio, empuje de tierras). Si es mayor que cero se verifica 0.55·φ·Nba >= Nua,s (ACI 17.5.2.2) y se reducen los valores de la Tabla 17.6.5.2.5.",
+      "type": "num",
+      "lo": 0,
+      "hi": 1,
+      "step": 0.05,
+      "dec": 2,
+      "suffix": "",
+      "uk": null
+     }
+    ]
+   },
+   {
+    "title": "Disposicion",
+    "items": [
+     {
+      "path": "bolts.pattern",
+      "label": "Patron",
+      "help": "Patron\nCoordenadas manuales: escriba x, y de cada anclaje en la tabla de abajo, respecto al centro de la placa. Perimetral coloca pernos en los cuatro lados; las opciones de 2 lados solo en los dos lados perpendiculares al eje indicado; Circular los reparte equiespaciados sobre un circulo.",
+      "type": "combo",
+      "items": [
+       "Perimetral (4 lados)",
+       "2 lados (eje mayor)",
+       "2 lados (eje menor)",
+       "Circular",
+       "Coordenadas manuales"
+      ],
+      "editable": false
+     },
+     {
+      "path": "bolts.n_major",
+      "label": "Pernos en eje MAYOR (fila en X)",
+      "help": "Pernos en eje MAYOR (fila en X)\nCantidad de pernos por fila a lo largo del eje X, es decir en los lados perpendiculares a la direccion del momento. Son los que toman la traccion.",
+      "type": "int",
+      "lo": 2,
+      "hi": 12
+     },
+     {
+      "path": "bolts.n_minor",
+      "label": "Pernos en eje MENOR (fila en Y)",
+      "help": "Pernos en eje MENOR (fila en Y)\nCantidad de pernos por fila a lo largo del eje Y, en los lados paralelos al momento.",
+      "type": "int",
+      "lo": 2,
+      "hi": 12
+     },
+     {
+      "path": "bolts.n_circ",
+      "label": "Pernos en patron circular",
+      "help": "Pernos en patron circular\nCantidad total de pernos equiespaciados sobre el circulo. Solo se usa con el patron Circular.",
+      "type": "int",
+      "lo": 3,
+      "hi": 36
+     },
+     {
+      "path": "bolts.ex",
+      "label": "ex (borde en X)",
+      "help": "ex (borde en X)\nDistancia del centro del perno al borde de la placa en direccion X. Debe dejar material suficiente para la arandela; el programa avisa si baja del minimo recomendado.",
+      "type": "num",
+      "lo": 0.5,
+      "hi": 20,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "bolts.ey",
+      "label": "ey (borde en Y)",
+      "help": "ey (borde en Y)\nDistancia del centro del perno al borde de la placa en direccion Y. Junto con N fija el brazo f de la resultante de traccion.",
+      "type": "num",
+      "lo": 0.5,
+      "hi": 20,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "type": "custom",
+      "id": "lbl_count",
+      "label": "Total"
+     },
+     {
+      "type": "note",
+      "text": "Perimetral: 2·mayor + 2·menor − 4.   2 lados (eje mayor): 2·mayor.   2 lados (eje menor): 2·menor."
+     }
+    ]
+   },
+   {
+    "title": "Coordenadas manuales",
+    "items": [
+     {
+      "type": "custom",
+      "id": "tbl_xy",
+      "label": ""
+     },
+     {
+      "type": "custom",
+      "id": "",
+      "label": ""
+     },
+     {
+      "type": "note",
+      "text": "PEGAR DESDE EXCEL: copie dos columnas (x, y) en Excel y use el boton 'Pegar desde Excel' (reemplaza toda la lista) o seleccione una celda y presione Ctrl+V (sobrescribe desde esa celda y agrega filas si hace falta). Los valores se leen en las unidades actuales; se aceptan coma o punto decimal, y los encabezados se ignoran."
+     },
+     {
+      "type": "note",
+      "text": "Origen en el centro de la placa; +Y es el lado traccionado por Mux. Las filas se numeran P1, P2... igual que en los dibujos y en la tabla del modelo 3D."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Llave de corte",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Llave de corte (shear lug)",
+    "items": [
+     {
+      "path": "lug.enabled",
+      "label": "Usar llave de corte",
+      "help": "Usar llave de corte\nAl activarla, todo el cortante se asigna a la llave y deja de exigirse a los pernos, que es la practica habitual cuando el cortante es alto.",
+      "type": "check"
+     },
+     {
+      "path": "lug.ltype",
+      "label": "Tipo de llave",
+      "help": "Tipo de llave\nPlaca: una pletina (o dos cruzadas). Perfil: cualquier seccion del catalogo (W, HSS, angulo, canal, tubo...). Con perfil se verifica cada direccion de cortante con la proyeccion del perfil: aplastamiento, flexion con Z, cortante, soldadura como grupo y desprendimiento del concreto.",
+      "type": "combo",
+      "items": [
+       "Placa",
+       "Perfil (cualquier seccion)"
+      ],
+      "editable": false
+     },
+     {
+      "type": "custom",
+      "id": "cb_lugfam",
+      "label": "Familia (si es perfil)"
+     },
+     {
+      "path": "lug.label",
+      "label": "Perfil de la llave",
+      "help": "Perfil de la llave\nSeccion usada como llave de corte.",
+      "type": "section"
+     },
+     {
+      "path": "lug.rotation",
+      "label": "Giro del perfil (0 o 90°)",
+      "help": "Giro del perfil (0 o 90°)\n0°: el perfil queda con su eje fuerte a lo largo de X. 90°: girado. Se usa para decidir que momento resistente (Zx o Zy) trabaja en cada direccion de cortante.",
+      "type": "num",
+      "lo": 0,
+      "hi": 90,
+      "step": 90.0,
+      "dec": 0,
+      "suffix": "°",
+      "uk": null
+     },
+     {
+      "path": "lug.direction",
+      "label": "Orientacion",
+      "help": "Orientacion\nEje al que es perpendicular la cara de aplastamiento de la llave. Con Ambos ejes se colocan dos llaves cruzadas y el cortante se reparte entre ellas.",
+      "type": "combo",
+      "items": [
+       "Eje X (paralelo a B)",
+       "Eje Y (paralelo a N)",
+       "Ambos ejes"
+      ],
+      "editable": false
+     },
+     {
+      "path": "lug.W",
+      "label": "W (ancho)",
+      "help": "W (ancho)\nAncho de la llave medido perpendicular a la direccion del cortante. Es el ancho de aplastamiento contra el concreto.",
+      "type": "num",
+      "lo": 1,
+      "hi": 60,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "lug.H",
+      "label": "H (altura bajo la placa)",
+      "help": "H (altura bajo la placa)\nAltura total de la llave por debajo de la placa. La altura util de aplastamiento es H menos el espesor del mortero.",
+      "type": "num",
+      "lo": 1,
+      "hi": 30,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "lug.t",
+      "label": "t (espesor)",
+      "help": "t (espesor)\nEspesor de la pletina de la llave. Gobierna su flexion en la cara inferior de la placa.",
+      "type": "num",
+      "lo": 0.25,
+      "hi": 6,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "lug.steel",
+      "label": "Acero",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "ASTM A36",
+       "ASTM A572 Gr.50",
+       "ASTM A572 Gr.55",
+       "ASTM A572 Gr.60",
+       "ASTM A572 Gr.65",
+       "ASTM A588 Gr.50",
+       "ASTM A709 Gr.50",
+       "ASTM A709 Gr.50W",
+       "ASTM A709 Gr.HPS70W",
+       "ASTM A514 Gr.B"
+      ],
+      "editable": false
+     },
+     {
+      "path": "lug.weld_size",
+      "label": "Filete a cada lado",
+      "help": "",
+      "type": "num",
+      "lo": 0.125,
+      "hi": 1.5,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "lug.electrode",
+      "label": "Electrodo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "E60XX",
+       "E70XX",
+       "E80XX",
+       "E90XX",
+       "E100XX",
+       "E110XX"
+      ],
+      "editable": false
+     },
+     {
+      "type": "note",
+      "text": "Con llave activa el cortante se asigna a la llave y no a los pernos. La altura embebida descuenta el espesor del mortero."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Rigidizadores",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Pletinas rigidizadoras",
+    "items": [
+     {
+      "type": "custom",
+      "id": "lbl_stiff_lock",
+      "label": ""
+     },
+     {
+      "path": "stiff.enabled",
+      "label": "Usar rigidizadores",
+      "help": "Usar rigidizadores\nLas pletinas reducen el voladizo de la placa y por tanto el espesor requerido, a cambio de soldadura adicional.",
+      "type": "check"
+     },
+     {
+      "path": "stiff.position",
+      "label": "Posicion",
+      "help": "Posicion\nCara del perfil a la que se sueldan las pletinas. En HSS lo habitual es Perimetro de 4 caras; en perfiles W, Alas o Ambos.",
+      "type": "combo",
+      "items": [
+       "Alas (paralelo a Y)",
+       "Alma (paralelo a X)",
+       "Ambos",
+       "Perimetro HSS (4 caras)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "stiff.count",
+      "label": "Cantidad total",
+      "help": "Cantidad total\nNumero total de pletinas del conjunto; el programa las reparte entre las caras segun la posicion elegida.",
+      "type": "int",
+      "lo": 1,
+      "hi": 16
+     },
+     {
+      "path": "stiff.L",
+      "label": "L (proyeccion desde el perfil)",
+      "help": "L (proyeccion desde el perfil)\nCuanto sobresale la pletina desde la cara del perfil hacia el borde de la placa. Si excede el voladizo disponible el programa la recorta y lo avisa.",
+      "type": "num",
+      "lo": 0.5,
+      "hi": 40,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "stiff.h",
+      "label": "h (altura)",
+      "help": "h (altura)\nAltura de la pletina sobre la placa, medida en la cara del perfil. Define el modulo de seccion y la longitud de la soldadura a la columna.",
+      "type": "num",
+      "lo": 1,
+      "hi": 40,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "stiff.t",
+      "label": "t (espesor)",
+      "help": "t (espesor)\nEspesor de la pletina. Junto con la altura define la esbeltez del borde libre, que se compara con 0.56·√(E/Fy).",
+      "type": "num",
+      "lo": 0.25,
+      "hi": 3,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "stiff.steel",
+      "label": "Acero",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "ASTM A36",
+       "ASTM A572 Gr.50",
+       "ASTM A572 Gr.55",
+       "ASTM A572 Gr.60",
+       "ASTM A572 Gr.65",
+       "ASTM A588 Gr.50",
+       "ASTM A709 Gr.50",
+       "ASTM A709 Gr.50W",
+       "ASTM A709 Gr.HPS70W",
+       "ASTM A514 Gr.B"
+      ],
+      "editable": false
+     }
+    ]
+   },
+   {
+    "title": "Ubicacion a lo largo de la cara",
+    "items": [
+     {
+      "path": "stiff.spacing_mode",
+      "label": "Criterio",
+      "help": "Criterio\nComo se ubican las pletinas a lo largo de la cara: repartidas automaticamente, con una separacion que usted fija, o alineadas con los pernos que caen dentro de la cara del perfil.",
+      "type": "combo",
+      "items": [
+       "Automatico (repartido)",
+       "Separacion fija",
+       "Alineado con los pernos"
+      ],
+      "editable": false
+     },
+     {
+      "path": "stiff.spacing",
+      "label": "Separacion centro a centro",
+      "help": "Separacion centro a centro\nDistancia entre pletinas contiguas de una misma cara. Solo se usa con el criterio de separacion fija. Es el parametro para acomodarlas respecto a los anclajes.",
+      "type": "num",
+      "lo": 0.5,
+      "hi": 100,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "stiff.offset_angle",
+      "label": "Angulo de arranque (columna circular)",
+      "help": "Angulo de arranque (columna circular)\nSolo columna circular: los rigidizadores se disponen en forma RADIAL, repartidos por igual en 360°. Este es el angulo de la primera pletina medido desde +X. Con columna circular 'Posicion' y 'Criterio' no se usan; la cantidad es el numero total de pletinas radiales.",
+      "type": "num",
+      "lo": -180,
+      "hi": 180,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "°",
+      "uk": null
+     },
+     {
+      "path": "stiff.offset",
+      "label": "Corrimiento del grupo",
+      "help": "Corrimiento del grupo\nDesplaza todo el grupo de pletinas a lo largo de la cara. Util para esquivar un perno o para centrar el conjunto.",
+      "type": "num",
+      "lo": -50,
+      "hi": 50,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "type": "note",
+      "text": "'Separacion fija' reparte las pletinas simetricamente con esa distancia entre ellas; el corrimiento desplaza todo el grupo. 'Alineado con los pernos' usa las coordenadas de los pernos que caen dentro de la cara del perfil."
+     }
+    ]
+   },
+   {
+    "title": "Forma de la pletina",
+    "items": [
+     {
+      "path": "stiff.shape",
+      "label": "Forma",
+      "help": "Forma\nRectangular, triangular, o rectangular con la esquina exterior recortada. En las dos ultimas la seccion critica no esta en la cara del perfil y el programa barre toda la proyeccion.",
+      "type": "combo",
+      "items": [
+       "Rectangular",
+       "Triangular",
+       "Rectangular con esquina recortada"
+      ],
+      "editable": false
+     },
+     {
+      "path": "stiff.clip_h",
+      "label": "Recorte horizontal de la esquina",
+      "help": "Recorte horizontal de la esquina\nLongitud del recorte medida desde el extremo exterior. Solo aplica a la forma con esquina recortada.",
+      "type": "num",
+      "lo": 0,
+      "hi": 20,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "stiff.clip_v",
+      "label": "Recorte vertical de la esquina",
+      "help": "Recorte vertical de la esquina\nAltura del recorte medida desde el borde superior. Solo aplica a la forma con esquina recortada.",
+      "type": "num",
+      "lo": 0,
+      "hi": 20,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "stiff.clip_root",
+      "label": "Destaje en el vertice placa-columna",
+      "help": "Destaje en el vertice placa-columna\nPequeno destaje en el encuentro de los dos cordones, practica habitual para evitar el cruce de soldaduras. Se descuenta de ambas longitudes de soldadura.",
+      "type": "num",
+      "lo": 0,
+      "hi": 4,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     }
+    ]
+   },
+   {
+    "title": "Soldadura",
+    "items": [
+     {
+      "path": "stiff.weld_size",
+      "label": "Filete a cada lado",
+      "help": "",
+      "type": "num",
+      "lo": 0.125,
+      "hi": 1.5,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "stiff.electrode",
+      "label": "Electrodo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "E60XX",
+       "E70XX",
+       "E80XX",
+       "E90XX",
+       "E100XX",
+       "E110XX"
+      ],
+      "editable": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Soldadura",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Alas (perfiles W)",
+    "items": [
+     {
+      "path": "welds.flange.wtype",
+      "label": "Tipo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "Filete",
+       "CJP (penetracion completa)",
+       "PJP (penetracion parcial)",
+       "Sin soldadura"
+      ],
+      "editable": false
+     },
+     {
+      "path": "welds.flange.size",
+      "label": "Tamano (cateto / garganta)",
+      "help": "",
+      "type": "num",
+      "lo": 0.0625,
+      "hi": 2,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "welds.flange.electrode",
+      "label": "Electrodo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "E60XX",
+       "E70XX",
+       "E80XX",
+       "E90XX",
+       "E100XX",
+       "E110XX"
+      ],
+      "editable": false
+     },
+     {
+      "path": "welds.flange.both_sides",
+      "label": "Ambos lados del ala",
+      "help": "",
+      "type": "check"
+     }
+    ]
+   },
+   {
+    "title": "Alma (perfiles W)",
+    "items": [
+     {
+      "path": "welds.web.wtype",
+      "label": "Tipo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "Filete",
+       "CJP (penetracion completa)",
+       "PJP (penetracion parcial)",
+       "Sin soldadura"
+      ],
+      "editable": false
+     },
+     {
+      "path": "welds.web.size",
+      "label": "Tamano",
+      "help": "",
+      "type": "num",
+      "lo": 0.0625,
+      "hi": 2,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "welds.web.electrode",
+      "label": "Electrodo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "E60XX",
+       "E70XX",
+       "E80XX",
+       "E90XX",
+       "E100XX",
+       "E110XX"
+      ],
+      "editable": false
+     },
+     {
+      "path": "welds.web.both_sides",
+      "label": "Ambos lados del alma",
+      "help": "",
+      "type": "check"
+     }
+    ]
+   },
+   {
+    "title": "Perimetral (HSS / Pipe)",
+    "items": [
+     {
+      "path": "welds.perimeter.wtype",
+      "label": "Tipo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "Filete",
+       "CJP (penetracion completa)",
+       "PJP (penetracion parcial)",
+       "Sin soldadura"
+      ],
+      "editable": false
+     },
+     {
+      "path": "welds.perimeter.size",
+      "label": "Tamano",
+      "help": "",
+      "type": "num",
+      "lo": 0.0625,
+      "hi": 2,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "welds.perimeter.electrode",
+      "label": "Electrodo",
+      "help": "",
+      "type": "combo",
+      "items": [
+       "E60XX",
+       "E70XX",
+       "E80XX",
+       "E90XX",
+       "E100XX",
+       "E110XX"
+      ],
+      "editable": false
+     }
+    ]
+   },
+   {
+    "title": "Opciones",
+    "items": [
+     {
+      "path": "welds.directional",
+      "label": "Incremento direccional de resistencia (AISC J2-5)",
+      "help": "",
+      "type": "check"
+     },
+     {
+      "type": "note",
+      "text": "CJP con metal de aporte compatible: la resistencia es la del metal base (AISC J2.4) y no se calcula el deposito."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Concreto",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Concreto y pedestal",
+    "items": [
+     {
+      "path": "conc.material",
+      "label": "Material",
+      "help": "Material\nConcretos de la biblioteca (Materiales > Biblioteca de materiales). Al elegir uno se copian f'c y λ; con '(personalizado)' se escriben a mano.",
+      "type": "combo",
+      "items": [
+       "(personalizado)",
+       "3 ksi  (21 MPa)",
+       "4 ksi  (28 MPa)",
+       "5 ksi  (35 MPa)",
+       "6 ksi  (42 MPa)",
+       "8 ksi  (55 MPa)",
+       "10 ksi (69 MPa)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "conc.fc",
+      "label": "f'c",
+      "help": "f'c\nResistencia a compresion especificada del concreto del pedestal a 28 dias.",
+      "type": "num",
+      "lo": 2,
+      "hi": 15,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "MPa",
+      "uk": "S"
+     },
+     {
+      "path": "conc.N2",
+      "label": "N2 pedestal (dir. Y)",
+      "help": "N2 pedestal (dir. Y)\nDimension del pedestal en direccion Y. Junto con B2 define el confinamiento y las distancias al borde que gobiernan el arrancamiento del concreto.",
+      "type": "num",
+      "lo": 4,
+      "hi": 400,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "conc.B2",
+      "label": "B2 pedestal (dir. X)",
+      "help": "B2 pedestal (dir. X)\nDimension del pedestal en direccion X.",
+      "type": "num",
+      "lo": 4,
+      "hi": 400,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "conc.ha",
+      "label": "ha (altura del elemento)",
+      "help": "ha (altura del elemento)\nAltura del elemento de concreto medida desde la superficie donde apoya la placa. Interviene en el factor de espesor del arrancamiento en cortante.",
+      "type": "num",
+      "lo": 4,
+      "hi": 400,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "conc.lam",
+      "label": "λa (concreto liviano)",
+      "help": "λa (concreto liviano)\nFactor de concreto liviano de ACI. Use 1.00 para concreto de peso normal.",
+      "type": "num",
+      "lo": 0.5,
+      "hi": 1.0,
+      "step": 0.05,
+      "dec": 2,
+      "suffix": "",
+      "uk": null
+     },
+     {
+      "path": "conc.cracked",
+      "label": "Concreto fisurado en servicio",
+      "help": "Concreto fisurado en servicio\nMarque si el concreto estara fisurado en la zona del anclaje bajo cargas de servicio, que es la hipotesis por defecto de ACI. Sin fisurar, las resistencias del concreto aumentan.",
+      "type": "check"
+     },
+     {
+      "path": "conc.seismic",
+      "label": "Diseno sismico (ACI 17.10, factor 0.75)",
+      "help": "Diseno sismico (ACI 17.10, factor 0.75)\nAplica el factor 0.75 a la resistencia del concreto de los anclajes. No verifica por usted el requisito de que el anclaje sea gobernado por la fluencia ductil del acero.",
+      "type": "check"
+     }
+    ]
+   },
+   {
+    "title": "Refuerzo del arrancamiento (barras U)",
+    "items": [
+     {
+      "path": "conc.u_on",
+      "label": "Agregar barras de refuerzo (U u Omega)",
+      "help": "Agregar barras de refuerzo (U u Omega)\nBarras en forma de U invertida (herradura) que abrazan el grupo de pernos: un tramo horizontal cerca de la superficie y dos patas verticales a cada lado. Segun ACI 318-19 17.5.2 el refuerzo del anclaje puede sustituir la resistencia del concreto al arrancamiento en traccion y en cortante: la capacidad pasa a ser φ·(n° de patas)·Ab·fy con φ = 0.75, siempre que las patas esten desarrolladas a ambos lados del cono de falla. Se dibujan en la elevacion y en el 3D. El analisis 3D no las modela (solo el calculo cerrado).",
+      "type": "check"
+     },
+     {
+      "path": "conc.u_type",
+      "label": "Tipo de barra",
+      "help": "Tipo de barra\nOpcion A, barra U: patas rectas; bajo la punta del anclaje se desarrolla ld (ACI 25.4.2.3) y el tramo horizontal actua como gancho sobre la punta del anclaje (ldh). Opcion B, barra Omega: las patas terminan en un gancho estandar de 90 grados hacia afuera (cola de 12 db) y bajo la punta del anclaje se desarrolla ldh (ACI 25.4.3). Cada opcion se dibuja en 3D y en la elevacion y se revisa: resistencia a traccion, desarrollo bajo y sobre la punta del anclaje, altura del pedestal y, en la Omega, el recubrimiento de la cola.",
+      "type": "combo",
+      "items": [
+       "Opcion A — barras U (patas rectas, ld)",
+       "Opcion B — barras Omega (patas con gancho, ldh)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "conc.u_size",
+      "label": "Diametro de la barra",
+      "help": "Diametro de la barra\nNumero de barra (ASTM A615). #4 = 1/2 in, #5 = 5/8 in, #6 = 3/4 in...",
+      "type": "combo",
+      "items": [
+       "#3",
+       "#4",
+       "#5",
+       "#6",
+       "#7",
+       "#8",
+       "#9",
+       "#10"
+      ],
+      "editable": false
+     },
+     {
+      "path": "conc.u_n",
+      "label": "Cantidad de barras U",
+      "help": "Cantidad de barras U\nCada barra aporta 2 patas.  Las barras se colocan FUERA del grupo de anclajes, a 5 cm de la fila extrema (mitad a cada lado), para que no choquen con los pernos; las patas quedan a 0.3·hef de los pernos extremos en X (maximo 0.5·hef, como exige ACI).",
+      "type": "int",
+      "lo": 1,
+      "hi": 12
+     },
+     {
+      "path": "conc.u_fy",
+      "label": "fy de la barra",
+      "help": "fy de la barra\nEsfuerzo de fluencia del refuerzo (Gr. 60 = 60 ksi).",
+      "type": "num",
+      "lo": 40,
+      "hi": 100,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "MPa",
+      "uk": "S"
+     },
+     {
+      "path": "conc.u_depth",
+      "label": "Profundidad del tramo horizontal",
+      "help": "Profundidad del tramo horizontal\nDistancia desde la superficie del concreto hasta el tramo horizontal de la U (recubrimiento + barras).",
+      "type": "num",
+      "lo": 0.5,
+      "hi": 24,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "conc.u_leg",
+      "label": "Longitud de la pata (0 = automatica)",
+      "help": "Longitud de la pata (0 = automatica)\nLargo de cada pata medido desde el tramo horizontal. 0 = automatica: la que desarrolla ld (barra U) o ldh (barra Omega) bajo la punta del anclaje (la seccion critica es el extremo inferior del anclaje, z = hef). Si pone un valor, se verifica el desarrollo.",
+      "type": "num",
+      "lo": 0,
+      "hi": 200,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "type": "note",
+      "text": "Verifica: capacidad del refuerzo en traccion y cortante (ACI 17.5.2.1, φ = 0.75), desarrollo de la pata bajo la punta del anclaje (ld, ACI 25.4.2.3) y gancho sobre la punta del anclaje (ldh, ACI 25.4.3). El refuerzo sustituye al concreto solo si resiste mas que el."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Elementos finitos",
+  "groups": [
+   {
+    "title": "",
+    "items": []
+   },
+   {
+    "title": "Apoyo y cargas",
+    "items": [
+     {
+      "path": "fea.ks_mode",
+      "label": "Modulo de balasto",
+      "help": "Modulo de balasto\nEc/hped estima el modulo de balasto como el modulo elastico del concreto dividido entre la altura del pedestal (minimo 6 in). Con manual usted lo impone. Lo usa el modelo solido 3D.",
+      "type": "combo",
+      "items": [
+       "Ec/hped",
+       "manual"
+      ],
+      "editable": false
+     },
+     {
+      "path": "fea.ks_manual",
+      "label": "ks manual",
+      "help": "ks manual\nModulo de balasto del apoyo de concreto. Solo se usa en modo manual.",
+      "type": "num",
+      "lo": 1,
+      "hi": 100000.0,
+      "step": 0.1,
+      "dec": 3,
+      "suffix": "kN/mm³",
+      "uk": "K"
+     },
+     {
+      "path": "fea.shear_arm",
+      "label": "Brazo del cortante (-1 = automatico)",
+      "help": "Brazo del cortante (-1 = automatico)\nDistancia entre donde el cortante entra en la placa (cara superior) y donde lo devuelven los pernos o la llave. El par V·e es un momento sobre la placa: hace que los pernos de un lado tengan mas traccion que los del otro. -1 = automatico: tp/2 + mortero sin llave; tp + H/2 con llave. 0 = sin efecto del cortante. Lo usa el modelo 3D (altura del punto de aplicacion de las cargas).",
+      "type": "num",
+      "lo": -1,
+      "hi": 60,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     }
+    ]
+   },
+   {
+    "title": "Analisis de elementos finitos (Gmsh + CalculiX)",
+    "items": [
+     {
+      "path": "fea.ccx_path",
+      "label": "CalculiX propio (opcional)",
+      "help": "CalculiX propio (opcional)\nDejelo vacio: el programa usa el CalculiX incluido en la carpeta solvers. Solo escriba una ruta si quiere usar otra version de ccx.exe.",
+      "type": "text"
+     },
+     {
+      "path": "fea.mesh3d_mode",
+      "label": "Calidad de la malla 3D",
+      "help": "Calidad de la malla 3D\nAutomatica (recomendada): el programa calcula el tamano de elemento del proyecto: el mayor entre 1.2 veces el radio de promedio del von Mises (con eso el esfuerzo promediado converge, ±2 % en el estudio de convergencia) y la raiz del area de la placa / 400 (limita el costo en placas grandes, ~70-90 mil nodos). Fina: 0.65 veces ese tamano (mas lenta). Si el calculo falla, el programa reintenta solo con una malla mas gruesa. Un tamano manual mayor que 0 (abajo) tiene prioridad.",
+      "type": "combo",
+      "items": [
+       "Automatica (recomendada)",
+       "Fina (mas lenta)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "fea.weld_model",
+      "label": "Modelo de la soldadura",
+      "help": "Modelo de la soldadura\nConectores (recomendado): el perfil y la placa son cuerpos separados; la compresion pasa por contacto y cada linea de cordon es un conector de traccion y cortante cuya fuerza se lee directo del resorte (una zona sin soldar o un lado sin cordon no transmite). Fusionado: union monolitica que equivale a una CJP; la fuerza del cordon se deduce de los esfuerzos del perfil y una zona sin soldar transmite igual.",
+      "type": "combo",
+      "items": [
+       "Conectores (cordon como resortes entre cuerpos separados)",
+       "Fusionado (union monolitica, equivale a CJP)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "fea.weld_criterion",
+      "label": "Criterio del cordon (FEM)",
+      "help": "Criterio del cordon (FEM)\nPlastico 5 % (Ghimire et al. 2023): los conectores del cordon son elasto-plasticos; fluyen en la resistencia de diseno AISC J2.4 con una rama plastica corta, lo que redistribuye los picos locales, y el D/C del cordon vale 1 cuando la deformacion plastica de su garganta llega al limite. Elastico: los conectores son lineales; el D/C PICO se admite hasta el limite indicado y la MEDIA hasta 1.0.",
+      "type": "combo",
+      "items": [
+       "Plastico 5 % (Ghimire et al. 2023)",
+       "Elastico (pico limitado y media)"
+      ],
+      "editable": false
+     },
+     {
+      "path": "fea.weld_plastic_limit",
+      "label": "Deformacion plastica limite del cordon (%)",
+      "help": "Deformacion plastica limite del cordon (%)\nDeformacion plastica de la garganta del cordon a la que el D/C vale 1.0. 5 % es el valor del articulo de Ghimire et al. (2023) y el limite habitual de EN 1993-1-5 (C.8); AISC 360 admite hasta 10 % en cordones transversales y 48 % en longitudinales, pero no se debe contar con la ductilidad del cordon.",
+      "type": "num",
+      "lo": 1,
+      "hi": 20,
+      "step": 0.5,
+      "dec": 1,
+      "suffix": "",
+      "uk": null
+     },
+     {
+      "path": "fea.weld_long_reduction",
+      "label": "Reduccion por cordon largo (AISC J2.2b(d))",
+      "help": "Reduccion por cordon largo (AISC J2.2b(d))\nEl FEM no captura la reduccion de resistencia de los cordones largos (Ghimire et al. 2023). Si se marca, la capacidad de los filetes con L > 100·w se multiplica por β = 1.2 − 0.002·L/w (β = 0.6 a 300·w; longitud efectiva 180·w despues). Es conservador para cordones que no estan cargados en sus extremos.",
+      "type": "check"
+     },
+     {
+      "path": "fea.plastic",
+      "label": "Acero elasto-plastico en todas las piezas (sin picos de esfuerzo)",
+      "help": "Acero elasto-plastico en todas las piezas (sin picos de esfuerzo)\nModela el acero de TODAS las piezas (placa, perfil, rigidizadores, llave y arandelas) como elasto-plastico perfecto con limite φ·Fy de su propio acero: el esfuerzo no pasa de φ·Fy, los picos puntuales desaparecen y se verifica la deformacion plastica equivalente (PEEQ). Placa: maximo nodal; perfil, rigidizadores y llave: promedio en un circulo de radio ≈ espesor (el borde del cordon es una singularidad de malla). Cuesta unas 4 veces mas tiempo que el calculo elastico. El von Mises que se muestra se recorta en φ·Fy de cada pieza (CalculiX lo extrapola a los nodos y puede pasarse del tope aunque el material no lo haga). Si CalculiX no converge con plasticidad, el programa usa solo el criterio elastico y lo avisa. Desactivado: criterio elastico de von Mises promediado ≤ 0.9·Fy.",
+      "type": "check"
+     },
+     {
+      "path": "fea.plastic_limit",
+      "label": "Deformacion plastica maxima admitida (%)",
+      "help": "Deformacion plastica maxima admitida (%)\nLimite de la deformacion plastica equivalente en la placa. Valor habitual: 5 % (EN 1993-1-5, C.8).",
+      "type": "num",
+      "lo": 0.1,
+      "hi": 20,
+      "step": 0.5,
+      "dec": 1,
+      "suffix": "",
+      "uk": null
+     },
+     {
+      "path": "fea.weld_peak_factor",
+      "label": "Limite del D/C pico de la soldadura (FEM)",
+      "help": "Limite del D/C pico de la soldadura (FEM)\nEl FEM da en cada cara del cordon un D/C PICO (el punto mas cargado, tipicamente en las esquinas, en regimen elastico) y un D/C MEDIA (la fuerza de la cara repartida en su longitud). Un filete ductil redistribuye plasticamente el pico antes de fallar, por eso el pico se admite hasta este valor (1.5 por defecto) y la media hasta 1.0. El D/C de la fila es max(pico / limite, media). Ponga 1.0 para exigir el pico completo (muy conservador).",
+      "type": "num",
+      "lo": 1.0,
+      "hi": 3.0,
+      "step": 0.05,
+      "dec": 2,
+      "suffix": "",
+      "uk": null
+     },
+     {
+      "path": "fea.vm_avg_factor",
+      "label": "Radio de promedio del von Mises 3D (× espesor)",
+      "help": "Radio de promedio del von Mises 3D (× espesor)\nEl von Mises puntual del modelo solido crece sin limite al refinar la malla (singularidades en el borde de los agujeros y en el pie del perfil). El programa verifica el maximo PROMEDIADO: promedio del tensor de esfuerzos, ponderado por area, en un circulo de este radio (en espesores de placa) sobre la misma cara. Predeterminado 1.0. Un radio menor da valores mas altos y mas sensibles a la malla; el radio nunca baja de 1/1.2 del tamano del elemento. Este valor si converge con la malla.",
+      "type": "num",
+      "lo": 0.1,
+      "hi": 3.0,
+      "step": 0.1,
+      "dec": 2,
+      "suffix": "",
+      "uk": null
+     },
+     {
+      "path": "fea.mesh3d",
+      "label": "Tamano de malla 3D (0 = automatico)",
+      "help": "Tamano de malla 3D (0 = automatico)\nTamano caracteristico de los tetraedros. Deje 0 para que el programa lo calcule segun la placa y el radio de promedio (recomendado). Un valor manual muy pequeno en una placa grande hace el modelo enorme y el calculo muy lento o no converge; el radio de promedio nunca baja del tamano de elemento.",
+      "type": "num",
+      "lo": 0,
+      "hi": 20,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "path": "fea.weld_mesh",
+      "label": "Malla sobre la soldadura (0 = automatica)",
+      "help": "Malla sobre la soldadura (0 = automatica)\nTamano del elemento junto al cordon (pie del perfil). Con 0 el programa usa ~28 mm aunque la malla global sea muy gruesa, que es lo que calibra el D/C de la soldadura. La fuerza maxima del cordon es un pico local: al afinar esta malla el D/C baja ~5 % y converge; el tamano global casi no lo afecta, pero un cordon muy fino con malla global muy gruesa (> 250 mm) puede dar un pico mayor por la transicion brusca.",
+      "type": "num",
+      "lo": 0,
+      "hi": 10,
+      "step": 5.0,
+      "dec": 1,
+      "suffix": "mm",
+      "uk": "L"
+     },
+     {
+      "type": "note",
+      "text": "El analisis solido 3D es el unico analisis de elementos finitos del programa: sus resultados (traccion en pernos, presion de contacto, von Mises promediado en la placa y fuerzas en la soldadura) entran al veredicto y a la memoria de calculo. Exportar > Modelo solido 3D escribe el .geo con la geometria real mas un script correr_3d.py que lo malla con Gmsh, arma el .inp y lo resuelve con CalculiX."
+     }
+    ]
+   }
+  ]
+ }
+]

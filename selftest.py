@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Autopruebas del motor de calculo (sin interfaz grafica)."""
-import sys, math, traceback
+import os, sys, math, traceback
 sys.path.insert(0, ".")
 for _st in (sys.stdout, sys.stderr):          # consolas de Windows (cp1252/cp850) no codifican φ, ° ni —
     try:
@@ -8,10 +8,10 @@ for _st in (sys.stdout, sys.stderr):          # consolas de Windows (cp1252/cp85
     except Exception:
         pass
 
-from placabase.model import Project
-from placabase.solver import solve
-from placabase import geometry as G
-from placabase.shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE
+from steelconpro.model import Project
+from steelconpro.solver import solve
+from steelconpro import geometry as G
+from steelconpro.shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE
 
 FAIL = []
 
@@ -100,9 +100,9 @@ case("llave + rigidizadores", **{"lug.enabled": True, "stiff.enabled": True,
 
 print()
 print("SOLDADURA")
-case("CJP alas", **{"welds.flange": __import__("placabase.model", fromlist=["WeldSpec"]).WeldSpec(
+case("CJP alas", **{"welds.flange": __import__("steelconpro.model", fromlist=["WeldSpec"]).WeldSpec(
     "CJP (penetracion completa)", 0.0, "E70XX", True)})
-case("filete chico", **{"welds.flange": __import__("placabase.model", fromlist=["WeldSpec"]).WeldSpec(
+case("filete chico", **{"welds.flange": __import__("steelconpro.model", fromlist=["WeldSpec"]).WeldSpec(
     "Filete", 0.1875, "E70XX", True), "loads.Mux": 5200.0})
 
 print()
@@ -138,9 +138,9 @@ case("adhesivo + coord. manuales", **{"bolts.atype": "Recto (sin cabeza)",
                                                        [-8.5, 8.5], [0.0, 8.5]]})
 
 # grupo de soldadura contra calculo a mano
-from placabase.shapes import CATALOG, make_custom, PLATE
-from placabase.model import WeldSpec
-from placabase import design as _D
+from steelconpro.shapes import CATALOG, make_custom, PLATE
+from steelconpro.model import WeldSpec
+from steelconpro import design as _D
 CATALOG.shapes["_PLT"] = make_custom("_PLT", PLATE, 12.0, 1.0, 1.0)
 _p = Project(); _p.section.label = "_PLT"
 _g = _D.weld_group(_p, G.section_rects(_p), WeldSpec(size=0.5), P=-100.0)
@@ -180,7 +180,7 @@ if not _cp or not any("NO esta soldada" in w for w in _rw.warnings):
 
 # ---- el veredicto final lo da el analisis 3D
 import types
-from placabase.fem_checks import Fem3D
+from steelconpro.fem_checks import Fem3D
 _m = Project(); _m.loads.Mux = 4200.0
 _rm = solve(_m)
 if not (_rm.pending and _rm.verdict == "PENDIENTE"):
@@ -229,7 +229,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from PIL import Image
 import io
-from placabase import view3d
+from steelconpro import view3d
 _vp = Project()
 _ok_view = True
 for _w, _h in ((10.2, 5.0), (7, 6), (4, 8), (3, 2.5)):
@@ -250,7 +250,7 @@ if not _ok_view:
     FAIL.append("vista 3D: el modelo debe caber completo y ocupar ~90 % del lado limitante")
 
 # tamano de malla 3D automatico: sube con el area de la placa (costo acotado) y respeta el manual
-from placabase import mesh3d
+from steelconpro import mesh3d
 _a = Project(); _b = Project(); _b.plate.N = _b.plate.B = 80.0
 _c = Project(); _c.fea.mesh3d = 1.5
 _la, _lb, _lc = mesh3d.mesh_size_for(_a), mesh3d.mesh_size_for(_b), mesh3d.mesh_size_for(_c)
@@ -267,7 +267,7 @@ case("placa insuficiente", **{"loads.Mux": 26000.0})
 case("perfil mas grande que placa", **{"section.label": "W14X730", "plate.N": 14.0, "plate.B": 14.0})
 
 # ---------------------------------------------------- combinaciones de carga y flexion del perno
-from placabase.model import LoadCombo
+from steelconpro.model import LoadCombo
 _cb = Project()
 _cb.combos = [LoadCombo("A", 400, 1800, 0, 30, 0), LoadCombo("B", -100, 0, 0, 10, 0)]
 _q0, _q1 = _cb.with_combo(0), _cb.with_combo(1)
@@ -294,7 +294,7 @@ print(f"{'flexion del perno (stand-off 2 in)':34} M/φMn = {_k['blt_m'].ratio:.3
 
 
 # ---------------------------------------------------- barras U y visualizacion de cargas
-from placabase.ubar import ubar
+from steelconpro.ubar import ubar
 _u0 = Project(); _u0.combos = [LoadCombo("T", -300, 0, 0, 30, 0)]; _u0.apply_combo(0)
 _u1 = Project.from_json(_u0.to_json()); _u1.conc.u_on = True; _u1.conc.u_n = 2; _u1.conc.u_size = "#5"
 _k0 = {c.key: c for c in solve(_u0).checks}; _k1 = {c.key: c for c in solve(_u1).checks}
@@ -323,7 +323,7 @@ for _k in ("aci_ubar_ten", "aci_ubar_dev", "aci_ubar_hook", "aci_ubar_fit", "aci
 if "aci_ubar_ten" not in {c.key for c in solve(_u1).checks} or "aci_ubar_cover" in {c.key for c in solve(_u1).checks}:
     FAIL.append("barras U: revisiones esperadas (tension, desarrollo, gancho, altura; sin recubrimiento de cola)")
 print(f"{'barras Omega (2 Ω #5)':34} ldh = {_om['ldh']:.1f} in   pata = {_om['leg']:.0f} in   cola = {_om['tail']:.1f} in")
-from placabase import view3d as _v3
+from steelconpro import view3d as _v3
 _its, _pts = _v3.load_arrows(_u0, 1.0)
 if len(_its) != 2 or not _pts:
     FAIL.append("cargas 3D: se esperaban flechas de Pu y Vux")
@@ -331,8 +331,8 @@ if len(_its) != 2 or not _pts:
 
 # ---------------------------------------------------- criterios del cordon (Ghimire et al. 2023)
 try:
-    from placabase import weldfe as _wf
-    from placabase.model import WeldSpec as _WS
+    from steelconpro import weldfe as _wf
+    from steelconpro.model import WeldSpec as _WS
     _pw = Project()
     _sp = _WS("Filete", 0.5, _pw.welds.flange.electrode, True)
     _mk = lambda L: {"periodic": False, "spec": _sp, "p1": (0.0, 0.0), "p2": (L, 0.0)}
@@ -353,61 +353,27 @@ try:
 except Exception as _e:
     FAIL.append(f"criterios del cordon: {type(_e).__name__}: {_e}")
 
-# ---------------------------------------------------- visor OpenGL: la escena se arma sin necesitar GPU
+# ---------------------------------------------------- escena 3D del visor (sin interfaz): la geometria se arma sin necesitar GPU
 try:
-    from placabase import gl3d as _gl
+    from steelconpro import scene3d as _gl
     import numpy as _np
     _conc = [(0, 0, 0), (4, 0, 0), (4, 1, 0), (1, 1, 0), (1, 4, 0), (0, 4, 0)]          # poligono concavo en L
     _tr = _gl.tri_poly(_conc)
     _ar = sum(abs(_np.cross(_np.subtract(_conc[b], _conc[a]), _np.subtract(_conc[c], _conc[a]))[2]) / 2 for a, b, c in _tr)
     if len(_tr) != 4 or abs(_ar - 7.0) > 1e-9:
-        FAIL.append(f"visor GL: triangulacion de un poligono concavo incorrecta ({len(_tr)} tris, area {_ar})")
+        FAIL.append(f"escena 3D: triangulacion de un poligono concavo incorrecta ({len(_tr)} tris, area {_ar})")
     _sc = _gl.scene_geometry(_u0, loads=True)
     _o, _t, _l = _sc.packed()
     if len(_o) < 100 or len(_t) == 0 or len(_l) == 0 or not _np.isfinite(_o).all() or not _sc.vlabels or len(_sc.dims) < 10:
-        FAIL.append("visor GL: la escena de geometria quedo vacia o con valores no finitos")
-    print(f"{'visor OpenGL (escena)':34} {len(_o) // 3} tris opacos, {len(_t) // 3} translucidos, {len(_l) // 2} aristas, {len(_sc.vlabels)} etiquetas, {len(_sc.dims)} cotas")
+        FAIL.append("escena 3D: la escena de geometria quedo vacia o con valores no finitos")
+    print(f"{'escena 3D (visor)':34} {len(_o) // 3} tris opacos, {len(_t) // 3} translucidos, {len(_l) // 2} aristas, {len(_sc.vlabels)} etiquetas, {len(_sc.dims)} cotas")
 except Exception as _e:
-    FAIL.append(f"visor GL: {type(_e).__name__}: {_e}")
-
-# ---------------------------------------------------- interfaz (solo si hay Qt): que existan y corran los metodos clave
-try:
-    os_ = __import__("os"); os_.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication as _QA
-    from placabase import ui as _ui
-    _app = _QA.instance() or _QA([])
-    _w = _ui.MainWindow()
-    for _m in ("_bolt_loads", "_fem_now", "_raw_now", "draw_geom", "draw_3d", "_goto_calc", "export_target", "recalc"):
-        if not hasattr(_w, _m):
-            FAIL.append(f"interfaz: falta el metodo {_m}")
-    _w.recalc(); _w.draw_geom(); _w.draw_3d()
-    _q, _R = _w.export_target()
-    print(f"{'interfaz (offscreen)':34} recalc, dibujo y exportacion OK   metodos: {len(dir(_w))}")
-    # pestana sismica: generar combinaciones desde la interfaz
-    _tabs = [_w.tabs_in.tabText(i) for i in range(_w.tabs_in.count())]
-    if "Sismica" not in _tabs:
-        FAIL.append("interfaz: falta la pestana Sismica")
-    _w.prj.seis.enabled = True
-    _w.prj.seis.cases = [[100.0, 0, 0, 0, 0], [50.0, 0, 0, 0, 0], [0.0] * 5, [0.0, 1000.0, 0, 0, 20.0], [0.0] * 5]
-    _w.prj.seis.prune = False
-    _w.load_ui()
-    _w.seis_generate(ask=False)
-    if len(_w.prj.combos) != 11 or _w.tbl_cb.columnCount() != 7 or _w.tbl_cb.rowCount() != 11:
-        FAIL.append(f"interfaz: generar combinaciones ({len(_w.prj.combos)} comb., {_w.tbl_cb.columnCount()} columnas)")
-    _w.store_ui()
-    if _w.prj.seis.cases[3][1] != 1000.0 or [c.kind for c in _w.prj.combos].count("Ωo") != 4:
-        FAIL.append("interfaz: la tabla de casos o la columna Tipo no se conservan al guardar la interfaz")
-    _w.recalc()
-    print(f"{'interfaz: pestana Sismica':34} {len(_w.prj.combos)} combinaciones generadas")
-except ImportError:
-    print(f"{'interfaz':34} omitida (sin PySide6)")
-except Exception as _e:
-    FAIL.append(f"interfaz: {type(_e).__name__}: {_e}")
+    FAIL.append(f"escena 3D: {type(_e).__name__}: {_e}")
 
 
 # ---------------------------------------------------------------- columna descentrada (cx, cy)
 try:
-    from placabase import geometry as _G
+    from steelconpro import geometry as _G
     _pc = Project()
     _pc.loads.Pu, _pc.loads.Mux, _pc.loads.Muy, _pc.loads.Vux, _pc.loads.Vuy = 400.0, 1800.0, 0.0, 30.0, 10.0
     _pc.section.cx, _pc.section.cy = 2.0, -3.0
@@ -426,7 +392,7 @@ try:
     for _n, _o in (("geometria", _ok_geo), ("traslado de cargas", _ok_ld), ("voladizo", _ok_m), ("calculo", _ok_run)):
         if not _o:
             FAIL.append(f"columna descentrada: {_n}")
-    from placabase import view3d as _V3
+    from steelconpro import view3d as _V3
     _gf = _V3.geometry_faces(_pc)
     _cf = [q for g in _gf if g[5] == "column" for q in g[1]]
     _cxs = [p[0] for q in _cf for p in q]
@@ -436,208 +402,11 @@ except Exception as _e_:
     FAIL.append(f"columna descentrada: {type(_e_).__name__}: {_e_}")
 
 
-# ================================================================ SISMO (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
-print()
-print("SISMO")
-try:
-    # --- modelo: migracion de la casilla vieja, guardado y firma 3D
-    _sp = Project(); _sp.conc.seismic = True
-    _sp.combos.append(__import__("placabase.model", fromlist=["LoadCombo"]).LoadCombo("Comb 2", 300, 900, 0, 20, 0))
-    _sp.normalize()
-    if not (_sp.seis.enabled and all(c.kind == "E" for c in _sp.combos) and not _sp.conc.seismic):
-        FAIL.append("sismo/modelo: la casilla vieja conc.seismic no se migro")
-    _sp.seis.cases[3] = [0.0, 1000.0, 0.0, 0.0, 20.0]
-    _sq = Project.from_json(_sp.to_json())
-    if _sq.seis.cases[3][1] != 1000.0 or _sq.combos[1].kind != "E" or not _sq.seis.enabled:
-        FAIL.append("sismo/modelo: guardar/abrir no conserva los datos sismicos")
-    _s1 = _sp.sig3d(); _sp.seis.SDS = 1.7
-    if _sp.sig3d() != _s1:
-        FAIL.append("sismo/modelo: cambiar datos sismicos no debe invalidar el 3D")
-    _nb = _sp.combo_loads_noE(1)
-    if abs(_nb.loads.Pu) > 1e-9:
-        FAIL.append("sismo/modelo: combinacion E sin parte conocida debe quedar en cero sin E")
-    print(f"{'sismo: modelo y migracion':34} ok")
-except Exception as _e_:
-    traceback.print_exc()
-    FAIL.append(f"sismo/modelo: {type(_e_).__name__}: {_e_}")
-
-
-try:
-    # --- generador de combinaciones ASCE 7-05 y limite por capacidad AISC 341-22 D2.6
-    from placabase import seismic as SE
-    _g = Project(); _g.seis.enabled = True; _g.seis.prune = False
-    _g.seis.cases = [[100.0, 0, 0, 0, 0], [50.0, 0, 0, 0, 0], [0.0] * 5,
-                     [0.0, 1000.0, 0, 0, 20.0], [0.0] * 5]
-    _cs = SE.generate(_g)
-    _k = [c.kind for c in _cs]
-    _E = [c for c in _cs if c.kind == "E"]; _O = [c for c in _cs if c.kind == "Ωo"]
-    if (len(_cs), _k.count(""), len(_E), len(_O)) != (11, 3, 4, 4):
-        FAIL.append(f"sismo/generador: se esperaban 11 combinaciones (3 G, 4 E, 4 Ω), hay "
-                    f"{len(_cs)} ({_k.count('')}, {len(_E)}, {len(_O)})")
-    _e1 = [c for c in _E if abs(c.Pu - 190.0) < 1e-6]
-    if len(_e1) != 2 or sorted(c.Mux for c in _e1) != [-1000.0, 1000.0]:
-        FAIL.append("sismo/generador: (1.2+0.2SDS)D + ρQE + f1L debe dar Pu = 190, Mux = ±1000")
-    elif not (_e1[0].e_known and abs(_e1[0].PE - 20.0) < 1e-6 and abs(abs(_e1[0].MxE) - 1000.0) < 1e-6):
-        FAIL.append("sismo/generador: parte E de la combinacion = Ev 0.2·SDS·D + ρ·QE")
-    if not any(abs(c.Pu - 70.0) < 1e-6 for c in _E):
-        FAIL.append("sismo/generador: (0.9 − 0.2SDS)D debe dar Pu = 70")
-    if sorted({round(abs(c.Mux), 6) for c in _O}) != [3000.0]:
-        FAIL.append("sismo/generador: Ωo·QE con Ωo = 3 debe dar |Mux| = 3000 (bajo el limite por capacidad)")
-    if abs(SE.ry_of("ASTM A992") - 1.1) > 1e-9 or abs(SE.ry_of("ASTM A36") - 1.5) > 1e-9 \
-            or abs(SE.ry_of("ASTM A500 Gr.B (HSS rect.)") - 1.4) > 1e-9:
-        FAIL.append("sismo/generador: Ry de AISC 341-22 Tabla A3.2")
-    _lim = SE.capacity_limits(_g)
-    if abs(_lim["Mx"] - 1.1 * 1.1 * 50.0 * _g.section.eff().Zx) > 1e-6 \
-            or abs(_lim["Vy"] - 2.0 * 1.1 * 50.0 * _g.section.eff().Zx / _g.seis.H) > 1e-6:
-        FAIL.append("sismo/generador: limites 1.1·Ry·Fy·Zx y 2·Ry·Fy·Zx/H")
-    _g.seis.cases[3] = [0.0, 10000.0, 0, 0, 20.0]
-    _Oc = [c for c in SE.generate(_g) if c.kind == "Ωo"]
-    if any(abs(abs(c.Mux) - _lim["Mx"]) > 1e-6 for c in _Oc) or any(abs(c.MxE + 0.0) < 1e-9 for c in _Oc):
-        FAIL.append("sismo/generador: Ωo·QE = 30000 debe quedar limitado a 1.1·Ry·Mp")
-    _g.seis.cap_limit = False
-    if max(abs(c.Mux) for c in SE.generate(_g) if c.kind == "Ωo") < 29999.0:
-        FAIL.append("sismo/generador: sin limite por capacidad debe quedar Ωo·QE completo")
-    _g.seis.cap_limit = True; _g.section.rotation = 90.0
-    _l90 = SE.capacity_limits(_g)
-    if abs(_l90["Mx"] - _lim["My"]) > 1e-6 or abs(_l90["My"] - _lim["Mx"]) > 1e-6:
-        FAIL.append("sismo/generador: con rotacion 90° se intercambian los limites de Mx y My")
-    _g.section.rotation = 0.0
-    _g.seis.ortho = True; _g.seis.cases[4] = [0.0, 0, 500.0, 15.0, 0]
-    _co = SE.generate(_g)
-    if len(_co) != 35:
-        FAIL.append(f"sismo/generador: con 100 % + 30 % se esperaban 35 combinaciones, hay {len(_co)}")
-    _pr = SE.prune(_g, _co)
-    if not (0 < len(_pr) <= len(_co)) or any(c not in _co for c in _pr):
-        FAIL.append("sismo/generador: prune debe devolver un subconjunto no vacio")
-    if len(SE.prune(_g, _co[:1])) != 1:
-        FAIL.append("sismo/generador: prune con una sola combinacion la conserva")
-    _z = Project(); _z.seis.enabled = True
-    if len(SE.generate(_z)) < 1:
-        FAIL.append("sismo/generador: con cargas en cero debe devolver al menos una combinacion")
-    print(f"{'sismo: generador ASCE 7-05':34} {len(_cs)} comb. (100/30: {len(_co)}, tras prune {len(_pr)})  "
-          f"1.1RyMp = {_lim['Mx']:.0f} kip·in")
-except Exception as _e_:
-    traceback.print_exc()
-    FAIL.append(f"sismo/generador: {type(_e_).__name__}: {_e_}")
-
-
-try:
-    # --- ACI 318-19 17.10: regla del 20 % y factor 0.75 solo en traccion
-    from placabase import seismic as SE
-    from placabase.model import LoadCombo as _LC
-
-    def _sc(kind, PE=0.0, MxE=0.0, VxE=0.0, Pu=400.0, Mux=5200.0, Vux=30.0, sdc="D", known=True):
-        q = Project(); q.seis.enabled = True; q.seis.sdc = sdc
-        c = _LC("t", Pu, Mux, 0.0, Vux, 0.0); c.kind = kind
-        c.PE, c.MxE, c.VxE, c.e_known = PE, MxE, VxE, known
-        q.combos = [c]; q.apply_combo(0)
-        return q
-
-    _ck = lambda q: {c.key: c for c in solve(q).checks}
-    _qE = _sc("E", MxE=5200.0)
-    _st = SE.seismic_state(_qE)
-    _g0, _gE = _ck(_sc("")), _ck(_qE)
-    if not (_st.active and _st.fN > 0.99 and abs(_st.k_t - 0.75) < 1e-12):
-        FAIL.append(f"sismo/ACI 17.10: traccion 100 % sismica debe dar k = 0.75 (fN = {_st.fN:.2f})")
-    if abs(_gE["aci_ncb"].capacity - 0.75 * _g0["aci_ncb"].capacity) > 1e-6 \
-            or abs(_gE["aci_np"].capacity - 0.75 * _g0["aci_np"].capacity) > 1e-6:
-        FAIL.append("sismo/ACI 17.10.5.4: arrancamiento y extraccion deben llevar 0.75")
-    if abs(_gE["aci_vcb"].capacity - _g0["aci_vcb"].capacity) > 1e-9 \
-            or abs(_gE["aci_vcp"].capacity - _g0["aci_vcp"].capacity) > 1e-9:
-        FAIL.append("sismo/ACI 17.10.6: el cortante NO lleva el factor 0.75")
-    _qs = _sc("E", MxE=200.0)
-    _ss = SE.seismic_state(_qs)
-    if not (_ss.fN <= 0.20 and _ss.k_t == 1.0):
-        FAIL.append(f"sismo/ACI 17.10.5.1: traccion sismica <= 20 % no lleva factor (fN = {_ss.fN:.3f})")
-    _qc = _sc("E", MxE=0.0, Mux=0.0, Pu=900.0)
-    if SE.seismic_state(_qc).fN != 0.0:
-        FAIL.append("sismo/ACI 17.10: sin traccion la fraccion sismica debe ser 0")
-    if SE.seismic_state(_sc("E", MxE=5200.0, sdc="B")).active:
-        FAIL.append("sismo/ACI 17.10.1: en SDC B no aplica 17.10")
-    if SE.seismic_state(_sc("E", known=False)).fN != 1.0:
-        FAIL.append("sismo/ACI 17.10: parte E desconocida debe tomarse como 100 % sismica")
-    _qv = _sc("E", VxE=30.0, MxE=0.0)
-    if SE.seismic_state(_qv).fV < 0.99:
-        FAIL.append("sismo/ACI 17.10.6: fraccion sismica del cortante")
-    print(f"{'sismo: ACI 17.10 (20 %, 0.75)':34} fN = {_st.fN:.2f} -> k = {_st.k_t}   fN = {_ss.fN:.3f} -> k = {_ss.k_t}")
-except Exception as _e_:
-    traceback.print_exc()
-    FAIL.append(f"sismo/ACI 17.10: {type(_e_).__name__}: {_e_}")
-
-
-try:
-    # --- verificaciones sismicas: anclaje ductil (17.10.5.3(a)), barras de refuerzo (17.10.4) y memoria
-    from placabase.model import LoadCombo as _LC2
-
-    def _sd(**mut):
-        q = Project(); q.seis.enabled = True; q.seis.sdc = "D"; q.seis.ductile = True
-        c = _LC2("E", 400.0, 5200.0, 0.0, 30.0, 0.0); c.kind = "E"; c.MxE = 5200.0; c.e_known = True
-        q.combos = [c]; q.apply_combo(0)
-        for path, val in mut.items():
-            o = q
-            for part in path.split(".")[:-1]:
-                o = getattr(o, part)
-            setattr(o, path.split(".")[-1], val)
-        R = solve(q)
-        return R, {c.key: c for c in R.checks}
-
-    _R105, _c105 = _sd(**{"bolts.steel": "ASTM F1554 Gr.105"})
-    _R36, _c36 = _sd(**{"bolts.steel": "ASTM F1554 Gr.36"})
-    _Rup, _cup = _sd(**{"bolts.steel": "ASTM F1554 Gr.105", "seis.upset": True})
-    if "seis_futa" not in _c105 or _c105["seis_futa"].ok:
-        FAIL.append("sismo/ductil: F1554 Gr.105 (futa/fya = 1.19) no cumple 17.10.5.3(a)(v)")
-    if not _c36.get("seis_futa") or not _c36["seis_futa"].ok:
-        FAIL.append("sismo/ductil: F1554 Gr.36 cumple futa/fya >= 1.3")
-    if not _cup.get("seis_futa") or not _cup["seis_futa"].skip:
-        FAIL.append("sismo/ductil: con rosca recalcada no se exige futa/fya")
-    if _c36["seis_stretch"].ok or abs(_c36["seis_stretch"].demand - 10.0) > 1e-9 \
-            or abs(_c36["seis_stretch"].capacity - 3.5) > 1e-9:
-        FAIL.append("sismo/ductil: estiramiento 8·da = 10 in contra 0 + 1.5 + 0 + 2 = 3.5 in debe fallar")
-    _Rsl, _csl = _sd(**{"seis.sleeve": 8.0})
-    if not _csl["seis_stretch"].ok:
-        FAIL.append("sismo/ductil: con camisa de 8 in el estiramiento cumple")
-    if "seis_duct_ratio" not in _c36 or "seis_duct_mat" not in _c36:
-        FAIL.append("sismo/ductil: faltan las verificaciones de anclaje ductil")
-    _Rrb, _crb = _sd(**{"conc.u_on": True, "conc.u_fy": 75.0})
-    if "seis_rebar" not in _crb or _crb["seis_rebar"].ok:
-        FAIL.append("sismo/ACI 17.10.4: barra de fy = 75 ksi no es Gr.60/80")
-    if not _sd(**{"conc.u_on": True, "conc.u_fy": 60.0})[1]["seis_rebar"].ok:
-        FAIL.append("sismo/ACI 17.10.4: barra Gr.60 cumple")
-    if "REQUISITOS SISMICOS" not in _R36.rec.to_html():
-        FAIL.append("sismo/memoria: falta la seccion de requisitos sismicos")
-    if not any("Ωo" in w for w in _R36.warnings):
-        FAIL.append("sismo/avisos: traccion > 20 % sin combinaciones Ωo debe avisar")
-    _Rb, _cb = _sd(**{"seis.sdc": "B"})
-    if any(k.startswith("seis_") for k in _cb) or not any("17.10" in w for w in _Rb.warnings):
-        FAIL.append("sismo/SDC B: sin verificaciones de 17.10 y con aviso")
-    print(f"{'sismo: ductil / refuerzo / memoria':34} futa/fya Gr.105 D/C = {_c105['seis_futa'].ratio:.2f}  "
-          f"estiramiento D/C = {_c36['seis_stretch'].ratio:.2f}  r_c/r_s = {_c36['seis_duct_ratio'].ratio:.2f}")
-except Exception as _e_:
-    traceback.print_exc()
-    FAIL.append(f"sismo/verificaciones: {type(_e_).__name__}: {_e_}")
-
-
-try:
-    # --- ejemplo sismico: abre, tiene combinaciones E y Ωo y todas resuelven
-    from placabase.model import load_book as _lb
-    _ex = _lb("ejemplos/SIS-01_W14X90_SMF.pbase")[0]
-    _kinds = {c.kind for c in _ex.combo_list()}
-    if not (_ex.seis.enabled and {"E", "Ωo"} <= _kinds):
-        FAIL.append("ejemplo SIS-01: debe tener el diseno sismico activo y combinaciones E y Ωo")
-    _rs = [solve(_ex.with_combo(i)) for i in range(len(_ex.combos))]
-    _gi = max(range(len(_rs)), key=lambda i: _rs[i].max_ratio)
-    print(f"{'ejemplo SIS-01 (SMF, SDC D)':34} {len(_ex.combos)} comb.  gobierna {_ex.combos[_gi].name}  "
-          f"D/C = {_rs[_gi].max_ratio:.3f} ({_rs[_gi].governing.title[:40]})")
-except Exception as _e_:
-    traceback.print_exc()
-    FAIL.append(f"ejemplo SIS-01: {type(_e_).__name__}: {_e_}")
-
-
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile
-    from placabase import mesh3d
-    from placabase.rep3d import make_fem
+    from steelconpro import mesh3d
+    from steelconpro.rep3d import make_fem
     print()
     print("ANALISIS SOLIDO 3D (--3d)")
     _p3 = Project()
@@ -692,6 +461,19 @@ if "--3d" in sys.argv:
             FAIL.append("3D fusionado: no entrego zonas de soldadura")
         else:
             print(f"{'  modelo fusionado (respaldo)':34} zonas = {[z.name for z in _rf.post.zones]}")
+
+
+# ====================================================================================================
+# MODULOS DE NUDO (steelconpro/conn): operaciones, verificaciones, secciones libres, materiales e interfaz; sus pruebas estan en selftest_nodes.py (tambien se corren solas)
+# ====================================================================================================
+import selftest_nodes as _sn
+FAIL += _sn.run()
+
+# ====================================================================================================
+# OPERACIONES GENERALES (placa, pernos, soldadura, corte), API JSON, espacio de trabajo y servidor local de la aplicacion Electron
+# ====================================================================================================
+import selftest_ops as _so
+FAIL += _so.run()
 
 
 print()

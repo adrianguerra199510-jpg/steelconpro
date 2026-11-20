@@ -1,0 +1,1005 @@
+// Editor de un proyecto: barra superior, árbol (miembros / operaciones / cargas), visor 3D y resultados por operación.
+import { call, latest } from './api.js';
+import { S, go } from './state.js';
+import { UnitSet } from './units.js';
+import { h, svg, btn, iconBtn, menu, modal, toast, errorBox, confirmBox, promptBox, tabs, chip, dcBar, spinner, debounce, clear, selectInput, segmented } from './ui.js';
+import { Viewer } from './viewer.js';
+import { native } from './native.js';
+import { openOperation, OP_ICON, opColor, groupOf } from './opdialog.js';
+import { openMember, openLoads, openProject, renameRefs, reparentChildren } from './editdialogs.js';
+import { openSections, openMaterials, openTemplates } from './libraries.js';
+import { renderItems } from './forms.js';
+import { pickTypology } from './typology.js';
+
+const join = (a, b) => `${a.replace(/[\\/]+$/, '')}/${b}`;
+
+export const E = {
+  path: '', conns: [], idx: 0, res: null, stale: true, viewer: null, ui: {}, undo: [], redo: [], femView: false, sel: null, dirty: false,
+  conn() { return this.conns[this.idx]; },
+  us() { return S.us; },
+};
+window.__E = E;                                     // depuración y pruebas
+
+// ---------------------------------------------------------------------------------------------------- ciclo de vida
+export async function enter(app, params) {
+  E.abs = params.abs ? params.path : join(S.root, params.path);
+  E.rel = params.abs ? null : params.path;
+  let book;
+  try { book = await call('book_load', { path: E.abs }); } catch (e) { errorBox(e); await go('home'); return; }
+  E.conns = book.connections; E.idx = 0; E.res = null; E.stale = true; E.undo = []; E.redo = []; E.femView = false; E.sel = null; E.job = null;
+  if (book.skipped && book.skipped.length) toast(`${book.skipped.length} conexión(es) de versiones anteriores no se pudieron abrir.`, 'info', 7000);
+  if (E.rel) call('ws_touch', { root: S.root, path: E.rel }).catch(() => {});
+  applyUnits();
+  build(app);
+  await refreshAll();
+  window.addEventListener('keydown', onKey);
+}
+
+export async function leave() {
+  if (E.panel) E.panel.close('switch');
+  if (E.report) E.report.win.close();
+  window.removeEventListener('keydown', onKey);
+  save.cancel();
+  if (E.dirty) await saveNow();
+  if (E.viewer) { E.viewer.dispose(); E.viewer = null; }
+  Object.values(E.pollers || {}).forEach((t) => t && clearInterval(t));
+  return true;
+}
+
+function onKey(ev) {
+  const mod = ev.ctrlKey || ev.metaKey;
+  if (mod && ev.key.toLowerCase() === 'z' && !ev.shiftKey) { if (!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { ev.preventDefault(); undo(); } }
+  else if (mod && (ev.key.toLowerCase() === 'y' || (ev.key.toLowerCase() === 'z' && ev.shiftKey))) { if (!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { ev.preventDefault(); redo(); } }
+  else if (mod && ev.key.toLowerCase() === 's') { ev.preventDefault(); saveNow(true); }
+  else if (ev.key === 'Delete' && E.sel && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !document.querySelector('.modal-back')) deleteSelected();
+}
+
+// ---------------------------------------------------------------------------------------------------- unidades y utilidades del modelo
+function applyUnits() {
+  const c = E.conn();
+  S.us = new UnitSet(S.C, c.u_len, c.u_force, c.u_stress, c.u_moment);
+  E.us = () => S.us;
+  if (E.ui.root) { refreshAll(false); }
+}
+E.applyUnits = () => { applyUnits(); markDirty(); };
+
+E.replaceConn = (c) => { E.conns[E.idx] = c; };
+E.snap = () => { E.undo.push(JSON.stringify(E.conns)); if (E.undo.length > 60) E.undo.shift(); E.redo = []; updateUndo(); };
+E.dropSnap = () => { E.undo.pop(); updateUndo(); };
+E.refreshTree = () => renderTree();
+E.renameElement = (old, nw) => { renameRefs(E.conn().node, old, nw); renderTree(); };
+
+// Vuelve al estado anterior a la última acción (sin dejarlo para «rehacer»): se usa al cancelar una ventana de operación nueva.
+function revertSnap() {
+  if (!E.undo.length) return;
+  E.conns = JSON.parse(E.undo.pop());
+  E.idx = Math.min(E.idx, E.conns.length - 1);
+  E.sel = null;
+  applyUnits(); refreshAll(); markDirty(); updateUndo();
+}
+
+function undo() {
+  if (!E.undo.length) return;
+  E.redo.push(JSON.stringify(E.conns));
+  E.conns = JSON.parse(E.undo.pop());
+  E.idx = Math.min(E.idx, E.conns.length - 1);
+  afterRestore();
+}
+function redo() {
+  if (!E.redo.length) return;
+  E.undo.push(JSON.stringify(E.conns));
+  E.conns = JSON.parse(E.redo.pop());
+  afterRestore();
+}
+function afterRestore() { applyUnits(); E.sel = null; refreshAll(); markDirty(); updateUndo(); }
+function updateUndo() {
+  if (!E.ui.undo) return;
+  E.ui.undo.disabled = !E.undo.length; E.ui.redo.disabled = !E.redo.length;
+}
+
+// ---------------------------------------------------------------------------------------------------- cambios, guardado y recálculo
+const refreshMesh = latest(async () => {
+  const data = await call('mesh', { connection: E.conn() });
+  return data;
+});
+const runMesh = debounce(async () => {
+  if (!E.viewer || E.femView) return;
+  try {
+    const data = await refreshMesh();
+    if (!data) return;
+    E.mesh = data;
+    E.viewer.setModel(data, { keepView: true });
+    E.viewer.setDimTexts((v) => S.us.q('L', v));
+    applyLoads();
+    highlight();
+    renderNotes(data.notes || []);
+  } catch (e) { setStatus(`No se pudo dibujar el modelo: ${e.message}`, true); }
+}, 90);
+
+// el equilibrio del nudo (cargas de los extremos) se mantiene al día para dibujar las flechas; las verificaciones (D/C) SOLO se calculan con «Calcular»
+const runNodal = debounce(async () => {
+  try { E.nodal = await call('nodal', { connection: E.conn() }); } catch (e) { E.nodal = null; }
+  renderNodal(); applyLoads();
+}, 300);
+// revisión automática de la geometría (choques, cordones que no tocan, pernos fuera de pieza, piezas sueltas): se mantiene al día con cada cambio
+const runGeo = debounce(async () => {
+  const conn = E.conn();
+  try { const g = await call('geometry_check', { connection: conn }); if (conn === E.conn()) E.geo = g; } catch (e) { E.geo = { issues: [], errors: 0, warnings: 0, ok: true, failed: e.message }; }
+  renderGeo();
+}, 700);
+const verify = latest(async () => call('verify', { connection: E.conn() }));
+const runVerify = debounce(async () => {
+  setVerdict('calc'); E.calculating = true; renderResults();
+  try {
+    const r = await verify();
+    if (!r) return;
+    E.res = r; E.stale = false; E.calculating = false;
+    try { E.nodal = await call('nodal', { connection: E.conn() }); } catch (e) { E.nodal = null; }
+    renderResults(); renderNodal(); applyLoads(); renderTree(); setVerdict(); if (E.report) E.report.refresh();
+  } catch (e) { E.calculating = false; E.res = null; setVerdict('error', e.message); renderResults(e.message); }
+}, 100);
+
+function markDirty() { E.dirty = true; setStatus('Cambios sin guardar…'); save(); }
+const save = debounce(() => saveNow(), 1200);
+async function saveNow(manual) {
+  save.cancel();
+  try {
+    setStatus('Guardando…');
+    await call('book_save', { path: E.abs, connections: E.conns });
+    E.dirty = false; setStatus(manual ? 'Guardado' : 'Guardado automáticamente');
+    if (manual) toast('Proyecto guardado', 'ok', 1800);
+  } catch (e) { errorBox(e); setStatus('No se pudo guardar', true); }
+}
+
+E.changed = (opts = {}) => {
+  E.rev = (E.rev || 0) + 1;
+  markDirty();
+  E.stale = true; E.res = null; E.calculating = false;
+  if (E.femStarted || E.femDone) { E.femStarted = false; E.femDone = false; updateFemTools(); }                        // un cambio descarta los resultados: sin D/C hasta volver a calcular
+  if (E.femView) { E.femView = false; E.femMeshOn = false; if (E.ui && E.ui.fembar) clear(E.ui.fembar); }                       // la malla o los resultados mostrados ya no corresponden al modelo
+  if (opts.structure) renderTree(); else renderTree();
+  if (opts.geometry !== false) { runMesh(); E.geo = null; renderGeo(); runGeo(); }
+  runNodal();
+  renderResults();
+  setVerdict('stale');
+};
+
+E.removeOperation = async (index, { silent = false } = {}) => {
+  const r = await call('delete_operation', { connection: E.conn(), index });
+  E.replaceConn(r.connection);
+  if (!silent) { E.changed({ structure: true }); if (r.removed.length > 1) toast(`Se quitaron ${r.removed.length} operaciones que dependían de ella.`, 'info', 5000); }
+  return r.removed;
+};
+
+// ---------------------------------------------------------------------------------------------------- estructura de la pantalla
+function build(app) {
+  const ui = E.ui = {};
+  const root = h('div', { class: 'editor' });
+  ui.root = root;
+  app.append(root);
+
+  // ---- barra superior
+  ui.title = h('div', { class: 'title' }, h('b', { text: '' }), h('small', { text: '' }));
+  ui.title.style.cursor = 'pointer'; ui.title.title = 'Datos del proyecto y unidades'; ui.title.onclick = () => openProject(E);
+  ui.connTabs = h('div', { class: 'conn-tabs' });
+  ui.undo = iconBtn('undo', 'Deshacer (Ctrl+Z)', undo); ui.redo = iconBtn('redo', 'Rehacer (Ctrl+Y)', redo);
+  ui.verdict = h('span', { class: 'big-chip idle' });
+  const libBtn = btn('Bibliotecas', { icon: 'library', onClick: (e) => menu(e.currentTarget, [
+    { label: 'Secciones y Section Designer', icon: 'shapes', onClick: () => openSections(E) }, { label: 'Materiales', icon: 'database', onClick: () => openMaterials(E) },
+    { label: 'Plantillas de conexión', icon: 'copy', onClick: () => openTemplates(E) }]) });
+  const repBtn = btn('Informe', { icon: 'file-text', onClick: () => openReport() });
+  const top = h('div', { class: 'ed-top' },
+    iconBtn('arrow-left', 'Volver al inicio', () => go('home')), ui.title, h('div', { class: 'vr' }), ui.connTabs, h('span', { class: 'grow' }),
+    ui.undo, ui.redo, h('div', { class: 'vr' }), libBtn, repBtn);
+
+  // ---- panel izquierdo (árbol)
+  ui.tree = h('div', { class: 'scroll' });
+  const left = h('div', { class: 'panel left' }, ui.tree);
+
+  // ---- visor
+  ui.vhost = h('div', { class: 'viewer' });
+  ui.note = h('div', { class: 'vnote' });
+  const vtool = h('div', { class: 'vtool' },
+    h('div', { class: 'group' }, iconBtn('home', 'Vista isométrica', () => E.viewer.setView('iso')), iconBtn('crosshair', 'Ajustar a la pantalla', () => E.viewer.fit()), ui.dimBtn = iconBtn('ruler', 'Cotas', () => { const on = !E.viewer.showDims; E.viewer.setDims(on); ui.dimBtn.classList.toggle('on', on); }),
+      ui.tagBtn = iconBtn('tag', 'Etiquetas', () => { const on = !E.viewer.showLabels; E.viewer.setLabels(on); ui.tagBtn.classList.toggle('on', on); }),
+      ui.hwBtn = iconBtn('bolt', 'Mostrar placas, pernos y soldaduras', () => { const nd = E.conn().node; nd.show_hw = !nd.show_hw; ui.hwBtn.classList.toggle('on', nd.show_hw); E.changed({}); }),
+      iconBtn('download', 'Guardar imagen', async () => { const f = await native.saveFile('conexion.png', [{ name: 'Imagen PNG', extensions: ['png'] }]); if (f) { try { await call('save_png', { path: f, data: E.viewer.screenshot() }); toast('Imagen guardada', 'ok'); } catch (e) { errorBox(e); } } })));
+  ui.tagBtn.classList.add('on');
+  ui.loadSel = h('select', { title: 'Caso de carga que se dibuja', onchange: () => { E.loadCase = parseInt(ui.loadSel.value, 10) || 0; applyLoads(); } });
+  const syncLoads = () => { ui.loadBtn.classList.toggle('on', E.showLoadsOn); ui.reacBtn.classList.toggle('on', E.showReactionsOn); E.viewer.setLoadsVisible(E.showLoadsOn || E.showReactionsOn); applyLoads(); };
+  ui.loadBtn = iconBtn('zap', 'Mostrar las cargas de los miembros (no principales)', () => { E.showLoadsOn = !E.showLoadsOn; syncLoads(); });
+  ui.reacBtn = iconBtn('arrow-left', 'Mostrar las reacciones en el nudo (resultantes)', () => { E.showReactionsOn = !E.showReactionsOn; syncLoads(); });
+  ui.loadBtn.classList.add('on'); ui.reacBtn.classList.add('on'); E.showLoadsOn = true; E.showReactionsOn = true;
+  vtool.append(h('div', { class: 'group' }, ui.loadBtn, ui.reacBtn, ui.loadSel));
+  // herramientas del análisis FEM: aparecen al pulsar «Ejecutar análisis» (malla y cortes del tramo modelado) y al terminar (resultados y deformada)
+  ui.femMeshBtn = iconBtn('layers', 'Ver la malla de elementos finitos (el tramo que se modela)', () => toggleFemMesh());
+  ui.femBackBtn = iconBtn('box', 'Volver al modelo', () => backToModel());
+  ui.femGroup = h('div', { class: 'group', style: { display: 'none' } }, ui.femMeshBtn, ui.femBackBtn);
+  ui.femCase = h('select', { title: 'Caso de carga' }); ui.femField = h('select', { title: 'Resultado' }); ui.femScale = h('select', { title: 'Deformada' }); ui.femPart = h('select', { title: 'Pieza' });
+  ui.femRes = h('div', { class: 'group', style: { display: 'none' } }, ui.femCase, ui.femField, ui.femScale, ui.femPart);
+  vtool.append(ui.femGroup, ui.femRes);
+  ui.fembar = h('div', { class: 'vhud' });
+  const center = h('div', { class: 'viewer-wrap' }, ui.vhost, vtool, ui.note, ui.fembar);
+
+  // ---- panel derecho (resultados)
+  ui.rview = h('div', { class: 'rview' });
+  ui.pview = h('div', { class: 'pview hidden' });
+  ui.right = h('div', { class: 'panel right' }, ui.rview, ui.pview);
+  ui.resizer = h('div', { class: 'resizer', title: 'Arrastre para cambiar el ancho del panel' });
+  const body = h('div', { class: 'ed-body' }, left, center, ui.resizer, ui.right);
+  ui.resizer.addEventListener('pointerdown', (ev) => {
+    ui.resizer.setPointerCapture(ev.pointerId); ui.resizer.classList.add('drag');
+    const mv = (e) => { const w = Math.max(360, Math.min(900, body.getBoundingClientRect().right - e.clientX)); body.style.setProperty('--rw', `${w}px`); };
+    const up = () => { ui.resizer.classList.remove('drag'); ui.resizer.removeEventListener('pointermove', mv); ui.resizer.removeEventListener('pointerup', up); };
+    ui.resizer.addEventListener('pointermove', mv); ui.resizer.addEventListener('pointerup', up);
+  });
+
+  ui.status = h('span', { text: '' });
+  ui.units = h('span', { class: 'grow', style: { textAlign: 'right' } });
+  const bar = h('div', { class: 'statusbar' }, ui.status, ui.units);
+  root.append(top, body, bar);
+
+  E.viewer = new Viewer(ui.vhost, { onPick: (name, part) => pickPart(name, part), onContext: (name, part, e) => contextMenu(name, part, e) });
+  buildRight();
+}
+
+function setStatus(t, bad) { if (E.ui.status) { E.ui.status.textContent = t; E.ui.status.style.color = bad ? 'var(--bad)' : ''; } }
+
+function renderNotes(notes) {
+  const n = E.ui.note; if (!n) return;
+  clear(n);
+  for (const t of notes.slice(0, 3)) n.append(h('div', { class: 'warn-row', style: { marginBottom: '4px' } }, svg('alert-triangle', 15), h('span', { text: t })));
+}
+
+// ---------------------------------------------------------------------------------------------------- refresco completo
+async function refreshAll(rebuildRight = true) {
+  const c = E.conn();
+  const t = E.ui.title;
+  t.firstChild.textContent = c.name || 'Proyecto sin nombre';
+  t.lastChild.textContent = `${c.element || ''}${c.author ? ' · ' + c.author : ''}`;
+  E.ui.units.textContent = `${c.u_len} · ${c.u_force} · ${c.u_stress}`;
+  E.ui.hwBtn.classList.toggle('on', c.node.show_hw);
+  renderConnTabs(); renderTree(); updateUndo();
+  if (rebuildRight) buildRight();
+  E.stale = true; E.res = null; setVerdict('stale');
+  runMesh.flush(); runNodal.flush(); renderResults(); E.geo = null; runGeo();
+}
+
+function renderConnTabs() {
+  const box = E.ui.connTabs; clear(box);
+  E.conns.forEach((c, i) => {
+    const b = h('button', { class: `conn-tab ${i === E.idx ? 'on' : ''}`, type: 'button', onclick: () => switchConn(i), oncontextmenu: (e) => { e.preventDefault(); connMenu(i, e); } }, svg('component', 15), h('span', { text: c.element || `CN-${i + 1}` }));
+    box.append(b);
+  });
+  box.append(iconBtn('plus', 'Nueva conexión en este proyecto', async () => {
+    const pick = await pickTypology();
+    if (!pick) return;
+    E.snap();
+    const c0 = E.conn();
+    const nc = await call('connection_new', { n: E.conns.length + 1, name: c0.name, u_len: c0.u_len, u_force: c0.u_force, u_stress: c0.u_stress, u_moment: c0.u_moment, typology: pick.typology, params: pick.params });
+    E.conns.push(nc); markDirty(); switchConn(E.conns.length - 1);
+  }));
+}
+function connMenu(i, e) {
+  menu(null, [
+    { label: 'Renombrar…', icon: 'pencil', onClick: async () => { const v = await promptBox('Identificador', E.conns[i].element, { title: 'Renombrar conexión' }); if (v) { E.snap(); E.conns[i].element = v; markDirty(); refreshAll(false); } } },
+    { label: 'Duplicar', icon: 'copy', onClick: () => { E.snap(); const c = JSON.parse(JSON.stringify(E.conns[i])); c.element = `${c.element}-copia`; E.conns.splice(i + 1, 0, c); markDirty(); switchConn(i + 1); } },
+    { label: 'Eliminar', icon: 'trash', danger: true, disabled: E.conns.length < 2, onClick: async () => { if (await confirmBox(`¿Eliminar la conexión ${E.conns[i].element}?`, { danger: true, ok: 'Eliminar' })) { E.snap(); E.conns.splice(i, 1); E.idx = Math.min(E.idx, E.conns.length - 1); markDirty(); switchConn(E.idx); } } }], { x: e.clientX, y: e.clientY });
+}
+function switchConn(i) {
+  if (E.panel) E.panel.close('switch');
+  E.idx = i; E.sel = null; E.res = null; E.femView = false; applyUnits(); refreshAll();
+}
+
+// ---------------------------------------------------------------------------------------------------- árbol
+const SHORT = (k) => k.replace(/ \(.*\)$/, '');
+function opTitle(o) {
+  const K = S.C.op;
+  switch (o.kind) {
+    case K.PLATE: return `${o.name || 'Placa'} · ${o.role}`;
+    case K.ANGLE: return `${o.name || 'Ángulo'} · L${o.leg_a}×${o.leg_b}`;
+    case K.HOLE: return `Huecos en ${o.parent}`;
+    case K.WORKPLANE: return `${o.name || 'Plano'} · plano de trabajo`;
+    case K.BLOCK: return `${o.name || 'Bloque'} · bloque de concreto`;
+    case K.ALIGN: return `Alinear ${o.member}.${o.face || '—'}`;
+    case K.TRIM: return `Recorte · ${(o.targets || []).join(', ') || '—'}`;
+    case K.BOLTS: return `Pernos en ${o.parent}`;
+    case K.FILLET: return `Soldadura · ${o.weld_main || (o.targets || []).join(', ') || '—'}`;
+    case K.CUT: case K.COPE: return `Corte · ${(o.targets && o.targets.length ? o.targets : [o.member]).join(', ')}`;
+    case K.BASE: return `Placa base · ${o.member || E.conn().node.main_name}`;
+    default: return `${SHORT(o.kind)} · ${o.member}`;
+  }
+}
+function opSub(o) {
+  const K = S.C.op;
+  if (o.kind === K.WORKPLANE) return `pasa por (${S.us.fmt('L', o.wp_x, 1)}, ${S.us.fmt('L', o.wp_y, 1)}, ${S.us.fmt('L', o.wp_z, 1)}) ${S.us.label('L')}`;
+  if (o.kind === K.BLOCK) return `${S.us.fmt('L', o.blk_L, 1)} × ${S.us.fmt('L', o.blk_W, 1)} × ${S.us.fmt('L', o.blk_H, 1)} ${S.us.label('L')}`;
+  if (o.kind === K.ALIGN) return o.parent ? `a ${o.parent}${o.ref_face && o.ref_face !== 'Plano' ? ' · ' + o.ref_face : ''}` : 'sin referencia';
+  if (o.kind === K.HOLE) return `${o.rows}×${o.cols} · ${o.hole_shape.toLowerCase()}`;
+  if (o.kind === K.TRIM) return `${o.trim_mode.toLowerCase()}`;
+  if (o.kind === K.PLATE || o.kind === K.ANGLE) return `sobre ${o.parent} · ${o.face}${o.attach ? ' · ' + o.attach.toLowerCase() : ''}`;
+  if (o.kind === K.BOLTS) return `${o.rows}×${o.cols} ${o.bolt_size}" ${o.bolt_grade}`;
+  if (o.kind === K.FILLET) return `${o.weld_main && (o.weld_to || []).length ? 'a ' + o.weld_to.map((t) => t[0]).join(', ') + ' · ' : ''}${(o.weld_type || 'Filete').split(' ')[0].toLowerCase()} ${S.us.q('L', o.weld_size)}`;
+  return groupOf(o.kind);
+}
+function opRatio(i) {
+  if (!E.res || E.stale) return null;
+  let max = null;
+  for (const c of E.res.checks) {
+    const m = /^(\d+)\./.exec(c.group || '');
+    if (m && parseInt(m[1], 10) - 1 === i && !c.skip) max = Math.max(max ?? 0, c.ratio);
+  }
+  return max;
+}
+
+function renderTree() {
+  const box = E.ui.tree; if (!box) return;
+  const nd = E.conn().node;
+  const K = S.C.op;
+  const scroll = box.scrollTop;
+  clear(box);
+  const item = ({ ic, color, name, sub, sel, star, onClick, onDbl, acts, ratio, depth = 0 }) => {
+    const row = h('div', { class: `tree-item ${sel ? 'sel' : ''}`, onclick: onClick, ondblclick: onDbl },
+      color ? h('span', { class: 'dot', style: { background: color } }) : svg(ic || 'component', 16),
+      star ? h('span', { class: 'star', title: 'Miembro principal' }, svg('star', 14)) : null,
+      h('div', { class: 'grow', style: { minWidth: 0 } }, h('div', { class: 'name', text: name }), sub ? h('div', { class: 'sub', text: sub }) : null),
+      ratio != null ? dcBar(ratio) : null,
+      h('div', { class: 'acts' }, ...(acts || [])));
+    return row;
+  };
+  // ---- miembros
+  const sec = (title, ic, action) => h('div', { class: 'ph' }, svg(ic, 15), h('h3', { text: title }), action || null);
+  box.append(sec('Miembros', 'component', iconBtn('plus', 'Agregar miembro', addMember)));
+  const members = [{ name: nd.main_name, shape: nd.main_shape, main: true }, ...nd.members.map((m) => ({ name: m.name, shape: m.shape + (m.attach_to && nd.members.some((x) => x.name === m.attach_to) ? ` · llega a ${m.attach_to}` : '') }))];
+  const ml = h('div', { class: 'sect' });
+  for (const m of members) ml.append(item({ ic: 'component', name: m.name, sub: m.shape, star: m.main, sel: E.sel === `m:${m.name}`,
+    onClick: () => select(`m:${m.name}`),
+    acts: [iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); openMember(E, m.name); })] }));
+  box.append(ml);
+  // ---- operaciones
+  box.append(sec('Operaciones', 'wrench', iconBtn('plus', 'Agregar operación', (e) => addMenu(e.currentTarget))));
+  const ol = h('div', { class: 'sect' });
+  const ops = nd.operations;
+    const plateIdx = (name) => ops.findIndex((p) => (p.kind === K.PLATE || p.kind === K.ANGLE) && p.name === name);
+  const parentIndex = (o) => { const p = o.parent ? plateIdx(o.parent) : -1; return p >= 0 ? p : -1; };
+  const children = (i) => ops.map((o, j) => [o, j]).filter(([o, j]) => j !== i && parentIndex(o) === i);
+  const draw = (o, i, depth) => {
+    const node = h('div');
+    node.append(item({ ic: OP_ICON[o.kind] || 'box', color: opColor(o.kind), name: `${i + 1}. ${opTitle(o)}`, sub: opSub(o), sel: E.sel === `o:${i}`, ratio: opRatio(i),
+      onClick: () => select(`o:${i}`),
+      acts: [iconBtn('chevron-up', 'Subir (se aplica antes)', (e) => { e.stopPropagation(); moveOperation(i, -1); }), iconBtn('chevron-down', 'Bajar (se aplica después)', (e) => { e.stopPropagation(); moveOperation(i, 1); }),
+        iconBtn('pencil', 'Editar', (e) => { e.stopPropagation(); editOperation(i); }), iconBtn('trash', 'Eliminar', (e) => { e.stopPropagation(); deleteOperation(i); })] }));
+    const kids = (o.kind === K.PLATE || o.kind === K.ANGLE) ? children(i) : [];
+    if (kids.length) node.append(h('div', { class: 'tree-children' }, kids.map(([c, j]) => draw(c, j, depth + 1))));
+    return node;
+  };
+  ops.forEach((o, i) => { if (parentIndex(o) < 0) ol.append(draw(o, i, 0)); });
+  if (!ops.length) ol.append(h('p', { class: 'muted', style: { padding: '4px 10px 8px', fontSize: '12.5px' }, text: 'Aún no hay operaciones. Agregue una placa, pernos, una soldadura, un corte o una placa base.' }));
+  box.append(ol);
+  // ---- cargas
+  box.append(sec('Cargas', 'zap', iconBtn('pencil', 'Editar cargas', () => openLoads(E))));
+  const ll = h('div', { class: 'sect' });
+  if (nd.loads.length) for (const l of nd.loads) ll.append(item({ ic: 'zap', name: l.case, sub: l.member, onClick: () => openLoads(E) }));
+  else ll.append(h('p', { class: 'muted', style: { padding: '4px 10px 8px', fontSize: '12.5px' }, text: 'Sin casos de carga del nudo. Las cargas de la placa base se escriben en su operación.' }));
+  box.append(ll);
+  box.scrollTop = scroll;
+}
+
+function select(sel, open = true) {
+  E.sel = sel; renderTree(); highlight();
+  if (sel && sel.startsWith('o:')) scrollToGroup(parseInt(sel.slice(2), 10));
+  if (open && sel) openFor(sel);
+}
+function openFor(sel) {
+  if (sel.startsWith('m:')) openMember(E, sel.slice(2));
+  else if (sel.startsWith('o:')) editOperation(parseInt(sel.slice(2), 10));
+}
+function highlight() {
+  if (!E.viewer) return;
+  const nd = E.conn().node;
+  const names = [];
+  if (E.sel && E.sel.startsWith('m:')) names.push(E.sel.slice(2));
+  else if (E.sel && E.sel.startsWith('o:')) {
+    const o = nd.operations[parseInt(E.sel.slice(2), 10)];
+    if (o) {
+      const K = S.C.op;
+      if (o.kind === K.PLATE || o.kind === K.ANGLE) names.push(o.name, o.parent);
+      else if (o.kind === K.HOLE) names.push(o.parent);
+      else if (o.kind === K.TRIM) names.push(...(o.targets || []), o.parent);
+      else if (o.kind === K.BOLTS) names.push(o.parent, ...(o.targets || []));
+      else if (o.kind === K.FILLET) names.push(...(o.weld_main ? [o.weld_main, ...(o.weld_to || []).map((t) => t[0])] : (o.targets || [])));
+      else if (o.kind === K.CUT) names.push(...(o.targets || []));
+      else if (o.kind === K.COPE) names.push(...(o.targets && o.targets.length ? o.targets : [o.member]));
+      else if (o.kind === K.BASE) names.push(o.member || nd.main_name);
+      else names.push(o.member);
+    }
+  }
+  E.viewer.select(names.filter(Boolean));
+}
+function pickPart(name, part) {
+  const nd = E.conn().node, K = S.C.op;
+  if (!name) { E.sel = null; renderTree(); highlight(); return; }
+  if (name === nd.main_name || nd.members.some((m) => m.name === name)) return select(`m:${name}`);
+  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE || o.kind === K.WORKPLANE || o.kind === K.BLOCK));
+  if (oi >= 0) return select(`o:${oi}`);
+  const owner = part ? part.owner : '';
+  if (owner === 'op:base') { const bi = nd.operations.findIndex((o) => o.kind === K.BASE); if (bi >= 0) return select(`o:${bi}`); }
+  if (owner && owner.startsWith('op:')) return select(`o:${parseInt(owner.slice(3), 10)}`);
+  if (owner) { const ci = nd.operations.findIndex((o) => o.member === owner && S.C.ops.connection.includes(o.kind)); if (ci >= 0) return select(`o:${ci}`); }
+  if (part && part.kind === 'gusset') { const gi = nd.operations.findIndex((o) => o.kind === K.GUSSET || o.kind === K.GUSSET_W); if (gi >= 0) return select(`o:${gi}`); }
+  if (part && part.label) setStatus(part.label);
+}
+
+// ---------------------------------------------------------------------------------------------------- miembros y operaciones
+async function addMember() {
+  try {
+    E.snap();
+    const r = await call('new_member', { connection: E.conn() });
+    E.conn().node.members.push(r.member);
+    E.changed({ structure: true });
+    select(`m:${r.member.name}`);
+    openMember(E, r.member.name);
+  } catch (e) { errorBox(e); }
+}
+
+// clic derecho en el visor: menú del miembro, de la operación o del espacio vacío
+function opIndexOf(name, part) {
+  const nd = E.conn().node, K = S.C.op;
+  const oi = nd.operations.findIndex((o) => o.name === name && (o.kind === K.PLATE || o.kind === K.ANGLE || o.kind === K.WORKPLANE || o.kind === K.BLOCK));
+  if (oi >= 0) return oi;
+  const owner = part ? part.owner : '';
+  if (owner === 'op:base') return nd.operations.findIndex((o) => o.kind === K.BASE);
+  if (owner && owner.startsWith('op:')) return parseInt(owner.slice(3), 10);
+  if (owner) return nd.operations.findIndex((o) => o.member === owner && S.C.ops.connection.includes(o.kind));
+  if (part && part.kind === 'gusset') return nd.operations.findIndex((o) => o.kind === K.GUSSET || o.kind === K.GUSSET_W);
+  return -1;
+}
+E.contextMenu = (name, part, ev) => contextMenu(name, part, ev);
+function contextMenu(name, part, ev) {
+  const nd = E.conn().node;
+  const at = { x: ev.clientX, y: ev.clientY };
+  const items = [];
+  const isMember = name && (name === nd.main_name || nd.members.some((m) => m.name === name));
+  const oi = !isMember && name ? opIndexOf(name, part) : -1;
+  if (isMember) {
+    E.sel = `m:${name}`; renderTree(); highlight();
+    items.push({ header: name === nd.main_name ? `Miembro principal «${name}»` : `Miembro «${name}»` },
+      { label: 'Editar miembro', icon: 'pencil', onClick: () => openMember(E, name) },
+      { label: 'Agregar operación a este miembro…', icon: 'plus', onClick: () => addMenu(null, at) });
+    if (name !== nd.main_name) {
+      items.push({ label: 'Alinear una cara a…', icon: 'crosshair', onClick: () => createOperation(S.C.op.ALIGN) });
+      items.push({ label: 'Designar como miembro principal', icon: 'star', onClick: async () => {
+        try { const r = await call('designate_main', { connection: E.conn(), name }); E.snap(); E.replaceConn(r.connection); E.changed({ structure: true }); if (r.notes && r.notes.length) toast(r.notes.join(' '), 'info', 7000); } catch (e) { errorBox(e); }
+      } }, '-', { label: 'Eliminar miembro', icon: 'trash', danger: true, onClick: async () => {
+        const deps = nd.operations.filter((o) => o.member === name || o.parent === name || (o.targets || []).includes(name));
+        if (!(await confirmBox(`¿Eliminar el miembro «${name}»?`, { danger: true, ok: 'Eliminar', detail: deps.length ? `También se quitarán ${deps.length} operación(es) que lo usan.` : '' }))) return;
+        E.snap(); reparentChildren(nd, name); nd.members.splice(nd.members.findIndex((x) => x.name === name), 1);
+        for (const o of deps) { const i = nd.operations.indexOf(o); if (i >= 0) await E.removeOperation(i, { silent: true }); }
+        nd.loads = nd.loads.filter((l) => l.member !== name); E.sel = null; E.changed({ structure: true });
+      } });
+    }
+  } else if (oi >= 0) {
+    E.sel = `o:${oi}`; renderTree(); highlight();
+    items.push({ header: `Operación ${oi + 1}: ${opTitle(nd.operations[oi])}` },
+      { label: 'Editar operación', icon: 'pencil', onClick: () => editOperation(oi) },
+      { label: 'Subir (se aplica antes)', icon: 'chevron-up', disabled: oi === 0, onClick: () => moveOperation(oi, -1) },
+      { label: 'Bajar (se aplica después)', icon: 'chevron-down', disabled: oi === nd.operations.length - 1, onClick: () => moveOperation(oi, 1) },
+      { label: 'Agregar operación…', icon: 'plus', onClick: () => addMenu(null, at) }, '-',
+      { label: 'Eliminar operación', icon: 'trash', danger: true, onClick: () => deleteOperation(oi) });
+  } else {
+    items.push({ header: 'Conexión' }, { label: 'Agregar operación…', icon: 'plus', onClick: () => addMenu(null, at) }, { label: 'Agregar miembro', icon: 'component', onClick: () => addMember() }, '-',
+      { label: 'Ajustar a la pantalla', icon: 'crosshair', onClick: () => E.viewer.fit() }, { label: 'Vista isométrica', icon: 'home', onClick: () => E.viewer.setView('iso') });
+  }
+  menu(null, items, at);
+}
+
+function addMenu(anchor, at) {
+  const C = S.C;
+  const items = [];
+  for (const [title, kinds] of C.ops.groups) {
+    items.push({ header: title });
+    for (const k of kinds) items.push({ label: k, icon: OP_ICON[k] || 'box', onClick: () => createOperation(k) });
+  }
+  const m = menu(anchor, items, at || {});
+  m.classList.add('wide');
+}
+
+E.createOperation = (k) => createOperation(k);
+async function createOperation(kind) {
+  const C = S.C;
+  const nd = E.conn().node;
+  const K = C.op;
+  const params = {};
+  if (C.ops.connection.includes(kind) || kind === K.COPE || kind === K.CONT) {
+    if (!nd.members.length) { toast('Agregue primero un miembro conectado al principal.', 'info', 5000); return; }
+    const sel = E.sel && E.sel.startsWith('m:') ? E.sel.slice(2) : '';
+    const hijo = (n) => { const mm = nd.members.find((x) => x.name === n); return !!(mm && mm.attach_to && nd.members.some((x) => x.name === mm.attach_to)); };
+    params.member = nd.members.find((m) => m.name === sel)?.name || (nd.members.find((m) => !hijo(m.name)) || nd.members[0]).name;
+    if (C.ops.connection.includes(kind) && hijo(params.member)) { toast(`«${params.member}» llega a otro miembro: las conexiones de catálogo solo se arman contra el principal. Use placas, ángulos, pernos y soldaduras (operaciones generales).`, 'info', 7000); return; }
+  } else if (kind === K.BASE && nd.operations.some((o) => o.kind === K.BASE)) {
+    toast('La conexión ya tiene una placa base: edítela o elimínela para cambiarla.', 'info', 5000); return;
+  } else if (kind === K.ALIGN) {
+    const sel = E.sel && E.sel.startsWith('m:') ? E.sel.slice(2) : '';
+    if (!sel || sel === nd.main_name) { toast('Alinear una cara: haga clic derecho sobre un miembro conectado (no el principal).', 'info', 5000); return; }
+    params.member = sel; params.face = 'Extremo fin';
+  } else if (kind === K.TRIM) {
+    const sel = E.sel && E.sel.startsWith('m:') ? E.sel.slice(2) : '';
+    const m = nd.members.find((x) => x.name === sel) || nd.members[0];
+    if (!m) { toast('Agregue primero un miembro conectado para recortarlo.', 'info', 5000); return; }
+    params.targets = [m.name]; params.parent = nd.main_name; params.face = S.C.faces_i[0];
+  } else if (kind === K.BOLTS || kind === K.FILLET) {
+    const plates = nd.operations.filter((o) => o.kind === K.PLATE || o.kind === K.ANGLE);
+    const last = plates[plates.length - 1];
+    if (last && kind === K.BOLTS) { params.parent = last.name; params.targets = [last.parent]; params.pl_s = last.pl_L / 2; params.pl_u = 0; }
+    if (last && kind === K.FILLET) { params.weld_main = last.name; params.weld_to = last.parent ? [[last.parent, '']] : []; }
+  }
+  E.snap();
+  try {
+    const before = nd.operations.length;
+    const r = await call('add_operation', { connection: E.conn(), kind, params });
+    E.replaceConn(r.connection);
+    E.sel = `o:${r.index}`;
+    E.changed({ structure: true });
+    const ok = await openOperation(E, r.index, { isNew: true });
+    if (!ok) { revertSnap(); return; }
+    E.changed({ structure: true });
+    renderTree();
+  } catch (e) { E.dropSnap(); errorBox(e); }
+}
+
+async function editOperation(i) {
+  E.snap();
+  const before = JSON.stringify(E.conn());
+  await openOperation(E, i, {});
+  if (JSON.stringify(E.conn()) === before) E.dropSnap();
+  else E.changed({ structure: true });
+  renderTree();
+}
+
+// las operaciones se aplican en el orden de la lista: una posterior puede apoyarse en lo que dejó una anterior
+function moveOperation(i, d) {
+  const ops = E.conn().node.operations;
+  const j = i + d;
+  if (j < 0 || j >= ops.length) return;
+  E.snap();
+  [ops[i], ops[j]] = [ops[j], ops[i]];
+  E.sel = `o:${j}`;
+  E.changed({ structure: true });
+}
+
+async function deleteOperation(i) {
+  const nd = E.conn().node;
+  const o = nd.operations[i];
+  let deps = [];
+  if (o.kind === S.C.op.PLATE) { try { deps = (await call('dependents', { connection: E.conn(), name: o.name })).operations.map((j) => `${j + 1}. ${opTitle(nd.operations[j])}`); } catch (e) { /* sin dependientes */ } }
+  const msg = `¿Eliminar la operación «${opTitle(o)}»?`;
+  const detail = deps.length ? `También se eliminarán las operaciones que dependen de esta placa: ${deps.join(', ')}.` : '';
+  if (!(await confirmBox(msg, { danger: true, ok: 'Eliminar', detail }))) return;
+  E.snap();
+  try { await E.removeOperation(i); E.sel = null; highlight(); } catch (e) { E.dropSnap(); errorBox(e); }
+}
+function deleteSelected() {
+  if (E.sel && E.sel.startsWith('o:')) deleteOperation(parseInt(E.sel.slice(2), 10));
+}
+
+// ---------------------------------------------------------------------------------------------------- veredicto
+function setVerdict(state, msg) {
+  const v = E.ui.verdict;
+  if (!v) return;
+  const r = E.res;
+  let cls = 'idle', txt = 'Sin calcular', ic = 'circle-help';
+  if (state === 'calc') { cls = 'idle'; txt = 'Calculando…'; ic = 'loader'; }
+  else if (state === 'error') { cls = 'bad'; txt = msg || 'Error'; ic = 'circle-alert'; }
+  else if (r && !E.stale && state !== 'stale' && (!r.checks.length || !(r.max_ratio > 0))) { cls = 'idle'; txt = 'Sin verificaciones'; ic = 'circle-help'; }
+  else if (r && !E.stale && state !== 'stale') { cls = r.ok ? 'ok' : 'bad'; txt = `${r.ok ? 'CUMPLE' : 'NO CUMPLE'} · D/C máx ${r.max_ratio.toFixed(3)}`; ic = r.ok ? 'check' : 'circle-alert'; }
+  else if (r) { cls = 'stale'; txt = 'Desactualizado: calcule de nuevo'; ic = 'refresh-cw'; }
+  v.className = `big-chip ${cls}`; v.replaceChildren(svg(ic, 16), h('span', { text: txt }));
+  if (E.ui.vbadge) { E.ui.vbadge.className = `big-chip ${cls}`; E.ui.vbadge.replaceChildren(svg(ic, 16), h('span', { text: txt })); }
+  if (E.ui.pchip) { E.ui.pchip.className = `big-chip ${cls}`; E.ui.pchip.style.height = '26px'; E.ui.pchip.style.padding = '0 10px'; E.ui.pchip.style.fontSize = '12px'; E.ui.pchip.replaceChildren(h('span', { text: txt })); }
+}
+
+// ---------------------------------------------------------------------------------------------------- panel derecho
+function buildRight() {
+  const right = E.ui.rview; clear(right);
+  const hasBase = E.conn().node.operations.some((o) => o.kind === S.C.op.BASE);
+  E.ui.vbadge = h('span', { class: 'big-chip idle' });
+  const items = [
+    { id: 'res', label: 'Resultados', icon: 'check', render: () => { E.ui.resBox = h('div', { class: 'scroll', style: { padding: '0 0 12px' } }); renderResults(); return E.ui.resBox; } },
+    { id: 'nod', label: 'Nudo', icon: 'zap', render: () => { E.ui.nodBox = h('div', { class: 'scroll', style: { padding: '0 12px 12px' } }); renderNodal(); return E.ui.nodBox; } },
+    { id: 'geo', label: 'Geometría', icon: 'shapes', render: () => { E.ui.geoBox = h('div', { class: 'scroll', style: { padding: '0 0 12px' } }); renderGeo(); return E.ui.geoBox; } },
+    { id: 'mem', label: 'Memoria', icon: 'file-text', render: () => { E.ui.memBox = h('div', { class: 'scroll memory' }); renderMemory(); return E.ui.memBox; } },
+  ];
+  items.push({ id: 'fem', label: 'FEM', icon: 'cpu', render: () => { E.ui.femBox = h('div', { class: 'scroll', style: { padding: '8px 12px' } }); renderFem(); return E.ui.femBox; } });
+  const t = tabs(items, { active: E.ui.rtab && items.some((i) => i.id === E.ui.rtab) ? E.ui.rtab : 'res', cls: 'pill', onChange: (id) => { E.ui.rtab = id; } });
+  E.ui.rtabs = t;
+  const calc = btn('Calcular', { icon: 'play', kind: 'primary', onClick: () => calcular() });
+  calc.classList.add('calc', 'calc-big');
+  calc.style.cssText = 'flex:1;height:44px;font-size:15px;font-weight:700;justify-content:center;border-radius:10px;';
+  right.append(h('div', { style: { padding: '10px 12px 6px', display: 'flex', gap: '10px', alignItems: 'center' } }, E.ui.vbadge, calc), t);
+  t.style.padding = '0 8px';
+  setVerdict();
+}
+
+// ---- edicion en el panel derecho (operaciones y miembros): reemplaza las ventanas que tapaban el visor
+E.panel = null;
+E.showPanel = ({ title, icon: ic, color, body, footer, onClose }) => {
+  if (E.panel) E.panel.close('switch');
+  const ui = E.ui;
+  clear(ui.pview);
+  const chip = h('span', { class: 'big-chip idle', style: { height: '26px', padding: '0 10px', fontSize: '12px', boxShadow: 'none' } });
+  ui.pchip = chip;
+  const closeBtn = iconBtn('x', 'Cerrar (conserva los cambios)', () => api.close('close'));
+  const head = h('div', { class: 'pedit' }, color ? h('span', { class: 'dot', style: { background: color, width: '11px', height: '11px', borderRadius: '4px' } }) : svg(ic || 'wrench', 18), h('h3', { text: title }), chip, closeBtn);
+  ui.pview.append(head, h('div', { class: 'scroll pbody' }, body));
+  if (footer && footer.length) ui.pview.append(h('div', { class: 'pfoot' }, footer));
+  ui.rview.classList.add('hidden'); ui.pview.classList.remove('hidden');
+  let closed = false;
+  const api = {
+    body,
+    close(reason = 'close') {
+      if (closed) return; closed = true;
+      if (E.panel === api) E.panel = null;
+      if (reason !== 'switch') { ui.pview.classList.add('hidden'); ui.rview.classList.remove('hidden'); clear(ui.pview); ui.pchip = null; }
+      if (onClose) onClose(reason);
+    },
+  };
+  E.panel = api;
+  setVerdict();
+  return api;
+};
+
+function scrollToGroup(i) {
+  if (!E.ui.rtabs) return;
+  E.ui.rtabs.show('res');
+  const el = E.ui.resBox && E.ui.resBox.querySelector(`[data-op="${i}"]`);
+  if (el) { el.classList.remove('closed'); el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.animate([{ background: 'var(--brand-50)' }, { background: 'transparent' }], { duration: 1200 }); }
+}
+
+const GEO_CODES = { choque: 'Choque', soldadura: 'Soldadura', perno: 'Perno', suelta: 'Pieza suelta', degenerada: 'Geometría inválida' };
+function renderGeo() {
+  const g = E.geo;
+  const tab = E.ui.rtabs && E.ui.rtabs.querySelector('.tab[data-id="geo"]');
+  if (tab) {                                                          // contador en la pestaña
+    let b = tab.querySelector('.geo-badge');
+    if (!b) { b = h('span', { class: 'geo-badge', style: { marginLeft: '6px', padding: '0 6px', borderRadius: '8px', fontSize: '11px', fontWeight: '600' } }); tab.append(b); }
+    const n = g ? g.errors + g.warnings : 0;
+    b.textContent = n ? String(n) : '';
+    b.style.display = n ? '' : 'none';
+    b.style.background = g && g.errors ? 'var(--bad-bg)' : 'var(--warn-bg)';
+    b.style.color = g && g.errors ? 'var(--bad)' : 'var(--warn)';
+  }
+  const box = E.ui.geoBox; if (!box) return;
+  clear(box);
+  box.append(h('p', { class: 'hint-text', style: { margin: '8px 14px' }, text: 'Revisión automática del modelo 3D: piezas que se cruzan, cordones que no tocan a sus dos piezas, pernos fuera de pieza o con agarre incompleto, distancias mínimas de pernos y piezas sin unión. No depende de las cargas.' }));
+  if (!g) { box.append(h('div', { style: { padding: '12px 16px' } }, spinner('Revisando la geometría…'))); return; }
+  if (g.failed) { box.append(h('div', { class: 'warns' }, h('div', { class: 'warn-row fatal' }, svg('circle-alert', 15), h('span', { text: `No se pudo revisar la geometría: ${g.failed}` })))); return; }
+  box.append(h('div', { class: 'kpis', style: { margin: '6px 0 12px' } },
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Errores' }), h('div', { class: 'v', style: { color: g.errors ? 'var(--bad)' : '' }, text: String(g.errors) })),
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Avisos' }), h('div', { class: 'v', style: { color: g.warnings ? 'var(--warn)' : '' }, text: String(g.warnings) })),
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Estado' }), h('div', { class: 'v', style: { fontSize: '12px' }, text: g.errors ? 'Corregir' : g.warnings ? 'Revisar avisos' : 'Sin problemas' }))));
+  if (!g.issues.length) { box.append(h('div', { class: 'muted', style: { padding: '6px 14px', fontSize: '13px' }, text: 'No se encontraron problemas de geometría.' })); }
+  const list = h('div', { class: 'warns' });
+  for (const e of g.issues) {
+    const row = h('div', { class: `warn-row ${e.sev === 'error' ? 'fatal' : ''}`, style: { cursor: 'pointer' }, title: 'Clic: resaltar las piezas en el modelo' },
+      svg(e.sev === 'error' ? 'circle-alert' : 'alert-triangle', 15),
+      h('span', null, h('b', { text: `${GEO_CODES[e.code] || e.code}: ` }), document.createTextNode(e.text)));
+    row.addEventListener('click', () => {
+      for (const r of list.children) r.style.outline = '';
+      row.style.outline = '2px solid currentColor';
+      if (E.viewer) { E.viewer.select(e.parts || []); if (e.at && E.viewer.focusOn) E.viewer.focusOn(e.at); }
+    });
+    list.append(row);
+  }
+  box.append(list);
+  if (g.notes && g.notes.length) box.append(h('p', { class: 'hint-text', style: { margin: '10px 14px 4px' }, text: 'Notas del armado del modelo:' }), h('div', { class: 'warns' }, g.notes.map((t) => h('div', { class: 'warn-row' }, svg('info', 15), h('span', { text: t })))));
+}
+
+function renderResults(err) { if (E.ui.resBox) fillResults(E.ui.resBox, err); renderMemory(); if (E.report) E.report.refresh(); }
+
+function fillResults(box, err, { forceOpen = false, pick = true } = {}) {
+  clear(box);
+  const r = E.res;
+  const us = S.us;
+  if (err) { box.append(h('div', { class: 'warns' }, h('div', { class: 'warn-row fatal' }, svg('circle-alert', 15), h('span', { text: err })))); return; }
+  if (!r) { box.append(E.calculating ? h('div', { style: { padding: '16px' } }, spinner('Calculando…')) : h('div', { class: 'muted', style: { padding: '18px 14px', fontSize: '13px' }, text: 'Todavía no se ha calculado. Presione «Calcular» para ver las verificaciones y los D/C de cada operación.' })); return; }
+  box.append(h('div', { class: 'kpis', style: { margin: '6px 0 12px' } },
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'D/C máximo' }), h('div', { class: 'v', text: r.max_ratio.toFixed(3) })),
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Gobierna' }), h('div', { class: 'v', style: { fontSize: '12px' }, text: r.governing || '—' })),
+    h('div', { class: 'kpi' }, h('div', { class: 'k', text: 'Verificaciones' }), h('div', { class: 'v', text: String(r.checks.filter((c) => !c.skip).length) }))));
+  if (r.geometry && r.geometry.errors) {
+    const gw = h('div', { class: 'warn-row fatal', style: { cursor: 'pointer' } }, svg('circle-alert', 15), h('span', { text: `La geometría del modelo tiene ${r.geometry.errors} error${r.geometry.errors > 1 ? 'es' : ''} (piezas que se cruzan, cordones o pernos fuera de sitio): revíselos en la pestaña «Geometría»; las verificaciones suponen un modelo coherente.` }));
+    gw.addEventListener('click', () => E.ui.rtabs && E.ui.rtabs.show('geo'));
+    box.append(h('div', { class: 'warns' }, gw));
+  }
+  if (r.warnings && r.warnings.length) box.append(h('div', { class: 'warns' }, r.warnings.map((w) => h('div', { class: `warn-row ${/^(ERROR|FATAL)/i.test(w) ? 'fatal' : ''}` }, svg('alert-triangle', 15), h('span', { text: w })))));
+  // ---- por operación
+  const groups = new Map();
+  for (const c of r.checks) { const g = c.group || 'Otras verificaciones'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(c); }
+  const nd = E.conn().node;
+  const ordered = [...groups].sort((a, b) => {
+    const ia = /^(\d+)\./.exec(a[0]), ib = /^(\d+)\./.exec(b[0]);
+    return (ia ? parseInt(ia[1], 10) : 1e9) - (ib ? parseInt(ib[1], 10) : 1e9);
+  });
+  for (const [g, list] of ordered) {
+    const m = /^(\d+)\./.exec(g);
+    const oi = m ? parseInt(m[1], 10) - 1 : -1;
+    const o = oi >= 0 ? nd.operations[oi] : null;
+    const evaluated = list.filter((c) => !c.skip);
+    const max = evaluated.length ? Math.max(...evaluated.map((c) => c.ratio)) : null;
+    const ok = max == null || max <= 1 + 1e-9;
+    const gh = h('div', { class: 'gh', onclick: () => { grp.classList.toggle('closed'); if (pick && oi >= 0) select(`o:${oi}`); } },
+      o ? h('span', { class: 'dot', style: { background: opColor(o.kind), width: '9px', height: '9px', borderRadius: '3px', flex: 'none' } }) : svg('check', 15),
+      h('span', { class: 'name', text: g }), max != null ? dcBar(max) : chip('sin evaluar', ''), svg('chevron-down', 14));
+    const gb = h('div', { class: 'gb' }, list.map((c) => h('div', { class: `chk ${c.skip ? 'na' : ''}` },
+      h('div', { class: 't', text: c.title }), c.ref ? h('div', { class: 'r', text: c.ref }) : null,
+      c.skip ? h('div', { class: 'v', text: c.note || 'No evaluado' }) : h('div', { class: 'v', text: `${fmt(c.demand)} ${c.unit || ''} ≤ ${fmt(c.capacity)} ${c.unit || ''}` }),
+      h('div', { class: 'dcw' }, dcBar(c.ratio, c.skip)))));
+    const grp = h('div', { class: `res-group ${ok || forceOpen ? (forceOpen ? '' : 'closed') : ''}`, dataset: { op: String(oi) } }, gh, gb);
+    box.append(grp);
+  }
+  if (r.combos && r.combos.length > 1) box.append(combosTable(r));
+  if (!r.checks.length) box.append(h('p', { class: 'muted', style: { padding: '12px 16px' }, text: 'Todavía no hay verificaciones: agregue operaciones y cargas.' }));
+}
+function fmt(v) { if (v == null) return '—'; const a = Math.abs(v); return Number(v).toLocaleString('es', { maximumFractionDigits: a >= 100 ? 1 : a >= 1 ? 2 : 3 }); }
+
+function combosTable(r) {
+  const tb = h('table', { class: 't compact' }, h('thead', null, h('tr', null, h('th', { text: 'Combinación' }), h('th', { class: 'num', text: 'D/C' }))),
+    h('tbody', null, r.combos.map((row, i) => h('tr', { class: i === r.combo_gov ? 'sel' : '' }, h('td', { text: Array.isArray(row) ? row[0] : (row.name ?? String(i + 1)) }), h('td', { class: 'num', text: Array.isArray(row) ? Number(row[row.length - 1]).toFixed(3) : Number(row.ratio ?? row.dc ?? 0).toFixed(3) })))));
+  return h('div', { class: 'res-group', style: { marginTop: '10px' } }, h('div', { class: 'gh' }, svg('list', 15), h('span', { class: 'name', text: 'Combinaciones de carga' })), h('div', { class: 'gb' }, tb));
+}
+
+const FORCE_COL = { member: '#d62728', ext: '#c0392b', main: '#d62728', reaction: '#1e8449', base: '#e8731a' };
+function applyLoads() {
+  const v = E.viewer; if (!v) return;
+  const a = E.nodal, us = S.us, sel = E.ui.loadSel;
+  if (sel) {
+    const n = a ? a.cases.length : 0;
+    if (sel.options.length !== n) { sel.replaceChildren(...(a ? a.cases : []).map((c, i) => h('option', { value: String(i), text: c.case }))); }
+    E.loadCase = Math.min(E.loadCase || 0, Math.max(n - 1, 0)); sel.value = String(E.loadCase);
+    sel.style.display = n && (E.showLoadsOn || E.showReactionsOn) ? '' : 'none';
+  }
+  if (!a || !a.cases.length || E.femView) { v.setLoads([]); return; }
+  const c = a.cases[Math.min(E.loadCase || 0, a.cases.length - 1)];
+  const nrm = (x) => Math.hypot(x[0], x[1], x[2]);
+  v.setLoads(c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ pos: d.pos, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
+    textF: nrm(d.F) > 1e-9 ? `${d.name}: ${us.q('F', nrm(d.F), 2)}` : '', textM: nrm(d.M) > 1e-9 ? `${d.name}: ${us.q('M', nrm(d.M), 1)}` : '' })));
+}
+
+function renderNodal() {
+  const box = E.ui.nodBox; if (!box) return;
+  clear(box);
+  const nd = E.conn().node, us = S.us, a = E.nodal;
+  box.append(h('p', { class: 'hint-text', style: { margin: '8px 0' }, text: 'Equilibrio del nudo por caso de carga: acciones de los miembros sobre el nudo (ejes globales, momentos respecto del cruce de ejes) y reacción del miembro principal por equilibrio.' }),
+    btn('Editar cargas', { icon: 'pencil', onClick: () => openLoads(E) }));
+  if (!a || !a.cases.length) { box.append(h('p', { class: 'muted', style: { padding: '10px 2px' }, text: 'Sin casos de carga.' })); return; }
+  const f = (v) => us.fmt('F', v, 2), m = (v) => us.fmt('M', v, 1);
+  for (const c of a.cases) {
+    const rows = c.rows.map((r) => h('tr', { class: r.given ? '' : 'sel' }, h('td', { text: r.member }), ...r.F.map((x) => h('td', { class: 'num', text: f(x) })), ...r.M.map((x) => h('td', { class: 'num', text: m(x) }))));
+    const tb = h('table', { class: 't compact' }, h('thead', null, h('tr', null, h('th', { text: 'Acción sobre el nudo' }), ...['Fx', 'Fy', 'Fz'].map((k) => h('th', { class: 'num', text: `${k} (${us.label('F')})` })), ...['Mx', 'My', 'Mz'].map((k) => h('th', { class: 'num', text: `${k} (${us.label('M')})` })))),
+      h('tbody', null, rows, h('tr', null, h('td', { text: 'Σ (con la reacción)', style: { fontWeight: 650 } }), ...[0, 1, 2].map(() => h('td', { class: 'num', text: '0' })), ...[0, 1, 2].map(() => h('td', { class: 'num', text: '0' })))));
+    const ml = c.main_local;
+    const info = h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '6px' } },
+      `Reacción de «${nd.main_name}» (lado ${c.side > 0 ? '+' : '−'}, ejes locales): N = ${f(ml.N)}, Vy = ${f(ml.Vy)}, Vz = ${f(ml.Vz)} ${us.label('F')}; T = ${m(ml.T)}, My = ${m(ml.My)}, Mz = ${m(ml.Mz)} ${us.label('M')}.`);
+    const base = c.base ? h('div', { style: { marginTop: '4px', fontSize: '12.5px', fontWeight: 600 } }, `Placa base: Pu = ${f(c.base.Pu)} ${us.label('F')}, Mux = ${m(c.base.Mux)}, Muy = ${m(c.base.Muy)} ${us.label('M')}, Vux = ${f(c.base.Vux)}, Vuy = ${f(c.base.Vuy)} ${us.label('F')}`) : null;
+    box.append(h('div', { class: 'card-sec', style: { marginTop: '10px' } }, h('h4', { text: c.case }), h('div', { style: { overflow: 'auto' } }, tb), info, base));
+  }
+}
+
+function renderMemory() {
+  const box = E.ui.memBox; if (!box) return;
+  const r = E.res;
+  box.innerHTML = r && r.memory ? r.memory : '';
+  if (!r || !r.memory) box.append(h('p', { class: 'muted', style: { padding: '16px' }, text: 'La memoria de cálculo aparece cuando hay verificaciones.' }));
+}
+
+// ---------------------------------------------------------------------------------------------------- análisis FEM (un solo modelo: nudo + placa base)
+// El análisis completo se lanza con «Calcular»; la pestaña FEM solo configura, malla y muestra la malla en el visor.
+function nodeFemCfg() {
+  return { title: 'Modelo FEM (miembros, placas, pernos, soldaduras y placa base)',
+    desc: 'Un solo modelo de PLACAS (cascarones sobre la superficie media de cada pieza, como IDEA StatiCa), mallado con Gmsh. Cada miembro tiene el largo con que se dibuja (lo fija el cálculo). '
+      + 'Con placa base, el modelo incluye la placa y sus rigidizadores; el concreto no se malla (apoyo elástico solo-compresión y anclajes como resortes). Las placas que apoyan contra otra se unen en su superficie media y los agujeros de los pernos se abren en cada placa. '
+      + 'Por ahora solo se genera la malla.',
+    start: (st) => call('fem_node_start', { connection: E.conn(), force: !!(st && st.force) }), scene: (st) => call('fem_node_scene', { connection: E.conn(), case: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
+    cases: () => (E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : []), caseLabel: 'Caso de carga', config: femConfig };
+}
+function renderFem() {
+  const box = E.ui.femBox; if (!box) return;
+  clear(box);
+  box.append(femSection(nodeFemCfg()));
+}
+const setFemStatus = (t) => { if (E.ui.femStatus) E.ui.femStatus.textContent = t; };
+function syncFemButtons() {
+  if (E.ui.femStop) E.ui.femStop.disabled = !E.femRunning;
+  if (E.ui.femMeshGo) E.ui.femMeshGo.disabled = !!E.femRunning;
+}
+// opciones del análisis FEM del nudo (se guardan con la conexión: conn.fea)
+function femConfig() {
+  const C = S.C; const F = C.fea;
+  const num = (label, path, uk, lo, hi, help) => ({ path, label, type: 'num', uk, lo, hi, help });
+  const ctx = { us: E.us(), get: () => E.conn().fea, onChange: () => { E.changed({ geometry: false }); }, hide: () => false };
+  const g1 = renderItems([
+    { path: 'mesh3d_mode', label: 'Calidad de la malla', type: 'combo', items: F.mesh_modes },
+    num('Tamaño de elemento manual (0 = automático)', 'mesh3d', 'L', 0, 10, 'Tamaño máximo en las placas; los miembros usan 1.6 veces este valor.'),
+    num('Tamaño de malla en las soldaduras (0 = automático)', 'weld_mesh', 'L', 0, 2),
+    { path: 'contacts', label: 'Contacto entre piezas (superficies que pueden separarse)', type: 'check', wide: true, help: 'Si se desactiva, las piezas quedan unidas donde se tocan: más estable pero menos realista.' },
+    { path: 'plastic', label: 'Acero elasto-plástico (límite φ·Fy)', type: 'check', wide: true },
+    num('Deformación plástica máxima admitida (%)', 'plastic_limit', '-', 0.1, 20),
+    { path: 'weld_model', label: 'Modelo de las soldaduras', type: 'combo', items: F.weld_models, wide: true },
+    { path: 'weld_criterion', label: 'Criterio de las soldaduras', type: 'combo', items: F.weld_criteria, wide: true },
+    num('Deformación plástica de la garganta con D/C = 1 (%)', 'weld_plastic_limit', '-', 1, 20),
+    num('Factor para el D/C pico de la soldadura', 'weld_peak_factor', '-', 1, 3)], ctx, { cols: 2 });
+  return h('details', { class: 'card-sec', style: { marginTop: '8px' } }, h('summary', { style: { cursor: 'pointer', fontWeight: 700 }, text: 'Configuración del análisis FEM' }), h('div', { style: { height: '8px' } }), g1);
+}
+// malla de elementos finitos en el visor (sin resolver): es la del modelo único del análisis (nudo + placa base si la hay)
+async function waitJob(r, status, msg) {
+  for (;;) {
+    const j = await call('job_status', { job: r.job });
+    status.textContent = j.message || msg;
+    if (j.done) { if (j.state !== 'done') throw new Error(j.error || 'No se pudo generar la malla.'); return; }
+    await new Promise((ok) => setTimeout(ok, 800));
+  }
+}
+async function showMeshAll(status) {
+  const nst = (E.fems && E.fems.node) || { combo: '0' };
+  const ncase = parseInt(nst.combo, 10) || 0;
+  try {
+    status.textContent = 'Generando la malla…';
+    const r = await call('fem_mesh_start', { connection: E.conn(), case: ncase, force: false });
+    await waitJob(r, status, 'Mallando…');
+    const d = await call('fem_mesh_scene', { connection: E.conn(), case: ncase, part: 'all' });
+    const keep = !!E.femView;
+    E.femView = true; E.femMeshOn = true;
+    E.viewer.setModel(d, { keepView: keep });
+    E.viewer.setLoads([]);
+    clear(E.ui.fembar);
+    status.textContent = `Malla: ${d.mesh.nodes.toLocaleString('es')} nodos · ${d.mesh.elements.toLocaleString('es')} elementos de placa`;
+    setStatus(status.textContent);
+  } catch (e) { status.textContent = ''; errorBox(e); }
+}
+const field2 = (l, c) => h('div', { class: 'field' }, h('span', { class: 'lbl', text: l }), c);
+
+function femSection(cfg) {
+  const kind = 'node';
+  E.fems = E.fems || {}; E.jobs = E.jobs || {};
+  E.fems[kind] = E.fems[kind] || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  E.femCfgs = E.femCfgs || {}; E.femCfgs[kind] = cfg;
+  const status = h('div', { class: 'muted', style: { fontSize: '12.5px', whiteSpace: 'pre-line' } });
+  E.ui.femStatus = status;
+  const meshGo = btn('Generar malla y ver en el visor', { icon: 'layers', kind: 'primary', onClick: async () => {
+    E.femStarted = true; E.femKind = E.femKind || 'node'; updateFemTools();
+    await showMeshAll(status); updateFemTools();
+  } });
+  const stop = btn('Cancelar el análisis', { icon: 'x', disabled: true, onClick: () => call('job_cancel', { job: E.jobs[kind] }) });
+  E.ui.femMeshGo = meshGo; E.ui.femStop = stop;
+  syncFemButtons();
+  const card = h('div', { class: 'card-sec' }, h('h4', { text: cfg.title }), h('p', { class: 'hint-text', text: cfg.desc }),
+    h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: 'Por ahora solo se genera la malla: aquí se genera y se ve en el visor, y el botón de la malla queda en la barra superior del visor.' }),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, meshGo), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null);
+  if (E.femRunning) pollJob(kind, cfg);
+  return card;
+}
+
+// «Calcular»: verificaciones + análisis FEM del modelo único (en segundo plano; los resultados llegan a la barra del visor)
+async function startFem() {
+  if (E.femRunning) return;
+  const cfg = nodeFemCfg();
+  E.femCfgs = E.femCfgs || {}; E.femCfgs.node = cfg; E.jobs = E.jobs || {}; E.fems = E.fems || {};
+  E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  try {
+    E.femStarted = true; E.femDone = false; E.femKind = 'node'; updateFemTools();
+    const r = await cfg.start({});
+    E.jobs.node = r.job; E.femRunning = true; E.femRev = E.rev || 0; syncFemButtons();
+    pollJob('node', cfg);
+  } catch (e) { E.femRunning = false; syncFemButtons(); errorBox(e); }
+}
+// Por ahora el análisis FEM no se lanza con «Calcular» (solo se malla desde la pestaña FEM); `startFem` queda listo para activarlo.
+function calcular() { runVerify.flush(); }
+
+function pollJob(kind, cfg) {
+  E.pollers = E.pollers || {};
+  if (E.pollers[kind]) clearInterval(E.pollers[kind]);
+  E.femRunning = true; syncFemButtons();
+  const tick = async () => {
+    try {
+      const j = await call('job_status', { job: E.jobs[kind] });
+      const msg = j.message || (j.done ? '' : 'Trabajando…');
+      setFemStatus(msg); if (!j.done) setStatus('FEM: ' + msg.split('\n').pop());
+      if (j.done) {
+        clearInterval(E.pollers[kind]); E.pollers[kind] = null; E.femRunning = false; syncFemButtons();
+        const fresh = (E.femRev || 0) === (E.rev || 0);                          // si el modelo cambió mientras corría, los resultados ya no valen
+        if (j.state === 'done' && fresh) { setFemStatus('Análisis terminado.'); toast('Análisis FEM terminado', 'ok'); E.jobs[kind] = null; E.femDone = true; E.femKind = 'node'; updateFemTools(); runVerify.flush(); showFem(kind, cfg); }
+        else if (j.state === 'done') { setFemStatus('El modelo cambió durante el análisis: vuelva a calcular.'); E.jobs[kind] = null; }
+        else { setFemStatus(j.state === 'cancelled' ? 'Cancelado.' : `Error: ${j.error}`); if (j.state !== 'cancelled') errorBox(new Error(j.error)); E.jobs[kind] = null; }
+      }
+    } catch (e) { clearInterval(E.pollers[kind]); E.pollers[kind] = null; E.femRunning = false; syncFemButtons(); errorBox(e); }
+  };
+  E.pollers[kind] = setInterval(tick, 1000); tick();
+}
+
+async function showFem(kind, cfg) {
+  const st = E.fems[kind];
+  try {
+    const d = await cfg.scene(st);
+    const keep = !!E.femView;                                                  // al entrar en la vista de resultados se encuadra; al cambiar de campo se conserva la cámara
+    E.femView = true;
+    E.viewer.setModel(d, { keepView: keep });
+    E.viewer.setLoads([]);
+    clear(E.ui.fembar);
+    if (d.cbar) E.ui.fembar.append(colorbar(d.cbar));
+    if (d.parts_list) st.parts = d.parts_list;
+    if (d.fields) st.fields = d.fields;
+    updateFemTools();
+    if (d.summary) setStatus(`FEM: ${d.summary.nodes.toLocaleString('es')} nodos · |U|máx = ${S.us.q('L', d.summary.umax, 3)} · von Mises máx = ${S.us.q('S', d.summary.vmmax, 1)}`);
+    if (d.message) toast(Array.isArray(d.message) ? d.message[0] : String(d.message), 'info');
+  } catch (e) { errorBox(e); }
+}
+// herramientas FEM de la barra superior del visor
+function updateFemTools() {
+  const ui = E.ui; if (!ui || !ui.femGroup) return;
+  ui.femGroup.style.display = E.femStarted ? '' : 'none';
+  ui.femRes.style.display = E.femDone ? '' : 'none';
+  ui.femMeshBtn.title = 'Ver la malla de elementos finitos del modelo completo';
+  if (!E.femDone) return;
+  E.fems = E.fems || {};
+  const st = E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  const fill = (sel, opts, value, onch) => { sel.replaceChildren(...opts.map((o) => h('option', { value: o.value, text: o.label }))); sel.value = String(value); sel.onchange = () => onch(sel.value); };
+  const cfg = E.femCfgs.node;
+  const cases = cfg.cases();
+  const fields = st.fields.length ? st.fields : [{ id: 'vm', label: 'Esfuerzo de von Mises' }, { id: 'u', label: 'Desplazamiento |U|' }, { id: 'uz', label: 'Desplazamiento vertical' }];
+  const parts = [{ id: 'all', label: 'Todo el conjunto' }, ...st.parts.filter((p) => p.id !== 'all')];
+  const show = () => showFem('node', cfg);
+  fill(ui.femCase, cases, st.combo, (v) => { st.combo = v; show(); });
+  fill(ui.femField, fields.map((f) => ({ value: f.id, label: f.label })), st.field, (v) => { st.field = v; show(); });
+  fill(ui.femScale, [['0', 'Sin deformar'], ['10', 'Deformada ×10'], ['50', 'Deformada ×50'], ['200', 'Deformada ×200'], ['1000', 'Deformada ×1000']].map(([value, label]) => ({ value, label })), String(st.scale), (v) => { st.scale = parseFloat(v); show(); });
+  fill(ui.femPart, parts.map((p) => ({ value: p.id, label: p.label })), st.part, (v) => { st.part = v; show(); });
+}
+async function toggleFemMesh() {
+  if (E.femView && E.femMeshOn) { E.femMeshOn = false; backToModel(); return; }
+  await showMeshAll({ textContent: '' });
+}
+function backToModel() { E.femView = false; E.femMeshOn = false; clear(E.ui.fembar); runMesh.flush(); applyLoads(); }
+
+function colorbar(cb) {
+  const cv = h('canvas', { width: 14, height: 140, style: { borderRadius: '4px', border: '1px solid var(--border)' } });
+  const g = cv.getContext('2d'); const n = cb.colors.length;
+  for (let i = 0; i < n; i++) { const c = cb.colors[n - 1 - i]; g.fillStyle = `rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})`; g.fillRect(0, (i * 140) / n, 14, 140 / n + 1); }
+  return h('div', { class: 'card-sec', style: { display: 'flex', gap: '8px', padding: '8px 10px', alignItems: 'stretch' } }, cv,
+    h('div', { style: { display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: '11.5px' } }, h('b', { text: cb.title }), h('span', { text: fmt(cb.vmax) }), h('span', { text: fmt((cb.vmax + cb.vmin) / 2) }), h('span', { text: fmt(cb.vmin) })));
+}
+
+// ---------------------------------------------------------------------------------------------------- informe (ventana flotante y movible)
+function openReport() {
+  if (E.report) { E.report.win.close(); return; }
+  const box = h('div', { class: 'scroll', style: { padding: '4px 14px 14px' } });
+  const mem = h('div', { class: 'memory', style: { padding: '4px 18px 18px', overflow: 'auto', flex: 1 } });
+  const nod = h('div', { class: 'scroll', style: { padding: '4px 14px 14px' } });
+  const t = tabs([
+    { id: 'res', label: 'Resultados por operación', icon: 'check', render: () => { fillResults(box, null, { forceOpen: true, pick: false }); return box; } },
+    { id: 'mem', label: 'Memoria de cálculo (fórmulas)', icon: 'file-text', render: () => { mem.innerHTML = E.res && E.res.memory ? E.res.memory : '<p class="muted" style="padding:14px">Sin memoria: calcule primero.</p>'; return mem; } },
+    { id: 'nod', label: 'Análisis nodal', icon: 'zap', render: () => { const keep = E.ui.nodBox; E.ui.nodBox = nod; renderNodal(); E.ui.nodBox = keep; return nod; } },
+  ], { cls: 'pill' });
+  t.style.flex = '1'; t.style.minHeight = '0';
+  const body = h('div', { class: 'report-dock' }, t);
+  const win = modal({ title: `Informe de cálculo — ${E.conn().name || E.conn().element}`, icon: 'file-text', width: 880, floating: true, pos: { x: Math.max(20, innerWidth - 920), y: 64 }, body,
+    footer: [btn('PDF…', { icon: 'file-down', onClick: () => exportReport('pdf') }), btn('Word…', { icon: 'file-down', onClick: () => exportReport('docx') }), btn('STEP…', { icon: 'box', onClick: exportStep }), h('span', { class: 'grow' }),
+      btn('Cerrar', { onClick: () => win.close() })],
+    onClose: () => { E.report = null; } });
+  win.el.style.height = '70vh';
+  win.body.style.padding = '0'; win.body.style.display = 'flex';
+  E.report = { win, refresh: () => { if (!E.report) return; const cur = t.current(); t.show(cur); } };
+}
+
+// ---------------------------------------------------------------------------------------------------- informes
+
+async function exportReport(format) {
+  const c = E.conn();
+  const f = await native.saveFile(`${c.name || 'conexion'}_${c.element || ''}.${format}`, [{ name: format === 'pdf' ? 'PDF' : 'Word', extensions: [format] }]);
+  if (!f) return;
+  const t = toast('Generando informe…', 'info', 60000);
+  try { await call('report', { connection: c, path: f, format }); t.remove(); toast('Informe generado', 'ok'); native.showItem(f); } catch (e) { t.remove(); errorBox(e); }
+}
+async function exportStep() {
+  const f = await native.saveFile(`${E.conn().element || 'conexion'}.step`, [{ name: 'STEP', extensions: ['step', 'stp'] }]);
+  if (!f) return;
+  try { await call('export_step', { connection: E.conn(), path: f }); toast('Modelo STEP exportado', 'ok'); } catch (e) { errorBox(e); }
+}
