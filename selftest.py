@@ -693,6 +693,28 @@ except Exception as _e_:
     FAIL.append(f"sismo/placa base: {type(_e_).__name__}: {_e_}")
 
 
+try:
+    # --- API del motor (lo que usa la interfaz Electron)
+    from steelconpro import api as _api
+    from dataclasses import asdict as _ad
+    _q = _sis_node()
+    _r = _api.seismic_generate({"connection": _api._dump(_q)})
+    _qq = _api._prj(_r["connection"])
+    if _r.get("count") != 11 or len([k for k in _qq.node.case_kind.values() if k in ("G", "E", "Ωo")]) != 11:
+        FAIL.append(f"sismo/API: seismic_generate debe devolver la conexion con 11 casos generados ({_r.get('count')})")
+    _i = _api.seismic_info({"connection": _api._dump(_qq)})
+    if not (_i["limits"]["Mx"] > 0 and _i["omega0"] and _i["systems"] and _i["sdc"] and _i["member"]):
+        FAIL.append("sismo/API: seismic_info debe dar los limites por capacidad, Ωo por sistema, sistemas y SDC")
+    _c = _api.constants()
+    if "seismic" not in _c or any(it.get("path") == "conc.seismic" for t in _c["schema_baseplate"]
+                                   for g in t.get("groups", []) for it in g.get("items", [])):
+        FAIL.append("sismo/API: constants() con datos sismicos y sin la casilla vieja conc.seismic en el esquema")
+    print(f"{'sismo: API':34} seismic_generate -> {_r['count']} casos; limite 1.1RyMp = {_i['limits']['Mx']:.0f} kip·in ({_i['member']})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/API: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

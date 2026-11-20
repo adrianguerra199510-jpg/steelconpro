@@ -87,7 +87,14 @@ def constants(_=None) -> dict:
         "roles": SP.PLATE_ROLES, "openings": SP.OPENINGS, "weld_types": SP.WELD_TYPES, "weld_sides": SP.WELD_SIDES, "base_colwelds": SP.BASE_COLWELD, "weld_modes": SP.WELD_MODES, "hole_shapes": SP.HOLE_SHAPES,
         "trim_modes": SP.TRIM_MODES, "tab_modes": SP.TAB_MODES, "beam_conns": SP.BEAM_CONNS, "faces_angle": SP.FACES_ANGLE, "faces_block": SP.FACES_BLOCK,
         "fea": {"mesh_modes": MODEL.MESH3D_MODES, "weld_models": MODEL.WELD_MODELS, "weld_criteria": MODEL.WELD_CRITERIA},
+        "seismic": {"systems": list(MODEL.SEIS_SYSTEMS), "sdc": list(MODEL.SDC_LIST), "omega0": _omega0(),
+                    "service_kinds": ["D", "L", "S", "QEx", "QEy"], "combo_kinds": list(MODEL.COMBO_KINDS)},
     }
+
+
+def _omega0():
+    from . import seismic as SE
+    return dict(SE.OMEGA0_DEFAULT)
 
 
 # ================================================================================================== libros (archivos .scp)
@@ -1167,4 +1174,30 @@ def tpl_delete(args) -> dict:
 
 
 # ================================================================================================== registro de funciones
+
+# ================================================================================================== diseno sismico (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
+def seismic_generate(args) -> dict:
+    """Genera en el nudo los casos factorizados de ASCE 7-05 desde los casos marcados como servicio (D, L, S, QEx, QEy).  Devuelve la conexion y cuantos genero."""
+    from . import seismic as SE
+    p = _prj(args["connection"])
+    n = SE.generate_node_cases(p)
+    return {"connection": _dump(p), "count": n}
+
+
+def seismic_info(args) -> dict:
+    """Datos para la ventana Sismo: limites por capacidad (AISC 341-22 D2.6) del miembro que lleva la placa base (o del principal), Ry, Ωo por sistema."""
+    from . import seismic as SE
+    from .conn import baseplate as BP
+    p = _prj(args["connection"])
+    nd = p.node
+    q = BP.derive(p, nd) if nd.base_op() is not None else p
+    if nd.base_op() is None:
+        q = copy.deepcopy(p)
+        q.section.label, q.section.steel = nd.main_shape, nd.main_steel
+    lim = SE.capacity_limits(q)
+    return {"limits": {k: lim[k] for k in ("Mx", "My", "Vx", "Vy")}, "Ry": lim["Ry"], "member": f"{q.section.label} ({q.section.steel})",
+            "omega0": SE.OMEGA0_DEFAULT, "systems": list(MODEL.SEIS_SYSTEMS), "sdc": list(MODEL.SDC_LIST),
+            "service_kinds": list(SE.SERVICE_KINDS)}
+
+
 EXPORTED = {k: v for k, v in dict(globals()).items() if callable(v) and not k.startswith("_") and getattr(v, "__module__", "") == __name__ and not isinstance(v, type)}

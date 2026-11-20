@@ -119,7 +119,8 @@ export async function baseplateForm(E, parentCtx) {
       return box;
     }
     const tb = h('table', { class: 't compact' });
-    const head = h('tr', null, h('th', { text: 'Nombre' }), ...[['Pu', 'F'], ['Mux', 'M'], ['Muy', 'M'], ['Vux', 'F'], ['Vuy', 'F']].map(([n, k]) => h('th', { class: 'num', text: `${n} (${us.label(k)})` })), h('th'));
+    const head = h('tr', null, h('th', { text: 'Nombre' }), ...[['Pu', 'F'], ['Mux', 'M'], ['Muy', 'M'], ['Vux', 'F'], ['Vuy', 'F']].map(([n, k]) => h('th', { class: 'num', text: `${n} (${us.label(k)})` })),
+      h('th', { text: 'Tipo', title: 'Vacío = gravedad o manual; E = sísmica (ρ·QE); Ωo = sobrerresistencia. Las E y Ωo reciben ACI 318-19 17.10 (botón Sismo del árbol, sección Cargas).' }), h('th'));
     const body = h('tbody');
     tb.append(h('thead', null, head), body);
     const draw = () => {
@@ -129,8 +130,10 @@ export async function baseplateForm(E, parentCtx) {
         const nameI = textInput({ value: cb.name, onChange: (v) => { cb.name = v; ctx.onChange('combos'); } });
         tr.append(h('td', null, nameI));
         for (const [k, u] of [['Pu', 'F'], ['Mux', 'M'], ['Muy', 'M'], ['Vux', 'F'], ['Vuy', 'F']]) {
-          tr.append(h('td', { class: 'num' }, numInput({ value: us.out(u, cb[k]), dec: us.dec(u === 'M' ? 'F' : u), onChange: (v) => { cb[k] = us.inn(u, v); ctx.onChange('combos'); } })));
+          tr.append(h('td', { class: 'num' }, numInput({ value: us.out(u, cb[k]), dec: us.dec(u === 'M' ? 'F' : u), onChange: (v) => { cb[k] = us.inn(u, v); cb.e_known = false; ctx.onChange('combos'); } })));
         }
+        tr.append(h('td', null, selectInput({ value: cb.kind || '', options: [{ value: '', label: '—' }, { value: 'E', label: 'E' }, { value: 'Ωo', label: 'Ωo' }],
+          onChange: (v) => { cb.kind = v; ctx.onChange('combos'); } })));
         tr.append(h('td', null, h('div', { class: 'row gap-4' },
           iconBtn('eye', 'Dibujar y detallar esta combinación', () => { conn().combo_idx = i; draw(); ctx.onChange('combo_idx'); }),
           iconBtn('trash', 'Quitar', () => { if (conn().combos.length > 1) { conn().combos.splice(i, 1); conn().combo_idx = Math.min(conn().combo_idx, conn().combos.length - 1); draw(); ctx.onChange('combos'); } }, { disabled: conn().combos.length < 2 }))));

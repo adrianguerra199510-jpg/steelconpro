@@ -6,7 +6,7 @@ import { h, svg, btn, iconBtn, menu, modal, toast, errorBox, confirmBox, promptB
 import { Viewer } from './viewer.js';
 import { native } from './native.js';
 import { openOperation, OP_ICON, opColor, groupOf } from './opdialog.js';
-import { openMember, openLoads, openProject, renameRefs, reparentChildren } from './editdialogs.js';
+import { openMember, openLoads, openProject, openSeismic, renameRefs, reparentChildren } from './editdialogs.js';
 import { openSections, openMaterials, openTemplates } from './libraries.js';
 import { renderItems } from './forms.js';
 import { pickTypology } from './typology.js';
@@ -377,9 +377,14 @@ function renderTree() {
   if (!ops.length) ol.append(h('p', { class: 'muted', style: { padding: '4px 10px 8px', fontSize: '12.5px' }, text: 'Aún no hay operaciones. Agregue una placa, pernos, una soldadura, un corte o una placa base.' }));
   box.append(ol);
   // ---- cargas
-  box.append(sec('Cargas', 'zap', iconBtn('pencil', 'Editar cargas', () => openLoads(E))));
+  const sis = E.conn().seis;
+  box.append(sec('Cargas', 'zap', h('span', { class: 'row gap-4' },
+    iconBtn('activity', sis && sis.enabled ? 'Diseño sísmico (activo)' : 'Diseño sísmico', () => openSeismic(E)),
+    iconBtn('pencil', 'Editar cargas', () => openLoads(E)))));
   const ll = h('div', { class: 'sect' });
-  if (nd.loads.length) for (const l of nd.loads) ll.append(item({ ic: 'zap', name: l.case, sub: l.member, onClick: () => openLoads(E) }));
+  const ck = nd.case_kind || {};
+  const kindLbl = { D: 'servicio D', L: 'servicio L', S: 'servicio S', QEx: 'servicio QEx', QEy: 'servicio QEy', G: 'generada', E: 'sísmica', 'Ωo': 'Ωo' };
+  if (nd.loads.length) for (const l of nd.loads) ll.append(item({ ic: 'zap', name: l.case, sub: ck[l.case] ? `${l.member} · ${kindLbl[ck[l.case]] || ck[l.case]}` : l.member, onClick: () => openLoads(E) }));
   else ll.append(h('p', { class: 'muted', style: { padding: '4px 10px 8px', fontSize: '12.5px' }, text: 'Sin casos de carga del nudo. Las cargas de la placa base se escriben en su operación.' }));
   box.append(ll);
   box.scrollTop = scroll;
