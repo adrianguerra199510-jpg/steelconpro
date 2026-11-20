@@ -9,6 +9,7 @@ from . import design as D
 from . import anchors as A
 from . import geometry as G
 from . import materials as M
+from . import seismic as S
 from .design import Check, Bearing
 from .explain import Recorder
 from .fem_checks import fem_checks
@@ -146,10 +147,6 @@ def solve(prj: Project, detail: bool = True, fem=None) -> Results:
         R.warnings.append("Columna descentrada respecto a la placa: el momento por la excentricidad de Pu se suma a "
                           "los momentos aplicados; los voladizos de la placa se toman del lado mas largo y la torsion "
                           f"(Tz = {prj.eloads.Tz:.1f} kip·in) no se verifica en pernos ni soldadura.")
-    if c.seismic:
-        R.warnings.append("Diseno sismico activo: se aplica el factor 0.75 a la resistencia del "
-                          "concreto de los anclajes (ACI 17.10.5.2). Verifique ademas el requisito "
-                          "de que el anclaje sea gobernado por la fluencia ductil del acero.")
 
     zs = D.unwelded_zones(prj)
     if zs:
@@ -189,6 +186,9 @@ def solve(prj: Project, detail: bool = True, fem=None) -> Results:
         rec.check("Espesor de la placa", R.treq, p.tp, "L",
                   R.treq / max(p.tp, 1e-9), R.treq <= p.tp, "DG1 §3.1")
     ck += A.anchor_checks(prj, br, rec, fem)
+    s_ck, s_w = S.seismic_checks(prj, br, rec)
+    ck += s_ck
+    R.warnings += s_w
     ck += D.welds(prj, br, rec)
     ck += D.shear_lug(prj, rec)
     ck += D.stiffeners(prj, br, rec)

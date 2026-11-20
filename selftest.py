@@ -549,6 +549,58 @@ except Exception as _e_:
     FAIL.append(f"sismo/ACI 17.10: {type(_e_).__name__}: {_e_}")
 
 
+try:
+    # --- verificaciones sismicas: anclaje ductil (17.10.5.3(a)), barras de refuerzo (17.10.4) y memoria
+    from placabase.model import LoadCombo as _LC2
+
+    def _sd(**mut):
+        q = Project(); q.seis.enabled = True; q.seis.sdc = "D"; q.seis.ductile = True
+        c = _LC2("E", 400.0, 5200.0, 0.0, 30.0, 0.0); c.kind = "E"; c.MxE = 5200.0; c.e_known = True
+        q.combos = [c]; q.apply_combo(0)
+        for path, val in mut.items():
+            o = q
+            for part in path.split(".")[:-1]:
+                o = getattr(o, part)
+            setattr(o, path.split(".")[-1], val)
+        R = solve(q)
+        return R, {c.key: c for c in R.checks}
+
+    _R105, _c105 = _sd(**{"bolts.steel": "ASTM F1554 Gr.105"})
+    _R36, _c36 = _sd(**{"bolts.steel": "ASTM F1554 Gr.36"})
+    _Rup, _cup = _sd(**{"bolts.steel": "ASTM F1554 Gr.105", "seis.upset": True})
+    if "seis_futa" not in _c105 or _c105["seis_futa"].ok:
+        FAIL.append("sismo/ductil: F1554 Gr.105 (futa/fya = 1.19) no cumple 17.10.5.3(a)(v)")
+    if not _c36.get("seis_futa") or not _c36["seis_futa"].ok:
+        FAIL.append("sismo/ductil: F1554 Gr.36 cumple futa/fya >= 1.3")
+    if not _cup.get("seis_futa") or not _cup["seis_futa"].skip:
+        FAIL.append("sismo/ductil: con rosca recalcada no se exige futa/fya")
+    if _c36["seis_stretch"].ok or abs(_c36["seis_stretch"].demand - 10.0) > 1e-9 \
+            or abs(_c36["seis_stretch"].capacity - 3.5) > 1e-9:
+        FAIL.append("sismo/ductil: estiramiento 8·da = 10 in contra 0 + 1.5 + 0 + 2 = 3.5 in debe fallar")
+    _Rsl, _csl = _sd(**{"seis.sleeve": 8.0})
+    if not _csl["seis_stretch"].ok:
+        FAIL.append("sismo/ductil: con camisa de 8 in el estiramiento cumple")
+    if "seis_duct_ratio" not in _c36 or "seis_duct_mat" not in _c36:
+        FAIL.append("sismo/ductil: faltan las verificaciones de anclaje ductil")
+    _Rrb, _crb = _sd(**{"conc.u_on": True, "conc.u_fy": 75.0})
+    if "seis_rebar" not in _crb or _crb["seis_rebar"].ok:
+        FAIL.append("sismo/ACI 17.10.4: barra de fy = 75 ksi no es Gr.60/80")
+    if not _sd(**{"conc.u_on": True, "conc.u_fy": 60.0})[1]["seis_rebar"].ok:
+        FAIL.append("sismo/ACI 17.10.4: barra Gr.60 cumple")
+    if "REQUISITOS SISMICOS" not in _R36.rec.to_html():
+        FAIL.append("sismo/memoria: falta la seccion de requisitos sismicos")
+    if not any("Ωo" in w for w in _R36.warnings):
+        FAIL.append("sismo/avisos: traccion > 20 % sin combinaciones Ωo debe avisar")
+    _Rb, _cb = _sd(**{"seis.sdc": "B"})
+    if any(k.startswith("seis_") for k in _cb) or not any("17.10" in w for w in _Rb.warnings):
+        FAIL.append("sismo/SDC B: sin verificaciones de 17.10 y con aviso")
+    print(f"{'sismo: ductil / refuerzo / memoria':34} futa/fya Gr.105 D/C = {_c105['seis_futa'].ratio:.2f}  "
+          f"estiramiento D/C = {_c36['seis_stretch'].ratio:.2f}  r_c/r_s = {_c36['seis_duct_ratio'].ratio:.2f}")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/verificaciones: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

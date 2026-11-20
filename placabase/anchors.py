@@ -460,10 +460,12 @@ def anchor_checks(prj: Project, br: Bearing,
                      "ACI 318-19 17.6.3", note, skip=skip))
 
     # ============================= ACI 17.6.4 desprendimiento lateral
+    Nsb_n = None
     if b.atype.startswith("Con cabeza") and ca_min < 0.4 * hef:
         Nsb = 160.0 * ca_min * math.sqrt(Abrg) * c.lam * fcp / 1000.0
         if ca_x2 < 3.0 * ca_min:
             Nsb *= (1.0 + ca_x2 / ca_min) / 4.0
+        Nsb_n = Nsb
         out.append(Check("aci_nsb", "Anclaje — desprendimiento lateral (side-face blowout)",
                          Nua_b, phi_c * k_seis * Nsb, "kip", "ACI 318-19 17.6.4",
                          f"Aplica porque ca_min = {u.q('L', ca_min)} < 0.4·hef = {u.q('L', 0.4*hef)}"))
@@ -576,6 +578,31 @@ def anchor_checks(prj: Project, br: Bearing,
             out.append(Check("aci_ubar_cover", "Refuerzo Omega — recubrimiento lateral de la cola del gancho", 1.5,
                              max(ub["cover"], 0.0), "in", "ACI 318-19 20.5.1",
                              f"cola {u.q('L', ub['tail'])} hacia afuera; recubrimiento que queda {u.q('L', ub['cover'])}, minimo 1.5 in"))
+
+    # ===================== ACI 17.10.5.3(a): anclaje ductil (la fluencia del acero precede a la falla del concreto)
+    if st.active and prj.seis.ductile and Nua > 1e-9:
+        r_s = Nua_b / (1.2 * Nsa) if Nsa > 0 else 99.0
+        modes = [("arrancamiento", Nua / Ncbg if Ncbg > 0 else 99.0)]
+        if Np > 0:
+            modes.append(("extraccion", Nua_b / (psi_cp_p * Np)))
+        elif not adh:
+            modes.append(("extraccion", 99.0))
+        if Nsb_n:
+            modes.append(("desprendimiento lateral", Nua_b / Nsb_n))
+        if adh and Nag:
+            modes.append(("adherencia", Nua / Nag))
+        gov_m, r_c = max(modes, key=lambda t: t[1])
+        out.append(Check("seis_duct_ratio", "Sismo — anclaje ductil: el acero fluye antes que el concreto",
+                         r_c, r_s, "-", "ACI 318-19 17.10.5.3(a)",
+                         f"Nua,perno/(1.2·Nsa) = {r_s:.3f} debe ser >= Nua/N concreto = {r_c:.3f} ({gov_m}); "
+                         "resistencias nominales (sin φ)"))
+        if rec:
+            rec.add("r acero", "Nua,perno / (1.2·Nsa)", f"{rec.n('F', Nua_b)} / (1.2·{rec.n('F', Nsa)})", r_s, "-",
+                    "ACI 17.10.5.3(a)(i)")
+            rec.add("r concreto", "max( Nua/Ncbg ; Nua,perno/Npn ; Nua,perno/Nsb ; Nua/Nag )",
+                    " ; ".join(f"{m} {v:.3f}" for m, v in modes), r_c, "-", "ACI 17.10.5.3(a)(ii)")
+            rec.check("Anclaje ductil (r concreto <= r acero)", r_c, r_s, "-",
+                      r_c / r_s if r_s > 0 else 99.0, r_c <= r_s, "ACI 17.10.5.3(a)")
 
     # ============================================= ACI 17.8 interaccion
     rN = max([ch.ratio for ch in out if ch.key in ("aci_nsa", "aci_ncb", "aci_np", "aci_nsb", "aci_na")] + [0.0])

@@ -226,3 +226,105 @@ def seismic_state(prj: Project) -> SeisState:
     st.fV = 0.0 if V <= 1e-9 else min(1.0, max(0.0, (V - V0) / V))
     st.k_t = 0.75 if st.fN > 0.20 + 1e-12 else 1.0
     return st
+
+
+# --------------------------------------------------- verificaciones y avisos sismicos (fuera de anclajes)
+_DEMAND_CRITICAL = ("(SMF)", "(IMF)", "(SCBF)", "(EBF)")
+_BRACED = ("(SCBF)", "(OCBF)", "(EBF)")
+
+
+def seismic_checks(prj: Project, br=None, rec=None):
+    """Devuelve (checks, avisos) del diseno sismico de la combinacion activa.  La relacion de ductilidad
+    17.10.5.3(a) se verifica en anchors.py, donde estan las resistencias nominales."""
+    from .design import Check
+    S, b, c = prj.seis, prj.bolts, prj.conc
+    checks, warns = [], []
+    if not S.enabled:
+        return checks, warns
+    u = prj.units()
+    st = seismic_state(prj)
+    if not S.aci_applies:
+        warns.append(f"SDC {S.sdc}: ACI 318-19 17.10 no aplica a los anclajes (solo SDC C a F, 17.10.1).")
+    combos = prj.combos or []
+    has_omega = any(x.kind == "Ωo" for x in combos)
+
+    if S.aci_applies:
+        mat = b.mat()
+        g = b.geom()
+        if S.ductile:
+            checks.append(Check("seis_duct_mat", "Sismo — anclaje ductil: elemento de acero ductil",
+                                0.0 if mat.ductile else 1.0, 1.0 if mat.ductile else 0.0, "-",
+                                "ACI 318-19 2.3 / 17.10.5.3(a)",
+                                f"{b.steel}: " + ("ductil (alargamiento >= 14 %, reduccion de area >= 30 %)"
+                                                   if mat.ductile else "NO es ductil")))
+            stretch = S.sleeve + prj.plate.grout + max(0.0, b.standoff) + prj.plate.tp
+            checks.append(Check("seis_stretch", "Sismo — anclaje ductil: longitud de estiramiento >= 8·da",
+                                8.0 * g.db, stretch, "in", "ACI 318-19 17.10.5.3(a)(iii)",
+                                f"camisa {u.q('L', S.sleeve)} + mortero {u.q('L', prj.plate.grout)} + stand-off "
+                                f"{u.q('L', max(0.0, b.standoff))} + tp {u.q('L', prj.plate.tp)}"))
+            ratio = mat.Fu / mat.Fy if mat.Fy > 0 else 0.0
+            checks.append(Check("seis_futa", "Sismo — anclaje ductil: futa/fya >= 1.3 (rosca no recalcada)",
+                                1.3, ratio, "-", "ACI 318-19 17.10.5.3(a)(v)",
+                                (f"rosca recalcada (upset): no se exige" if S.upset else
+                                 f"futa/fya = {mat.Fu:g}/{mat.Fy:g} = {ratio:.2f}"), skip=bool(S.upset)))
+            if b.standoff > 1e-9:
+                warns.append("Anclaje ductil con stand-off (tuercas de nivelacion): con inversion de carga el perno "
+                             "debe protegerse contra el pandeo (ACI 17.10.5.3(a)(iv)).")
+        if c.u_on:
+            ok = any(abs(c.u_fy - f) < 1e-6 for f in (60.0, 80.0))
+            checks.append(Check("seis_rebar", "Sismo — refuerzo del anclaje: Gr.60 u 80 (A615 con 20.2.2.5 o A706)",
+                                0.0 if ok else 1.0, 1.0 if ok else 0.0, "-", "ACI 318-19 17.10.4",
+                                f"fy = {u.q('S', c.u_fy)}"))
+        if not c.cracked:
+            warns.append("Sismo: ACI 17.10.5.4 supone concreto FISURADO salvo que se demuestre lo contrario; "
+                         "el proyecto usa concreto no fisurado.")
+        if b.adhesive:
+            warns.append("Sismo: el anclaje adhesivo debe estar calificado para cargas sismicas segun ACI 355.4 "
+                         "(17.10.3); τ y Vsa deben salir de esos ensayos.")
+        if st.active and (st.fN > 0.20 or st.fV > 0.20) and not has_omega \
+                and not (S.ductile and st.fV <= 0.20 and not S.aisc341):   # AISC 341 D2.6 exige Ωo/capacidad igual
+            warns.append("Sismo: la parte sismica supera el 20 % de la "
+                         + ("traccion" if st.fN > 0.20 else "") + (" y del " if st.fN > 0.2 and st.fV > 0.2 else "")
+                         + ("cortante" if st.fV > 0.20 else "")
+                         + " pero no hay combinaciones con Ωo: ACI 17.10.5.3 / 17.10.6.3 exigen disenar con Ωo·E, "
+                           "con la fluencia del elemento conectado o (en traccion) con anclaje ductil; AISC 341-22 D2.6 exige "
+                           "ademas la resistencia requerida de la base con Ωo o por capacidad. "
+                           "Genere las combinaciones en la pestana Sismica.")
+    if S.aisc341:
+        if any(k in S.system for k in _DEMAND_CRITICAL):
+            warns.append("AISC 341-22: las soldaduras de ranura de la columna a la placa base de este sistema son de "
+                         "DEMANDA CRITICA (A3.4b): metal de aporte con tenacidad CVN especificada.")
+        if any(k in S.system for k in _BRACED):
+            warns.append("AISC 341-22 D2.6a/b(a): sume a QE las componentes de la resistencia requerida de las "
+                         "conexiones de las riostras que llegan a la base.")
+    if S.enabled and S.sdc in ("D", "E", "F") and not S.ortho:
+        warns.append("ASCE 7-05 12.5.4: si la columna pertenece a dos sistemas que se cruzan, active 100 % + 30 %.")
+
+    if rec:
+        lim = capacity_limits(prj)
+        z3 = lambda z: f"{z / u.fl ** 3:.4g} {u.L}³"
+        rec.section("S.  REQUISITOS SISMICOS  (ASCE 7-05 / AISC 341-22 D2.6 / ACI 318-19 17.10)")
+        rec.add("Sistema", S.system, f"SDC {S.sdc}, Ωo = {S.Omega0:g}, ρ = {S.rho:g}, SDS = {S.SDS:g}", None, "-",
+                "ASCE 7-05 Tabla 12.2-1")
+        cmb = active_combo(prj)
+        rec.add("Combinacion", (cmb.name if cmb else "-"),
+                {"": "gravedad / sin sismo", "E": "sismica (ρ·QE)", "Ωo": "sobrerresistencia (Ωo·QE)"}
+                .get(cmb.kind if cmb else "", ""), None, "-")
+        if st.active:
+            rec.add("fN", "(Tu − Tu sin E) / Tu", "parte sismica de la traccion de los anclajes"
+                    + ("" if st.known else " (desconocida: 100 %)"), st.fN, "-", "ACI 17.10.5.1")
+            rec.add("fV", "(Vu − Vu sin E) / Vu", "parte sismica del cortante", st.fV, "-", "ACI 17.10.6.1")
+            rec.add("factor traccion", "0.75 si fN > 20 %", "", st.k_t, "-", "ACI 17.10.5.4")
+        rec.add("Ry", "AISC 341-22 Tabla A3.2" + (" (manual)" if S.Ry > 0 else ""), prj.section.steel,
+                lim["Ry"], "-")
+        rec.add("Mpr,x", "1.1·Ry·Fy·Zx", f"1.1·{lim['Ry']:g}·{rec.n('S', lim['Fy'])}·{z3(lim['Zx'])}",
+                lim["Mx"], "M", "AISC 341-22 D2.6c(b)(1)", "limite del momento requerido de la base (eje fuerte)")
+        rec.add("Mpr,y", "1.1·Ry·Fy·Zy", f"1.1·{lim['Ry']:g}·{rec.n('S', lim['Fy'])}·{z3(lim['Zy'])}",
+                lim["My"], "M", "AISC 341-22 D2.6c(b)(1)")
+        rec.add("Vpr,y", "2·Ry·Fy·Zx / H", f"H = {rec.f('L', S.H)}", lim["Vy"], "F", "AISC 341-22 D2.6b(b)(1)",
+                "limite del cortante requerido de la base")
+        rec.add("Vpr,x", "2·Ry·Fy·Zy / H", "", lim["Vx"], "F", "AISC 341-22 D2.6b(b)(1)")
+        if S.cap_limit and S.aisc341:
+            rec.text("Las combinaciones con Ωo·QE quedan limitadas por estos valores (resistencia requerida de la "
+                     "base = el menor entre la capacidad de la columna y la combinacion con sobrerresistencia).")
+    return checks, warns
