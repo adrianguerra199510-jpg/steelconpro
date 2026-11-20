@@ -12,6 +12,7 @@ Unidades internas: in, kip, ksi.
 """
 from __future__ import annotations
 import copy
+from dataclasses import dataclass
 
 from .model import Project, LoadCombo, SEIS_SYSTEMS
 
@@ -183,3 +184,45 @@ def prune(prj: Project, combos: list) -> list:
             best_kind[k] = (R.max_ratio, i)
     keep = sorted({i for _, i in best.values()} | {i for _, i in best_kind.values()})
     return [combos[i] for i in keep] or [combos[0]]
+
+
+# ------------------------------------------------------- estado sismico de la combinacion activa
+@dataclass
+class SeisState:
+    active: bool = False         # rige ACI 17.10 en esta combinacion (SDC C-F y combinacion E u Ωo)
+    kind: str = ""
+    fN: float = 0.0              # fraccion sismica de la traccion de los anclajes (ACI 17.10.5.1)
+    fV: float = 0.0              # fraccion sismica del cortante (ACI 17.10.6.1)
+    k_t: float = 1.0             # factor sobre los modos de concreto en traccion (0.75 si fN > 20 %, 17.10.5.4)
+    bond: bool = False           # reduccion de τ por sismo (nota de la Tabla 17.6.5.2.5)
+    known: bool = True           # la parte sismica de la combinacion es conocida
+
+
+def active_combo(prj: Project):
+    cs = prj.combos or []
+    return cs[prj.combo_idx] if 0 <= prj.combo_idx < len(cs) else None
+
+
+def seismic_state(prj: Project) -> SeisState:
+    """Clasifica la combinacion activa segun ACI 318-19 17.10.  La fraccion sismica se calcula con el
+    equilibrio cerrado (DG1): (Tu − Tu sin E) / Tu, y para el cortante (Vu − Vu sin E) / Vu."""
+    from . import design as D
+    st = SeisState()
+    c = active_combo(prj)
+    if not prj.seis.aci_applies or c is None or c.kind not in ("E", "Ωo"):
+        return st
+    st.active, st.kind, st.bond, st.known = True, c.kind, True, bool(c.e_known)
+    q = copy.deepcopy(prj)
+    L = q.loads
+    if c.e_known:
+        L.Pu, L.Mux, L.Muy = L.Pu - c.PE, L.Mux - c.MxE, L.Muy - c.MyE
+        L.Vux, L.Vuy = L.Vux - c.VxE, L.Vuy - c.VyE
+    else:
+        L.Pu = L.Mux = L.Muy = L.Vux = L.Vuy = 0.0
+    T = D.bearing(prj).Tu
+    T0 = D.bearing(q).Tu if c.e_known else 0.0
+    st.fN = 0.0 if T <= 1e-9 else min(1.0, max(0.0, (T - T0) / T))
+    V, V0 = prj.eloads.Vu, (q.eloads.Vu if c.e_known else 0.0)
+    st.fV = 0.0 if V <= 1e-9 else min(1.0, max(0.0, (V - V0) / V))
+    st.k_t = 0.75 if st.fN > 0.20 + 1e-12 else 1.0
+    return st

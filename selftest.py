@@ -505,6 +505,50 @@ except Exception as _e_:
     FAIL.append(f"sismo/generador: {type(_e_).__name__}: {_e_}")
 
 
+try:
+    # --- ACI 318-19 17.10: regla del 20 % y factor 0.75 solo en traccion
+    from placabase import seismic as SE
+    from placabase.model import LoadCombo as _LC
+
+    def _sc(kind, PE=0.0, MxE=0.0, VxE=0.0, Pu=400.0, Mux=5200.0, Vux=30.0, sdc="D", known=True):
+        q = Project(); q.seis.enabled = True; q.seis.sdc = sdc
+        c = _LC("t", Pu, Mux, 0.0, Vux, 0.0); c.kind = kind
+        c.PE, c.MxE, c.VxE, c.e_known = PE, MxE, VxE, known
+        q.combos = [c]; q.apply_combo(0)
+        return q
+
+    _ck = lambda q: {c.key: c for c in solve(q).checks}
+    _qE = _sc("E", MxE=5200.0)
+    _st = SE.seismic_state(_qE)
+    _g0, _gE = _ck(_sc("")), _ck(_qE)
+    if not (_st.active and _st.fN > 0.99 and abs(_st.k_t - 0.75) < 1e-12):
+        FAIL.append(f"sismo/ACI 17.10: traccion 100 % sismica debe dar k = 0.75 (fN = {_st.fN:.2f})")
+    if abs(_gE["aci_ncb"].capacity - 0.75 * _g0["aci_ncb"].capacity) > 1e-6 \
+            or abs(_gE["aci_np"].capacity - 0.75 * _g0["aci_np"].capacity) > 1e-6:
+        FAIL.append("sismo/ACI 17.10.5.4: arrancamiento y extraccion deben llevar 0.75")
+    if abs(_gE["aci_vcb"].capacity - _g0["aci_vcb"].capacity) > 1e-9 \
+            or abs(_gE["aci_vcp"].capacity - _g0["aci_vcp"].capacity) > 1e-9:
+        FAIL.append("sismo/ACI 17.10.6: el cortante NO lleva el factor 0.75")
+    _qs = _sc("E", MxE=200.0)
+    _ss = SE.seismic_state(_qs)
+    if not (_ss.fN <= 0.20 and _ss.k_t == 1.0):
+        FAIL.append(f"sismo/ACI 17.10.5.1: traccion sismica <= 20 % no lleva factor (fN = {_ss.fN:.3f})")
+    _qc = _sc("E", MxE=0.0, Mux=0.0, Pu=900.0)
+    if SE.seismic_state(_qc).fN != 0.0:
+        FAIL.append("sismo/ACI 17.10: sin traccion la fraccion sismica debe ser 0")
+    if SE.seismic_state(_sc("E", MxE=5200.0, sdc="B")).active:
+        FAIL.append("sismo/ACI 17.10.1: en SDC B no aplica 17.10")
+    if SE.seismic_state(_sc("E", known=False)).fN != 1.0:
+        FAIL.append("sismo/ACI 17.10: parte E desconocida debe tomarse como 100 % sismica")
+    _qv = _sc("E", VxE=30.0, MxE=0.0)
+    if SE.seismic_state(_qv).fV < 0.99:
+        FAIL.append("sismo/ACI 17.10.6: fraccion sismica del cortante")
+    print(f"{'sismo: ACI 17.10 (20 %, 0.75)':34} fN = {_st.fN:.2f} -> k = {_st.k_t}   fN = {_ss.fN:.3f} -> k = {_ss.k_t}")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/ACI 17.10: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

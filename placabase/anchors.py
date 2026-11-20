@@ -13,6 +13,7 @@ from . import materials as MAT
 from .explain import Recorder
 from .design import Check, Bearing
 from .ubar import ubar
+from .seismic import seismic_state
 
 
 def _sqrt_fc_psi(fc_ksi: float) -> float:
@@ -74,7 +75,8 @@ def anchor_checks(prj: Project, br: Bearing,
     phi_s_t = 0.75 if mat.ductile else 0.65
     phi_s_v = 0.65 if mat.ductile else 0.60
     phi_c = 0.75 if c.cond_A_eff else 0.70
-    k_seis = 0.75 if c.seismic else 1.0
+    st = seismic_state(prj)
+    k_seis = st.k_t                  # ACI 17.10.5.4: 0.75 solo en los modos de concreto en TRACCION (fN > 20 %)
 
     # ---- anclaje postinstalado con adhesivo (ACI 318-19 17.6.5)
     adh = b.adhesive
@@ -207,9 +209,11 @@ def anchor_checks(prj: Project, br: Bearing,
                 "elemento " + ("ductil" if mat.ductile else "fragil"))
         rec.add("φ concreto", "condicion " + ("A" if c.cond_A_eff else "B"),
                 f"{phi_c:.2f}", None, "-", "ACI Tabla 17.5.3(c)")
-        if c.seismic:
-            rec.add("factor sismico", "0.75 sobre la resistencia del concreto",
-                    "", None, "-", "ACI 17.10.5.2")
+        if st.active:
+            rec.add("factor sismico", f"{k_seis:g} sobre arrancamiento, extraccion, desprendimiento lateral y adherencia"
+                    " en traccion; el cortante no se reduce",
+                    f"traccion sismica = {st.fN:.0%} del total " + ("> 20 %" if st.fN > 0.2 else "<= 20 %"),
+                    None, "-", "ACI 17.10.5.1 / 17.10.5.4 / 17.10.6")
 
     # ================================================ ACI 17.6.1 acero traccion
     Nsa = g.Ase * futa
@@ -336,7 +340,7 @@ def anchor_checks(prj: Project, br: Bearing,
         if table and b.sustained > 0:
             t_cr_d *= 0.4; t_uncr_d *= 0.4
             f_red = "×0.4 por traccion sostenida"
-        if table and c.seismic:
+        if table and st.bond:
             t_cr_d *= 0.8; t_uncr_d *= 0.4
             f_red += (" ; " if f_red else "") + "τcr×0.8, τuncr×0.4 por sismo (SDC C-F)"
         tau = t_cr_d if c.cracked else t_uncr_d
@@ -461,7 +465,7 @@ def anchor_checks(prj: Project, br: Bearing,
         if ca_x2 < 3.0 * ca_min:
             Nsb *= (1.0 + ca_x2 / ca_min) / 4.0
         out.append(Check("aci_nsb", "Anclaje — desprendimiento lateral (side-face blowout)",
-                         Nua_b, phi_c * Nsb, "kip", "ACI 318-19 17.6.4",
+                         Nua_b, phi_c * k_seis * Nsb, "kip", "ACI 318-19 17.6.4",
                          f"Aplica porque ca_min = {u.q('L', ca_min)} < 0.4·hef = {u.q('L', 0.4*hef)}"))
 
     # ==================================== ACI 17.7.1 acero en cortante
@@ -515,10 +519,10 @@ def anchor_checks(prj: Project, br: Bearing,
                 f"({Avc/Avco:.3f})·1.00·{psi_edV:.3f}·{psi_cV:.2f}·"
                 f"{psi_hV:.3f}·{rec.n('F', Vb)}", Vcbg, "F")
         rec.check("Arrancamiento del concreto en cortante", Vua,
-                  phi_c * k_seis * Vcbg, "F",
-                  Vua / (phi_c * k_seis * Vcbg) if Vcbg > 0 else 0,
-                  Vua <= phi_c * k_seis * Vcbg, "ACI 17.7.2")
-    cap_vcb = phi_c * k_seis * Vcbg
+                  phi_c * Vcbg, "F",
+                  Vua / (phi_c * Vcbg) if Vcbg > 0 else 0,
+                  Vua <= phi_c * Vcbg, "ACI 17.7.2")
+    cap_vcb = phi_c * Vcbg
     if ub is not None:
         cap_vcb = max(cap_vcb, ub["phi"] * ub["Nrs"])           # ACI 17.7.2.5: refuerzo de anclaje en cortante
     out.append(Check("aci_vcb", "Anclaje — arrancamiento del concreto en cortante"
@@ -532,7 +536,7 @@ def anchor_checks(prj: Project, br: Bearing,
     Ncp = min(Ncbg, Nag) if adh and Nag is not None else Ncbg   # ACI 17.7.3.1.1
     Vcpg = kcp * Ncp
     out.append(Check("aci_vcp", "Anclaje — desprendimiento por cabeceo (pryout)",
-                     Vua, phi_c * k_seis * Vcpg, "kip", "ACI 318-19 17.7.3",
+                     Vua, phi_c * Vcpg, "kip", "ACI 318-19 17.7.3",
                      f"kcp = {kcp:.0f}"))
 
     if rec:
@@ -540,9 +544,9 @@ def anchor_checks(prj: Project, br: Bearing,
         rec.add("Vcpg", "kcp · min(Ncbg ; Nag)" if adh else "kcp · Ncbg",
                 f"{kcp:.0f} · {rec.n('F', Ncp)}", Vcpg, "F",
                 "ACI Ec. 17.7.3.1")
-        rec.check("Pryout", Vua, phi_c * k_seis * Vcpg, "F",
-                  Vua / (phi_c * k_seis * Vcpg) if Vcpg > 0 else 0,
-                  Vua <= phi_c * k_seis * Vcpg, "ACI 17.7.3")
+        rec.check("Pryout", Vua, phi_c * Vcpg, "F",
+                  Vua / (phi_c * Vcpg) if Vcpg > 0 else 0,
+                  Vua <= phi_c * Vcpg, "ACI 17.7.3")
 
     if ub is not None:
         nm = "Omega" if ub["kind"] == "OMEGA" else "U"
