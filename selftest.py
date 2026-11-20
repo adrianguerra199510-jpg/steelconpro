@@ -709,10 +709,40 @@ try:
     if "seismic" not in _c or any(it.get("path") == "conc.seismic" for t in _c["schema_baseplate"]
                                    for g in t.get("groups", []) for it in g.get("items", [])):
         FAIL.append("sismo/API: constants() con datos sismicos y sin la casilla vieja conc.seismic en el esquema")
+    # archivo de nudo con la casilla vieja conc.seismic: tras normalizar, los casos del nudo quedan sismicos (0.75 en traccion)
+    from steelconpro.model import load_book as _lbv
+    from steelconpro.conn import baseplate as _BPv
+    _qv = _lbv("ejemplos/CN-04_columna_con_placa_base.scp")[0]
+    _qv.conc.seismic = True
+    _qn = _api._prj(_api.normalize({"connection": _api._dump(_qv)})["connection"])
+    if not (_qn.seis.enabled and _qn.node.case_kind.get("Caso 1") == "E"
+            and all(c.kind == "E" for c in _BPv.derive(_qn).combo_list())):
+        FAIL.append("sismo/API: un nudo con la casilla vieja debe quedar con sus casos marcados como sismicos (E)")
     print(f"{'sismo: API':34} seismic_generate -> {_r['count']} casos; limite 1.1RyMp = {_i['limits']['Mx']:.0f} kip·in ({_i['member']})")
 except Exception as _e_:
     traceback.print_exc()
     FAIL.append(f"sismo/API: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- ejemplo SIS-01: abre con el sismo activo, casos de servicio y generados, y se verifica
+    from steelconpro.model import load_book as _lb
+    from steelconpro.conn import solve_conn as _sc, nodal as NOD
+    _ex = _lb("ejemplos/SIS-01_portico_SMF_placa_base.scp")[0]
+    _ks = set(_ex.node.case_kind.values())
+    if not (_ex.seis.enabled and {"D", "L", "QEx", "E", "Ωo"} <= _ks):
+        FAIL.append("ejemplo SIS-01: debe traer el sismo activo, casos de servicio y casos E y Ωo generados")
+    _R = _sc(_ex)
+    _bp = [c for c in _R.checks if c.key.startswith("bp_")]
+    if not _bp or not any(c.key == "bp_seis_rebar" for c in _bp) or "REQUISITOS SISMICOS" not in _R.rec.to_html():
+        FAIL.append("ejemplo SIS-01: la placa base debe incluir las verificaciones y la memoria sismicas")
+    if not _R.ok:
+        FAIL.append(f"ejemplo SIS-01: el ejemplo debe cumplir (D/C max = {_R.max_ratio:.3f})")
+    print(f"{'ejemplo SIS-01 (SMF, SDC D)':34} {len(NOD.cases_of(_ex.node))} casos  D/C max = {_R.max_ratio:.3f}  "
+          f"({_R.governing.title[:60] if _R.governing else '-'})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"ejemplo SIS-01: {type(_e_).__name__}: {_e_}")
 
 
 if "--3d" in sys.argv:

@@ -580,6 +580,12 @@ class Project:
             for c in self.combo_list():
                 if not c.kind:
                     c.kind = "E"
+            nd = getattr(self, "node", None)                     # nudo: sus casos factorizados pasan a ser sismicos (parte E desconocida)
+            if nd is not None:
+                ck = dict(getattr(nd, "case_kind", None) or {})
+                for x in nd.loads:
+                    ck.setdefault(x.case, "E")
+                nd.case_kind = ck
             changes.append("Diseno sismico: la casilla de la pestana Concreto se paso a la pestana Sismica; "
                            "las combinaciones existentes se marcaron como sismicas (E).")
         if self.loads.tilted and self.stiff.enabled:
