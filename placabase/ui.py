@@ -29,6 +29,8 @@ from .model import (Project, PATTERNS, ANCHOR_TYPES, WELD_TYPES, PLATE_SHAPES,
 from . import materials as M
 from .shapes import CATALOG, W_SHAPE, HSS_RECT, HSS_ROUND, PIPE, KIND_LABELS
 from .model import LUG_TYPES, save_book, load_book, MESH3D_MODES, WELD_MODELS, FIXITY, LoadCombo, REBAR
+from .model import SDC_LIST, SEIS_SYSTEMS, SEIS_CASES
+from . import seismic as SEIS
 from .dialogs import SectionDialog, MaterialsDialog
 from PySide6.QtWidgets import QListWidget, QInputDialog
 from .solver import solve
@@ -356,7 +358,7 @@ class MainWindow(QMainWindow):
         # ---- cargas (combinaciones)
         f = new_form("Cargas")
         f.group("Combinaciones de carga factorizadas (LRFD)")
-        self.tbl_cb = QTableWidget(0, 6)
+        self.tbl_cb = QTableWidget(0, 7)
         self.tbl_cb.setMinimumHeight(190)
         self.tbl_cb.verticalHeader().setDefaultSectionSize(24)
         hh = self.tbl_cb.horizontalHeader()
@@ -379,6 +381,9 @@ class MainWindow(QMainWindow):
                "tracciona el lado opuesto, cambie el signo o gire la placa 180°.  Vux y Vuy son las componentes "
                "del cortante en los ejes de la placa.  Todos son valores YA FACTORIZADOS (LRFD).  Muy entra en el "
                "perfil, la soldadura y el 3D; el equilibrio cerrado de DG1 es uniaxial (usa Mux).")
+        f.note("TIPO — vacio = gravedad o manual; E = combinacion sismica (ρ·QE); Ωo = sobrerresistencia (Ωo·QE). "
+               "Las combinaciones E y Ωo reciben los requisitos de ACI 318-19 17.10 (pestaña Sismica). Si edita a mano "
+               "las cargas de una combinacion generada, su parte sismica deja de conocerse y se toma como 100 % sismica.")
         f.note("La INCLINACION DE LA COLUMNA se define en la pestaña Perfil. Si esta inclinada, estas cargas se "
                "ingresan en los ejes de la columna.")
         f.group("Friccion")
@@ -388,6 +393,9 @@ class MainWindow(QMainWindow):
         self.lbl_si.setStyleSheet("color:#595959; font-size:8pt;")
         f._lay.addRow("Combinacion activa", self.lbl_si)
         f.finish()
+
+        # ---- sismica (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
+        self._build_seismic(new_form("Sismica"))
 
         # ---- perfil
         f = new_form("Perfil")
@@ -611,7 +619,6 @@ class MainWindow(QMainWindow):
         f.num("ha (altura del elemento)", "conc.ha", 4, 400, uk="L", help="Altura del elemento de concreto medida desde la superficie donde apoya la placa. Interviene en el factor de espesor del arrancamiento en cortante.")
         f.num("λa (concreto liviano)", "conc.lam", 0.5, 1.0, 0.05, 2, help="Factor de concreto liviano de ACI. Use 1.00 para concreto de peso normal.")
         f.check("Concreto fisurado en servicio", "conc.cracked", help="Marque si el concreto estara fisurado en la zona del anclaje bajo cargas de servicio, que es la hipotesis por defecto de ACI. Sin fisurar, las resistencias del concreto aumentan.")
-        f.check("Diseno sismico (ACI 17.10, factor 0.75)", "conc.seismic", help="Aplica el factor 0.75 a la resistencia del concreto de los anclajes. No verifica por usted el requisito de que el anclaje sea gobernado por la fluencia ductil del acero.")
         f.group("Refuerzo del arrancamiento (barras U)")
         f.check("Agregar barras de refuerzo (U u Omega)", "conc.u_on", help="Barras en forma de U invertida (herradura) que abrazan el grupo de pernos: un tramo horizontal cerca de la superficie y dos patas verticales a cada lado. Segun ACI 318-19 17.5.2 el refuerzo del anclaje puede sustituir la resistencia del concreto al arrancamiento en traccion y en cortante: la capacidad pasa a ser φ·(n° de patas)·Ab·fy con φ = 0.75, siempre que las patas esten desarrolladas a ambos lados del cono de falla. Se dibujan en la elevacion y en el 3D. El analisis 3D no las modela (solo el calculo cerrado).")
         f.combo("Tipo de barra", "conc.u_type", U_TYPES, help="Opcion A, barra U: patas rectas; bajo la punta del anclaje se desarrolla ld (ACI 25.4.2.3) y el tramo horizontal actua como gancho sobre la punta del anclaje (ldh). Opcion B, barra Omega: las patas terminan en un gancho estandar de 90 grados hacia afuera (cola de 12 db) y bajo la punta del anclaje se desarrolla ldh (ACI 25.4.3). Cada opcion se dibuja en 3D y en la elevacion y se revisa: resistencia a traccion, desarrollo bajo y sobre la punta del anclaje, altura del pedestal y, en la Omega, el recubrimiento de la cola.")
@@ -939,6 +946,7 @@ class MainWindow(QMainWindow):
                 f.load(self.prj)
             self._xy_load()
             self._combo_load()
+            self._seis_load()
         finally:
             self._loading = False
         self._update_visibility()
@@ -949,6 +957,7 @@ class MainWindow(QMainWindow):
             f.store(self.prj)
         self._xy_store()
         self._combo_store()
+        self._seis_store()
 
     # ------------------------------------------ coordenadas manuales de pernos
     def _xy_load(self):
@@ -1333,6 +1342,17 @@ class MainWindow(QMainWindow):
         fc, cn = F["Concreto"], prj.conc
         for path in ("conc.u_type", "conc.u_size", "conc.u_n", "conc.u_fy", "conc.u_depth", "conc.u_leg"):
             fc.show_field(path, bool(cn.u_on))
+        # ---- sismica
+        fs = F["Sismica"]
+        on = bool(prj.seis.enabled)
+        for path in ("seis.sdc", "seis.system", "seis.Omega0", "seis.rho", "seis.SDS", "seis.f1", "seis.Ry",
+                     "seis.H", "seis.base_moment"):
+            fs.show_field(path, on)
+        fs.show_field(self.lbl_seis, on)
+        for g in self._SEIS_GROUPS:
+            fs.show_group(g, on)
+        fs.show_field("seis.sleeve", on and bool(prj.seis.ductile))
+        fs.show_field("seis.upset", on and bool(prj.seis.ductile))
         # ---- elementos finitos
         ff, fe = F["Elementos finitos"], prj.fea
         ff.show_field("fea.ks_manual", fe.ks_mode == "manual")
@@ -1650,13 +1670,14 @@ class MainWindow(QMainWindow):
         t = self.tbl_cb
         t.blockSignals(True)
         t.setHorizontalHeaderLabels(["Nombre", f"Pu ({u.F})", f"Mux ({u.label('M')})",
-                                     f"Muy ({u.label('M')})", f"Vux ({u.F})", f"Vuy ({u.F})"])
+                                     f"Muy ({u.label('M')})", f"Vux ({u.F})", f"Vuy ({u.F})", "Tipo"])
         cs = self.prj.combo_list()
         t.setRowCount(len(cs))
         for i, c in enumerate(cs):
             t.setItem(i, 0, QTableWidgetItem(c.name))
             for j, (v, k) in enumerate(((c.Pu, "F"), (c.Mux, "M"), (c.Muy, "M"), (c.Vux, "F"), (c.Vuy, "F")), 1):
                 t.setItem(i, j, QTableWidgetItem(f"{u.out(k, v):.6g}"))
+            t.setItem(i, 6, QTableWidgetItem(c.kind))
         t.selectRow(self.prj.combo_idx)
         t.blockSignals(False)
 
@@ -1667,15 +1688,31 @@ class MainWindow(QMainWindow):
         for i in range(t.rowCount()):
             try:
                 nm = t.item(i, 0).text().strip() or f"Comb {i + 1}"
-                v = [float(t.item(i, j).text().replace(",", "")) for j in range(1, 6)]
+                old_c = self.prj.combos[i] if i < len(self.prj.combos) else None
+                v = []
+                for j, k in enumerate(("F", "M", "M", "F", "F"), 1):
+                    txt = t.item(i, j).text().strip()
+                    ov = (old_c.Pu, old_c.Mux, old_c.Muy, old_c.Vux, old_c.Vuy)[j - 1] if old_c else None
+                    # sin editar: conserva el valor exacto (la tabla muestra 6 cifras)
+                    v.append(u.out(k, ov) if (ov is not None and txt == f"{u.out(k, ov):.6g}")
+                             else float(txt.replace(",", "")))
                 if not all(math.isfinite(x) for x in v):
                     raise ValueError("valor no finito")
             except (AttributeError, ValueError):
                 old = self.prj.combos[i] if i < len(self.prj.combos) else LoadCombo(f"Comb {i + 1}")
                 cs.append(old)
                 continue
-            cs.append(LoadCombo(nm, u.inn("F", v[0]), u.inn("M", v[1]), u.inn("M", v[2]),
-                                u.inn("F", v[3]), u.inn("F", v[4])))
+            nc = LoadCombo(nm, u.inn("F", v[0]), u.inn("M", v[1]), u.inn("M", v[2]),
+                           u.inn("F", v[3]), u.inn("F", v[4]))
+            it = t.item(i, 6)
+            k = (it.text().strip() if it is not None else "").upper()
+            nc.kind = "Ωo" if (k.startswith("Ω") or k.startswith("O")) else ("E" if k.startswith("E") else "")
+            old = self.prj.combos[i] if i < len(self.prj.combos) else None
+            if old is not None and old.e_known and all(
+                    abs(a - b) <= 1e-6 * max(1.0, abs(b)) for a, b in
+                    zip((nc.Pu, nc.Mux, nc.Muy, nc.Vux, nc.Vuy), (old.Pu, old.Mux, old.Muy, old.Vux, old.Vuy))):
+                nc.PE, nc.MxE, nc.MyE, nc.VxE, nc.VyE, nc.e_known = old.PE, old.MxE, old.MyE, old.VxE, old.VyE, True
+            cs.append(nc)
         if cs:
             self.prj.combos = cs
         self.prj.apply_combo(self.prj.combo_idx)
@@ -1725,6 +1762,133 @@ class MainWindow(QMainWindow):
         finally:
             self._loading = False
         self.on_change()
+
+
+    # ============================================================ sismica
+    _SEIS_GROUPS = ("Cargas de servicio por caso (sin factorar)", "Generacion de combinaciones (ASCE 7-05)",
+                    "Anclaje ductil (ACI 318-19 17.10.5.3(a))")
+
+    def _build_seismic(self, f):
+        f.group("Sitio y sistema")
+        f.check("Diseno sismico (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)", "seis.enabled", help="Activa los requisitos sismicos: las combinaciones de tipo E y Ωo reciben ACI 318-19 17.10 (regla del 20 %, factor 0.75 en los modos de concreto en traccion, anclaje ductil opcional) y se calcula la resistencia requerida de la base de AISC 341-22 D2.6.")
+        f.combo("Categoria de diseno sismico (SDC)", "seis.sdc", SDC_LIST, help="ASCE 7-05 11.6. ACI 318-19 17.10 solo aplica en SDC C, D, E y F.")
+        self.cb_seis_sys = f.combo("Sistema sismorresistente", "seis.system", SEIS_SYSTEMS, help="Sistema de la columna (ASCE 7-05 Tabla 12.2-1). Define Ωo por defecto, si las soldaduras columna-placa son de demanda critica (AISC 341-22 A3.4b) y los avisos de riostras. 'No detallado (R = 3)' no aplica AISC 341.")
+        self.cb_seis_sys.currentTextChanged.connect(self._on_seis_system)
+        f.num("Ωo (sobrerresistencia)", "seis.Omega0", 1.0, 4.0, 0.25, 2, help="Factor de sobrerresistencia de ASCE 7-05 Tabla 12.2-1. Se propone el del sistema; puede reducirse 0.5 con diafragma flexible (nota g).")
+        f.num("ρ (redundancia)", "seis.rho", 1.0, 1.3, 0.3, 2, help="ASCE 7-05 12.3.4: 1.0 o 1.3.")
+        f.num("SDS", "seis.SDS", 0.0, 3.0, 0.05, 3, help="Aceleracion espectral de diseno en periodo corto. Define Ev = 0.2·SDS·D (12.4.2.2).")
+        f.num("f1 (factor de L con sismo)", "seis.f1", 0.5, 1.0, 0.5, 2, help="ASCE 7-05 2.3.2 excepcion 1: 0.5 si L0 <= 100 psf (salvo garajes y lugares de reunion publica); si no, 1.0.")
+        f.num("Ry (0 = automatico)", "seis.Ry", 0.0, 2.0, 0.05, 2, help="Esfuerzo de fluencia esperado / minimo del acero de la columna, AISC 341-22 Tabla A3.2 (A992 1.1, A36 1.5, A500 Gr.B 1.4, A500 Gr.C 1.3, A53 1.6, A1085 1.25). 0 = segun el acero del perfil.")
+        f.num("H (altura del piso)", "seis.H", 1, 2000, uk="L", help="Altura del piso de la columna. Limite del cortante requerido de la base: 2·Ry·Fy·Z/H (AISC 341-22 D2.6b(b)(1)).")
+        f.check("La base transmite momento (empotrada)", "seis.base_moment", help="Si esta marcado, el momento de las combinaciones con Ωo se limita a 1.1·Ry·Fy·Z (AISC 341-22 D2.6c). Desmarque en bases articuladas.")
+        self.lbl_seis = QLabel("")
+        self.lbl_seis.setWordWrap(True)
+        self.lbl_seis.setStyleSheet("color:#595959; font-size:8pt;")
+        f._lay.addRow("Capacidad de la columna", self.lbl_seis)
+
+        f.group(self._SEIS_GROUPS[0])
+        self.tbl_seis = QTableWidget(len(SEIS_CASES), 5)
+        self.tbl_seis.setVerticalHeaderLabels(["D (muerta)", "L (viva)", "S (nieve)", "QEx (sismo X)", "QEy (sismo Y)"])
+        self.tbl_seis.setMinimumHeight(180)
+        self.tbl_seis.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.tbl_seis.itemChanged.connect(lambda *_: self._seis_changed())
+        f._lay.addRow(self.tbl_seis)
+        f.note("Cargas SIN FACTORAR en la base, en los ejes de la columna, con la misma convencion de signos que las "
+               "combinaciones (P positivo en compresion; Mx tracciona +Y). QEx y QEy son los efectos del sismo "
+               "horizontal en cada direccion, tal como salen del modelo del edificio (con su signo; el programa "
+               "genera ± cada uno).")
+
+        f.group(self._SEIS_GROUPS[1])
+        f.check("Incluir combinaciones de gravedad (2.3.2)", "seis.gravity", help="1.4D ; 1.2D + 1.6L + 0.5S ; 1.2D + 1.6S + f1·L.")
+        f.check("Direcciones ortogonales 100 % + 30 % (12.5)", "seis.ortho", help="±QEx ± 0.3·QEy y ±0.3·QEx ± QEy. Exigido en SDC D-F para columnas de dos sistemas que se cruzan (12.5.4).")
+        f.check("Limitar Ωo·QE por la capacidad de la columna (AISC 341-22 D2.6)", "seis.cap_limit", help="Resistencia requerida de la base = la menor entre la combinacion con Ωo y la capacidad de la columna: 1.1·Ry·Fy·Z en flexion, 2·Ry·Fy·Z/H en cortante.")
+        f.check("Conservar solo las combinaciones que gobiernan (recomendado)", "seis.prune", help="Calcula cada combinacion con el metodo cerrado y conserva las que dan el mayor D/C de alguna verificacion, mas la mas desfavorable de cada tipo. Reduce el numero de analisis 3D.")
+        bt = QPushButton("Generar combinaciones")
+        bt.clicked.connect(lambda: self.seis_generate())
+        f._lay.addRow(bt)
+        f.note("Genera (ASCE 7-05): (1.2 + 0.2·SDS)·D + ρ·QE + f1·L + 0.2·S ; (0.9 − 0.2·SDS)·D + ρ·QE (12.4.2.3) y las "
+               "mismas con Ωo·QE (12.4.3.2), con ±QE en cada direccion. REEMPLAZA la lista de la pestaña Cargas.")
+
+        f.group(self._SEIS_GROUPS[2])
+        f.check("Verificar anclaje ductil", "seis.ductile", help="ACI 318-19 17.10.5.3(a): acero ductil, la relacion de carga del acero (1.2·Nsa) mayor o igual que la del concreto, longitud de estiramiento >= 8·da y futa/fya >= 1.3 (F1554 Gr.105 no cumple salvo rosca recalcada).")
+        f.num("Longitud desadherida en el concreto (camisa)", "seis.sleeve", 0, 200, uk="L", help="Tramo del perno sin adherencia dentro del concreto. Estiramiento = camisa + mortero + stand-off + tp.")
+        f.check("Rosca recalcada (upset)", "seis.upset", help="Con rosca recalcada no se exige futa/fya >= 1.3 (17.10.5.3(a)(v)).")
+        f.finish()
+
+    def _on_seis_system(self, name):
+        if self._loading or name not in SEIS.OMEGA0_DEFAULT:
+            return
+        self.prj.seis.Omega0 = SEIS.OMEGA0_DEFAULT[name]
+        self._loading = True
+        try:
+            self.fnamed["Sismica"].load(self.prj)
+        finally:
+            self._loading = False
+
+    def _seis_load(self):
+        u, t = self.us, self.tbl_seis
+        t.blockSignals(True)
+        t.setHorizontalHeaderLabels([f"P ({u.F})", f"Mx ({u.label('M')})", f"My ({u.label('M')})",
+                                     f"Vx ({u.F})", f"Vy ({u.F})"])
+        kinds = ("F", "M", "M", "F", "F")
+        for i in range(len(SEIS_CASES)):
+            row = self.prj.seis.cases[i] if i < len(self.prj.seis.cases) else [0.0] * 5
+            for j in range(5):
+                t.setItem(i, j, QTableWidgetItem(f"{u.out(kinds[j], float(row[j])):.6g}"))
+        t.blockSignals(False)
+        lim = SEIS.capacity_limits(self.prj)
+        self.lbl_seis.setText(f"Ry = {lim['Ry']:g};  1.1·Ry·Fy·Zx = {u.q('M', lim['Mx'])},  1.1·Ry·Fy·Zy = "
+                              f"{u.q('M', lim['My'])};  2·Ry·Fy·Zx/H = {u.q('F', lim['Vy'])},  "
+                              f"2·Ry·Fy·Zy/H = {u.q('F', lim['Vx'])}")
+
+    def _seis_store(self):
+        u, t = self.us, self.tbl_seis
+        kinds = ("F", "M", "M", "F", "F")
+        cases = []
+        for i in range(len(SEIS_CASES)):
+            old = self.prj.seis.cases[i] if i < len(self.prj.seis.cases) else [0.0] * 5
+            row = []
+            for j in range(5):
+                try:
+                    txt = t.item(i, j).text().strip()
+                    if txt == f"{u.out(kinds[j], float(old[j])):.6g}":      # sin editar: conserva el valor exacto
+                        row.append(float(old[j]))
+                        continue
+                    v = float(txt.replace(",", ""))
+                    row.append(u.inn(kinds[j], v) if math.isfinite(v) else float(old[j]))
+                except (AttributeError, ValueError):
+                    row.append(float(old[j]))
+            cases.append(row)
+        self.prj.seis.cases = cases
+
+    def _seis_changed(self):
+        if self._loading:
+            return
+        self._seis_store()
+        self.on_change()
+
+    def seis_generate(self, ask=True):
+        """Genera las combinaciones de ASCE 7-05 a partir de los casos y reemplaza la lista de combinaciones."""
+        self.store_ui()
+        if ask and QMessageBox.question(
+                self, "Generar combinaciones",
+                f"Se reemplazaran las {len(self.prj.combo_list())} combinaciones actuales por las de ASCE 7-05. "
+                "¿Continuar?") != QMessageBox.Yes:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            cs = SEIS.generate(self.prj)
+            n_all = len(cs)
+            if self.prj.seis.prune:
+                cs = SEIS.prune(self.prj, cs)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.prj.combos = cs
+        self.prj.apply_combo(0)
+        self.load_ui()
+        self.recalc()
+        self.statusBar().showMessage(f"{len(cs)} combinaciones" + (f" (de {n_all} generadas)" if len(cs) != n_all else "")
+                                     + " — ASCE 7-05", 10000)
 
     # --------------------------------------------------------------- ejecutar
     def run_3d(self):

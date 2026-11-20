@@ -417,7 +417,7 @@ class Seismic:
     SDS: float = 1.0             # aceleracion espectral de diseno en periodo corto
     f1: float = 1.0              # factor de la carga viva en combinaciones con E (2.3.2 excepcion 1: 0.5)
     Ry: float = 0.0              # esfuerzo esperado / minimo (AISC 341-22 Tabla A3.2); 0 = automatico
-    H: float = 157.5             # altura del piso de la columna, in
+    H: float = 157.48            # altura del piso de la columna, in (4.0 m)
     base_moment: bool = True     # la base transmite momento (empotrada)
     cap_limit: bool = True       # limitar las combinaciones Ωo por la capacidad de la columna (AISC 341 D2.6b/c)
     ortho: bool = False          # combinar direcciones 100 % + 30 % (ASCE 7-05 12.5)

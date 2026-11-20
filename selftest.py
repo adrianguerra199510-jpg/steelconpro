@@ -383,6 +383,22 @@ try:
     _w.recalc(); _w.draw_geom(); _w.draw_3d()
     _q, _R = _w.export_target()
     print(f"{'interfaz (offscreen)':34} recalc, dibujo y exportacion OK   metodos: {len(dir(_w))}")
+    # pestana sismica: generar combinaciones desde la interfaz
+    _tabs = [_w.tabs_in.tabText(i) for i in range(_w.tabs_in.count())]
+    if "Sismica" not in _tabs:
+        FAIL.append("interfaz: falta la pestana Sismica")
+    _w.prj.seis.enabled = True
+    _w.prj.seis.cases = [[100.0, 0, 0, 0, 0], [50.0, 0, 0, 0, 0], [0.0] * 5, [0.0, 1000.0, 0, 0, 20.0], [0.0] * 5]
+    _w.prj.seis.prune = False
+    _w.load_ui()
+    _w.seis_generate(ask=False)
+    if len(_w.prj.combos) != 11 or _w.tbl_cb.columnCount() != 7 or _w.tbl_cb.rowCount() != 11:
+        FAIL.append(f"interfaz: generar combinaciones ({len(_w.prj.combos)} comb., {_w.tbl_cb.columnCount()} columnas)")
+    _w.store_ui()
+    if _w.prj.seis.cases[3][1] != 1000.0 or [c.kind for c in _w.prj.combos].count("Ωo") != 4:
+        FAIL.append("interfaz: la tabla de casos o la columna Tipo no se conservan al guardar la interfaz")
+    _w.recalc()
+    print(f"{'interfaz: pestana Sismica':34} {len(_w.prj.combos)} combinaciones generadas")
 except ImportError:
     print(f"{'interfaz':34} omitida (sin PySide6)")
 except Exception as _e:
