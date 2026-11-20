@@ -149,7 +149,9 @@ def _base_cases(prj, nd: Nodo):
     Fm = np.column_stack([sx, sy, A_in]) @ Rz
     ex, ey, ez = Fm[:, 0], Fm[:, 1], Fm[:, 2]
     out = []
-    for cname, loads in cases:
+
+    def plate_load(loads):
+        """([Pu, Mux, Muy, Vux, Vuy], Fp, Mp) de la placa para una lista de cargas del nudo."""
         bal = balance(nd, loads)
         if m is None:
             if side == bal["side"]:
@@ -168,7 +170,39 @@ def _base_cases(prj, nd: Nodo):
         # accion del extremo del miembro sobre la placa = −(accion del apoyo sobre el miembro); el apoyo equilibra al tramo entre el nudo y la placa
         Fp = -R
         Mp = -MR - np.cross(-E, R)            # momento respecto del centro de la placa: −M_R − (O − E) × R
-        out.append((LoadCombo(cname, float(np.dot(R, ez)), float(np.dot(Mp, ex)), float(-np.dot(Mp, ey)), float(np.dot(Fp, ex)), float(np.dot(Fp, ey))), E, Fp, Mp))
+        return [float(np.dot(R, ez)), float(np.dot(Mp, ex)), float(-np.dot(Mp, ey)), float(np.dot(Fp, ex)), float(np.dot(Fp, ey))], Fp, Mp
+
+    kinds = getattr(nd, "case_kind", None) or {}
+    metas = getattr(nd, "case_meta", None) or {}
+    for cname, loads in cases:
+        v, Fp, Mp = plate_load(loads)
+        lc = LoadCombo(cname, *v)
+        k = kinds.get(cname, "")
+        if k in ("E", "Ωo"):
+            lc.kind = k
+            meta = metas.get(cname)
+            if meta:                                          # parte sismica: la carga de la placa del caso virtual de solo E (el equilibrio es lineal)
+                ve = plate_load(_scaled(nd, meta.get("e", {})))[0]
+                vg = plate_load(_scaled(nd, meta.get("g", {})))[0]
+                if all(abs(a + b - t) <= 1e-6 * max(1.0, abs(t)) for a, b, t in zip(ve, vg, v)):
+                    lc.PE, lc.MxE, lc.MyE, lc.VxE, lc.VyE = ve
+                    lc.e_known = True                         # si no coincide (casos de servicio editados despues), se toma como 100 % sismica
+        out.append((lc, E, Fp, Mp))
+    return out
+
+
+def _scaled(nd: Nodo, coefs: dict) -> list:
+    """Cargas del caso virtual Σ coef·(caso de servicio), con los mismos filtros que cases_of (liberaciones, nudo intermedio)."""
+    import dataclasses
+    kinds = getattr(nd, "case_kind", None) or {}
+    intermediate = nd.end_index == 0
+    out = []
+    for x in nd.loads:
+        a = coefs.get(kinds.get(x.case, ""), 0.0)
+        if not a or (intermediate and x.member == nd.main_name):
+            continue
+        x = nd.effective_load(x)
+        out.append(dataclasses.replace(x, case="virtual", N=a * x.N, Vy=a * x.Vy, Vz=a * x.Vz, T=a * x.T, My=a * x.My, Mz=a * x.Mz))
     return out
 
 

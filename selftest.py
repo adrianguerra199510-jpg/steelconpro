@@ -634,6 +634,65 @@ except Exception as _e_:
     FAIL.append(f"sismo/nudo: {type(_e_).__name__}: {_e_}")
 
 
+try:
+    # --- placa base desde el nudo: parte sismica de cada combinacion y limite por capacidad (AISC 341-22 D2.6)
+    from steelconpro import seismic as SE
+    from steelconpro.conn import nodal as NOD, baseplate as BPm
+    import copy as _cp
+    _q = _sis_node(qex_my=400.0)
+    SE.generate_node_cases(_q)
+    _bp = BPm.derive(_q)
+    _cb = {c.name: c for c in _bp.combo_list()}
+    _e1 = next(n for n in _cb if n.startswith("E1:"))
+    _c = _cb[_e1]
+    if not (_c.kind == "E" and _c.e_known):
+        FAIL.append("sismo/placa base: la combinacion E1 del nudo debe llegar con tipo E y parte sismica conocida")
+    # parte no sismica = caso escrito a mano con solo los coeficientes g
+    _qg = _sis_node(qex_my=400.0)
+    _m = _q.node.case_meta[_e1]["g"]
+    _svc = {}
+    for l in _qg.node.loads:
+        if _qg.node.case_kind.get(l.case):
+            _svc.setdefault(l.case, []).append(l)
+    _qg.node.loads = []
+    for k, a_ in _m.items():
+        for l in _svc.get(k, []):
+            l2 = _cp.deepcopy(l); l2.case = "g"
+            for f in ("N", "Vy", "Vz", "T", "My", "Mz"):
+                setattr(l2, f, a_ * getattr(l, f))
+            _qg.node.loads.append(l2)
+    _qg.node.case_kind = {}
+    _g = NOD.base_combos(_qg, _qg.node)
+    _gs = {}
+    for c in _g:
+        pass
+    _gp = [sum(getattr(c, f) for c in _g) for f in ("Pu", "Mux", "Muy", "Vux", "Vuy")]
+    _ne = [_c.Pu - _c.PE, _c.Mux - _c.MxE, _c.Muy - _c.MyE, _c.Vux - _c.VxE, _c.Vuy - _c.VyE]
+    if any(abs(x - y) > 1e-6 * max(1.0, abs(y)) for x, y in zip(_ne, _gp)):
+        FAIL.append(f"sismo/placa base: total − parte E debe ser la carga de la parte no sismica ({_ne} vs {_gp})")
+    # limite por capacidad en las Ωo: momento enorme en la viga
+    _qb = _sis_node(qex_my=4.0e6)
+    SE.generate_node_cases(_qb)
+    _bb = BPm.derive(_qb)
+    _lim = SE.capacity_limits(_bb)
+    _om = [c for c in _bb.combo_list() if c.kind == "Ωo"]
+    _mm = max(max(abs(c.Mux), abs(c.Muy)) for c in _om)
+    if not _om or _mm > max(_lim["Mx"], _lim["My"]) + 1e-6 or _mm < min(_lim["Mx"], _lim["My"]) - 1e-6:
+        FAIL.append(f"sismo/placa base: Ωo debe quedar limitado a 1.1·Ry·Fy·Z ({_mm:.0f} vs {_lim['Mx']:.0f}/{_lim['My']:.0f})")
+    _es = [c for c in _bb.combo_list() if c.kind == "E"]
+    if max(max(abs(c.Mux), abs(c.Muy)) for c in _es) < 1.0e5:
+        FAIL.append("sismo/placa base: las combinaciones E (ρ·QE) no se limitan por capacidad")
+    _st = SE.seismic_state(_bb.with_combo([c.name for c in _bb.combo_list()].index(_e1)))
+    # sin sismo: igual que antes
+    _q0 = _sis_node(); _q0.node.case_kind = {}; _q0.seis.enabled = False
+    if any(c.kind or c.e_known for c in BPm.derive(_q0).combo_list()):
+        FAIL.append("sismo/placa base: sin tipos de caso las combinaciones quedan como antes")
+    print(f"{'sismo: placa base desde el nudo':34} E1 {_c.name[:28]}  fN = {_st.fN:.2f}  Ωo max |M| = {_mm:.0f} (lim {_lim['Mx']:.0f})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/placa base: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile
