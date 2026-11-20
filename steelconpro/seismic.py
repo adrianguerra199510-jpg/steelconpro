@@ -104,6 +104,83 @@ def _lin(coefs, cases):
     return [sum(a * cases[i][k] for i, a in enumerate(coefs)) for k in range(5)]
 
 
+SERVICE_KINDS = ("D", "L", "S", "QEx", "QEy")
+GENERATED_KINDS = ("G", "E", "Ωo")
+
+
+def combo_specs(S, has_x: bool, has_y: bool) -> list:
+    """Combinaciones LRFD de ASCE 7-05 como coeficientes sobre los casos de servicio:
+    [{"kind": "G"/"E"/"Ωo", "label", "g": {D, L, S}, "e": {D, QEx, QEy}}]; g = parte no sismica, e = Ev + ρ/Ωo·QE."""
+    f1, sds = S.f1, S.SDS
+    out = []
+    if S.gravity:
+        for aD, aL, aS in ((1.4, 0.0, 0.0), (1.2, 1.6, 0.5), (1.2, f1, 1.6)):          # ASCE 7-05 2.3.2 (1), (2), (3)
+            out.append({"kind": "G", "label": _term(aD, "D", True) + _term(aL, "L") + _term(aS, "S"),
+                        "g": {"D": aD, "L": aL, "S": aS}, "e": {}})
+    cs = [[0.0] * 5] * 3 + [[1.0] * 5 if has_x else [0.0] * 5, [1.0] * 5 if has_y else [0.0] * 5]
+    dirs = _directions(cs, S.ortho)
+    for kind, fq in (("E", S.rho), ("Ωo", S.Omega0)):
+        for aD, aL, aS, ev in ((1.2 + 0.2 * sds, f1, 0.2, +1), (0.9 - 0.2 * sds, 0.0, 0.0, -1)):
+            for ax, ay in dirs:
+                out.append({"kind": kind,
+                            "label": (_term(aD, "D", True) + _term(aL, "L") + _term(aS, "S")
+                                      + _term(fq * ax, "QEx") + _term(fq * ay, "QEy")),
+                            "g": {"D": 1.2 if ev > 0 else 0.9, "L": aL, "S": aS},
+                            "e": {"D": ev * 0.2 * sds, "QEx": fq * ax, "QEy": fq * ay}})
+    return out
+
+
+def generate_node_cases(prj: Project) -> int:
+    """Genera en el nudo los casos factorizados de ASCE 7-05 a partir de los casos marcados como servicio (D, L, S, QEx, QEy en
+    `node.case_kind`): cada caso generado es, miembro a miembro (y lado del principal), la combinacion lineal de las filas de servicio
+    (el equilibrio del nudo es lineal).  Reemplaza los casos generados antes; no toca los escritos a mano.  Devuelve cuantos genero."""
+    from .conn.specs import Load
+    nd = prj.node
+    kinds = dict(getattr(nd, "case_kind", None) or {})
+    svc = {}                                                  # tipo de servicio -> {(miembro, lado): [N, Vy, Vz, T, My, Mz]}
+    for l in nd.loads:
+        k = kinds.get(l.case)
+        if k in SERVICE_KINDS:
+            row = svc.setdefault(k, {}).setdefault((l.member, int(l.side)), [0.0] * 6)
+            for i, key in enumerate(("N", "Vy", "Vz", "T", "My", "Mz")):
+                row[i] += float(getattr(l, key))
+    old = {c for c, k in kinds.items() if k in GENERATED_KINDS}
+    nd.loads = [l for l in nd.loads if l.case not in old]
+    for c in old:
+        kinds.pop(c, None)
+        nd.case_meta.pop(c, None)
+    nz = lambda k: any(abs(v) > 1e-12 for r in svc.get(k, {}).values() for v in r)          # noqa: E731
+    if not svc or not (nz("D") or nz("L") or nz("S") or nz("QEx") or nz("QEy")):
+        nd.case_kind = kinds
+        return 0
+    keys = sorted({mk for d in svc.values() for mk in d}, key=lambda t: (t[0], t[1]))
+    made, seen = [], set()
+    cnt = {"G": 0, "E": 0, "Ωo": 0}
+    pre = {"G": "G", "E": "E", "Ωo": "Ω"}
+    for sp in combo_specs(prj.seis, nz("QEx"), nz("QEy")):
+        coef = {}
+        for d in (sp["g"], sp["e"]):
+            for k, a in d.items():
+                coef[k] = coef.get(k, 0.0) + a
+        rows = []
+        for mk in keys:
+            v = [sum(a * svc.get(k, {}).get(mk, [0.0] * 6)[i] for k, a in coef.items()) for i in range(6)]
+            rows.append((mk, v))
+        sig = (sp["kind"],) + tuple((mk, tuple(round(x, 9) for x in v)) for mk, v in rows)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        cnt[sp["kind"]] += 1
+        name = f"{pre[sp['kind']]}{cnt[sp['kind']]}: {sp['label']}"
+        for (m, side), v in rows:
+            nd.loads.append(Load(name, m, *v, side=side))
+        kinds[name] = sp["kind"]
+        nd.case_meta[name] = {"kind": sp["kind"], "g": dict(sp["g"]), "e": dict(sp["e"])}
+        made.append(name)
+    nd.case_kind = kinds
+    return len(made)
+
+
 def generate(prj: Project) -> list:
     """Combinaciones LRFD de ASCE 7-05 a partir de las cargas de servicio de prj.seis.cases.
     Gravedad (G), sismicas (E: ρ·QE) y de sobrerresistencia (Ω: Ωo·QE), con la parte sismica guardada."""

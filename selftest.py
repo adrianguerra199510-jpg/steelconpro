@@ -583,6 +583,57 @@ except Exception as _e_:
     FAIL.append(f"sismo/verificaciones: {type(_e_).__name__}: {_e_}")
 
 
+# ------------------------------------------------ sismo en el nudo: casos de servicio, generador y placa base
+def _sis_node(qex_my=0.0):
+    from steelconpro.model import load_book as _lb
+    from steelconpro.conn.specs import Load as _Ld
+    q = _lb("ejemplos/CN-04_columna_con_placa_base.scp")[0]
+    nd = q.node
+    for l in nd.loads:
+        l.case = "D"
+    nd.loads += [_Ld("L", "V1", Vz=-8.0), _Ld("L", "V2", Vz=-8.0),
+                 _Ld("QEx", "D1", N=20.0), _Ld("QEx", "V1", My=qex_my),
+                 _Ld("M1", "V1", Vz=-30.0)]
+    nd.case_kind = {"D": "D", "L": "L", "QEx": "QEx"}
+    q.seis.enabled = True
+    return q
+
+
+try:
+    from steelconpro import seismic as SE
+    from steelconpro.conn import nodal as NOD
+    _q = _sis_node()
+    _n = SE.generate_node_cases(_q)
+    _nd = _q.node
+    _names = [c for c, _ in NOD.cases_of(_nd)]
+    _gen = [c for c in _names if _nd.case_kind.get(c) in ("G", "E", "Ωo")]
+    _kinds = [_nd.case_kind[c] for c in _gen]
+    if (_n, _kinds.count("G"), _kinds.count("E"), _kinds.count("Ωo")) != (11, 3, 4, 4):
+        FAIL.append(f"sismo/nudo: se esperaban 11 casos generados (3 G, 4 E, 4 Ω): {_n} {_kinds}")
+    if any(c in _names for c in ("D", "L", "QEx")) or "M1" not in _names:
+        FAIL.append("sismo/nudo: los casos de servicio no se disenan y los escritos a mano se conservan")
+    _e1 = next(c for c in _gen if c.startswith("E1:"))
+    _ld = {(l.case, l.member): l for l in _nd.loads}
+    if abs(_ld[(_e1, "D1")].N - (1.4 * 2.0 + 20.0)) > 1e-9 or abs(_ld[(_e1, "V1")].Vz - (1.4 * -15.0 + 1.0 * -8.0)) > 1e-9:
+        FAIL.append("sismo/nudo: E1 = (1.2 + 0.2SDS)D + f1·L + 0.2S + ρQEx por miembro")
+    if not (_q.node.case_meta.get(_e1, {}).get("e", {}).get("QEx") == 1.0):
+        FAIL.append("sismo/nudo: falta la parte sismica (case_meta) del caso generado")
+    _n2 = SE.generate_node_cases(_q)
+    if _n2 != 11 or len([c for c, _ in NOD.cases_of(_q.node)]) != 12:
+        FAIL.append("sismo/nudo: regenerar no debe duplicar casos")
+    _q0 = _sis_node(); _q0.node.case_kind = {}
+    if SE.generate_node_cases(_q0) != 0 or len(NOD.cases_of(_q0.node)) != 4:
+        FAIL.append("sismo/nudo: sin casos de servicio marcados no se genera nada ni se borra lo escrito")
+    from steelconpro.model import Project as _P
+    _rt = _P.from_json(_q.to_json())
+    if _rt.node.case_kind != _q.node.case_kind or _rt.node.case_meta.get(_e1) != _q.node.case_meta.get(_e1):
+        FAIL.append("sismo/nudo: guardar/abrir no conserva el tipo y la composicion de los casos")
+    print(f"{'sismo: generador en el nudo':34} {_n} casos generados  ({_e1})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/nudo: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

@@ -24,9 +24,13 @@ KEYS = ("N", "Vy", "Vz", "T", "My", "Mz")
 
 def cases_of(nd: Nodo):
     """[(caso, [Load])] en orden de aparicion."""
+    from ..seismic import SERVICE_KINDS
+    kinds = getattr(nd, "case_kind", None) or {}
     out = {}
     intermediate = nd.end_index == 0                         # el principal pasa por el nudo: sus lados los da el equilibrio, no se le asignan cargas
     for x in nd.loads:
+        if kinds.get(x.case) in SERVICE_KINDS:                 # caso de servicio (sin factorar): solo alimenta el generador sismico
+            continue
         if intermediate and x.member == nd.main_name:
             continue
         out.setdefault(x.case, []).append(nd.effective_load(x))          # las rotaciones liberadas en el extremo del nudo no transmiten momento
