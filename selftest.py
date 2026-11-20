@@ -617,6 +617,22 @@ except Exception as _e_:
     FAIL.append(f"sismo/verificaciones: {type(_e_).__name__}: {_e_}")
 
 
+try:
+    # --- ejemplo sismico: abre, tiene combinaciones E y Ωo y todas resuelven
+    from placabase.model import load_book as _lb
+    _ex = _lb("ejemplos/SIS-01_W14X90_SMF.pbase")[0]
+    _kinds = {c.kind for c in _ex.combo_list()}
+    if not (_ex.seis.enabled and {"E", "Ωo"} <= _kinds):
+        FAIL.append("ejemplo SIS-01: debe tener el diseno sismico activo y combinaciones E y Ωo")
+    _rs = [solve(_ex.with_combo(i)) for i in range(len(_ex.combos))]
+    _gi = max(range(len(_rs)), key=lambda i: _rs[i].max_ratio)
+    print(f"{'ejemplo SIS-01 (SMF, SDC D)':34} {len(_ex.combos)} comb.  gobierna {_ex.combos[_gi].name}  "
+          f"D/C = {_rs[_gi].max_ratio:.3f} ({_rs[_gi].governing.title[:40]})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"ejemplo SIS-01: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile
