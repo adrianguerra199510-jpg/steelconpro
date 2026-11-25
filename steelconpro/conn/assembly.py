@@ -2208,6 +2208,9 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
     if fem is not None:
         _fem_setup(mdl, nd, fem, fem_ends, lneg, lpos, mshape, base=bool(getattr(mdl, 'base_fem', False)))
     _node_dims(mdl, A * (-lneg), A * lpos, axes)
+    mdl.wire = {"node": [0.0, 0.0, 0.0],
+                "lines": [{"name": nd.main_name, "kind": "principal", "a": [float(x) for x in A * (-lneg)], "b": [float(x) for x in A * lpos], "attach": None}]
+                + [{"name": nm, "kind": "miembro", "a": [float(x) for x in p0], "b": [float(x) for x in e_], "attach": [float(x) for x in p0]} for (nm, _s, e_, p0, _pos) in axes]}
     return mdl
 
 

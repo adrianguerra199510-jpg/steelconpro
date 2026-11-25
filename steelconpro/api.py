@@ -383,7 +383,7 @@ def mesh(args) -> dict:
     dims = [{"a": list(map(float, a)), "b": list(map(float, b)), "off": list(map(float, off)),
              "value": float(val) if not isinstance(val, str) else val, "views": list(views)} for a, b, off, val, views in mdl.dims]
     labels = [{"pos": list(map(float, pos)), "text": text} for pos, text in mdl.tags] + plane_labels
-    return {"parts": parts, "dims": dims, "labels": labels, "notes": mdl.notes, "bounds": [lo, hi], "unit": "in"}
+    return {"parts": parts, "dims": dims, "labels": labels, "notes": mdl.notes, "bounds": [lo, hi], "unit": "in", "wire": getattr(mdl, "wire", None) or None}
 
 
 def thumbnail(args) -> dict:

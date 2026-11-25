@@ -537,3 +537,8 @@ cierra con V.
 ## Flechas de carga
 - Toda flecha de fuerza (cargas de los miembros, cargas del nudo y reacciones) **nace en el elemento**, en su punto de aplicación (extremo libre del miembro), y **sale hacia afuera en el sentido de la fuerza**; su rótulo queda más allá de la punta. Los momentos siguen dibujándose como arcos alrededor del punto. **El tamaño de las flechas es fijo**: depende del tamaño del elemento donde se aplican (0.6 × su dimensión mayor, acotado entre 0.14 y 0.3 de la diagonal del conjunto), nunca del valor de la fuerza; el valor va solo en el rótulo.
 
+## Modo alámbrico del visor
+- Botón «Modo alámbrico» (barra del visor): oculta las piezas sólidas y dibuja **cada miembro como su eje** (línea; el principal en azul oscuro, los demás en azul) y el **nudo de análisis como una esfera naranja** con su rótulo, en el origen de las posiciones (`pos = 0` sobre el principal). Los puntos donde un miembro llega a su apoyo fuera del nudo llevan un punto. Se elige un miembro haciendo clic en su eje.
+- Se ven las **cargas** de los miembros (en el extremo libre, como siempre) y las **resultantes del equilibrio dibujadas en el nudo**: la **reacción** del principal (verde, fuerza y momento) y la **resultante de las cargas** aplicadas (marrón, la suma de las fuerzas y de los momentos respecto del nudo, de sentido contrario a la reacción). Con placa base la reacción no se dibuja en el modo normal (es la carga de la placa); en el alámbrico sí. Los botones de cargas y reacciones de la barra siguen mandando.
+- El motor devuelve la geometría en `api.mesh(...)["wire"]` (`Model3D.wire`: nodo y ejes de cada miembro); prueba en `electron/tests/alambrico.js`.
+

@@ -276,6 +276,7 @@ class Model3D:
     generic: list = field(default_factory=list)   # entradas de las operaciones generales (placas, pernos, soldaduras) para sus verificaciones
     elems: dict = field(default_factory=dict)     # elementos con caras (miembros, placas, placa base): nombre -> datos
     grounds: list = field(default_factory=list)  # apoyos elasticos solo-compresion contra suelo fijo: [{name, part, box, normal, kv}] (kv en kip/in3): el concreto bajo la placa base
+    wire: dict = field(default_factory=dict)       # modo alambrico del visor: {'node': [x, y, z], 'lines': [{name, kind ('principal'|'miembro'), a, b}]}
     base_fem: bool = False                        # la placa base (y su concreto y anclajes) entra al FEM del nudo
     base_xf: tuple = None                         # (O, F) de la placa base: coordenadas de placa -> mundo (None sin placa base)
 

@@ -26,7 +26,7 @@ export async function enter(app, params) {
   E.rel = params.abs ? null : params.path;
   let book;
   try { book = await call('book_load', { path: E.abs }); } catch (e) { errorBox(e); await go('home'); return; }
-  E.conns = book.connections; E.idx = 0; E.res = null; E.stale = true; E.undo = []; E.redo = []; E.femView = false; E.sel = null; E.job = null;
+  E.conns = book.connections; E.idx = 0; E.res = null; E.stale = true; E.undo = []; E.redo = []; E.femView = false; E.wireOn = false; E.sel = null; E.job = null;
   if (book.skipped && book.skipped.length) toast(`${book.skipped.length} conexión(es) de versiones anteriores no se pudieron abrir.`, 'info', 7000);
   if (E.rel) call('ws_touch', { root: S.root, path: E.rel }).catch(() => {});
   applyUnits();
@@ -201,6 +201,7 @@ function build(app) {
   ui.note = h('div', { class: 'vnote' });
   const vtool = h('div', { class: 'vtool' },
     h('div', { class: 'group' }, iconBtn('home', 'Vista isométrica', () => E.viewer.setView('iso')), iconBtn('crosshair', 'Ajustar a la pantalla', () => E.viewer.fit()), ui.dimBtn = iconBtn('ruler', 'Cotas', () => { const on = !E.viewer.showDims; E.viewer.setDims(on); ui.dimBtn.classList.toggle('on', on); }),
+      ui.wireBtn = iconBtn('wire', 'Modo alámbrico: ejes de los miembros, nudo de análisis, cargas y resultantes del equilibrio', () => { E.wireOn = !E.wireOn; E.viewer.setWireMode(E.wireOn); ui.wireBtn.classList.toggle('on', E.wireOn); applyLoads(); }),
       ui.tagBtn = iconBtn('tag', 'Etiquetas', () => { const on = !E.viewer.showLabels; E.viewer.setLabels(on); ui.tagBtn.classList.toggle('on', on); }),
       ui.hwBtn = iconBtn('bolt', 'Mostrar placas, pernos y soldaduras', () => { const nd = E.conn().node; nd.show_hw = !nd.show_hw; ui.hwBtn.classList.toggle('on', nd.show_hw); E.changed({}); }),
       iconBtn('download', 'Guardar imagen', async () => { const f = await native.saveFile('conexion.png', [{ name: 'Imagen PNG', extensions: ['png'] }]); if (f) { try { await call('save_png', { path: f, data: E.viewer.screenshot() }); toast('Imagen guardada', 'ok'); } catch (e) { errorBox(e); } } })));
@@ -766,8 +767,20 @@ function applyLoads() {
   if (!a || !a.cases.length || E.femView) { v.setLoads([]); return; }
   const c = a.cases[Math.min(E.loadCase || 0, a.cases.length - 1)];
   const nrm = (x) => Math.hypot(x[0], x[1], x[2]);
-  v.setLoads(c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ name: d.name, pos: d.pos, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
-    textF: nrm(d.F) > 1e-9 ? `${d.name}: ${us.q('F', nrm(d.F), 2)}` : '', textM: nrm(d.M) > 1e-9 ? `${d.name}: ${us.q('M', nrm(d.M), 1)}` : '' })));
+  const wire = !!(E.wireOn && v.wireData);                                         // modo alámbrico: la reacción y la resultante se dibujan en el nudo de análisis
+  const node = (v.wireData && v.wireData.node) || [0, 0, 0];
+  const items = c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ name: d.name, pos: wire && d.kind === 'reaction' ? node : d.pos, lScale: wire && d.kind === 'reaction' ? 0.7 : 1, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
+    textF: nrm(d.F) > 1e-9 ? `${d.name}: ${us.q('F', nrm(d.F), 2)}` : '', textM: nrm(d.M) > 1e-9 ? `${d.name}: ${us.q('M', nrm(d.M), 1)}` : '' }));
+  const nm = E.conn().node.main_name;
+  if (wire && E.showReactionsOn && c.R && !c.draw.some((d) => d.kind === 'reaction') && (nrm(c.R) > 1e-9 || nrm(c.M) > 1e-9)) {              // con placa base la reacción es la carga de la placa: en el alámbrico se dibuja igual en el nudo
+    items.push({ name: `${nm} (reacción)`, pos: node, lScale: 0.7, F: c.R, M: c.M, color: FORCE_COL.reaction, colorM: '#8e44ad',
+      textF: nrm(c.R) > 1e-9 ? `${nm} (reacción): ${us.q('F', nrm(c.R), 2)}` : '', textM: nrm(c.M) > 1e-9 ? `${nm} (reacción): ${us.q('M', nrm(c.M), 1)}` : '' });
+  }
+  if (wire && E.showReactionsOn && c.sum_F && (nrm(c.sum_F) > 1e-9 || nrm(c.sum_M) > 1e-9)) {
+    items.push({ name: `${nm} (resultante)`, pos: node, lScale: 0.7, F: c.sum_F, M: c.sum_M, mScale: 0.7, color: '#b45309', colorM: '#b45309',
+      textF: nrm(c.sum_F) > 1e-9 ? `Resultante de las cargas: ${us.q('F', nrm(c.sum_F), 2)}` : '', textM: nrm(c.sum_M) > 1e-9 ? `Resultante de las cargas: ${us.q('M', nrm(c.sum_M), 1)}` : '' });
+  }
+  v.setLoads(items);
 }
 
 function renderNodal() {

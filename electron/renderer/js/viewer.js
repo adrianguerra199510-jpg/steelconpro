@@ -143,6 +143,7 @@ export class Viewer {
     this.hidden = new Set();
     this.dimGroup = new THREE.Group(); this.scene.add(this.dimGroup);
     this.loadGroup = new THREE.Group(); this.scene.add(this.loadGroup); this.loadEls = []; this.showLoads = true;
+    this.wireGroup = new THREE.Group(); this.wireGroup.visible = false; this.scene.add(this.wireGroup); this.wireMeshes = []; this.wireEls = []; this.wireData = null; this.wireOn = false;   // modo alámbrico
     this.overlay = document.createElement('div'); this.overlay.className = 'vlabels'; container.append(this.overlay);
     this.uniforms = { uCam: { value: new THREE.Vector3(0, 0, 1) }, uL: { value: new THREE.Vector3(0.4, -0.5, 0.75).normalize() } };
     this._raf = 0;
@@ -168,7 +169,7 @@ export class Viewer {
     this.parts = [];
     this.dimGroup.clear();
     this.clearLoads();                                  // las flechas y sus rótulos son del modelo anterior
-    this.overlay.replaceChildren(); this.loadEls = []; this.labelEls = []; this.dimEls = []; this.dimLabels = [];
+    this.overlay.replaceChildren(); this.loadEls = []; this.labelEls = []; this.dimEls = []; this.dimLabels = []; this.wireEls = [];
   }
 
   // closed: la malla de la pieza es una superficie cerrada con las normales hacia afuera (prismas del modelo): se dibuja solo la cara que mira a la cámara.
@@ -213,6 +214,7 @@ export class Viewer {
     this.bounds = new THREE.Box3(new THREE.Vector3(...lo), new THREE.Vector3(...hi));
     this.dimData = data.dims || []; this.labelData = data.labels || [];
     this._buildDims(); this._buildLabels();
+    this.setWire('wire' in data ? data.wire : null);
     this._applyVisibility(); this._applySelection();
     if (!keepView || !this._fitted) { this.setView(this.view, true); this._fitted = true; }
     this.requestRender();
@@ -275,7 +277,7 @@ export class Viewer {
     // el tamaño de las flechas es FIJO: depende del tamaño del elemento en el que se aplican (su dimensión mayor), no del valor de la fuerza
     const sizes = {};
     const elemSize = (name) => {
-      const base = String(name || '').replace(/ \((reacción|reaccion)\)$/, '');
+      const base = String(name || '').replace(/ \((reacción|reaccion|resultante)\)$/, '');
       if (sizes[base] != null) return sizes[base];
       let dim = 0;
       const part = this.parts.find((p) => p.name === base && p.kind !== 'weld');
@@ -304,7 +306,7 @@ export class Viewer {
       const c = it.color || '#d62728';
       const F = new THREE.Vector3(...(it.F || [0, 0, 0])); const f = F.length();
       if (f > 1e-9) {
-        const len = elemSize(it.name); const dir = F.clone().normalize();
+        const len = elemSize(it.name) * (it.lScale || 1); const dir = F.clone().normalize();
         const rad = 0.035 * len, head = 0.22 * len;
         const tip = P.clone().addScaledVector(dir, len);                      // la flecha nace en el elemento (punto de aplicación) y sale hacia afuera, en el sentido de la fuerza
         arrow(P.clone(), tip, c, rad, head);
@@ -315,7 +317,7 @@ export class Viewer {
         const ax = M.clone().normalize();
         const ref = Math.abs(ax.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
         const u = new THREE.Vector3().crossVectors(ax, ref).normalize(); const v = new THREE.Vector3().crossVectors(ax, u);
-        const Lm = elemSize(it.name); const R = 0.3 * Lm; const rad = 0.035 * Lm, head = 0.22 * Lm; const pts = [];
+        const Lm = elemSize(it.name); const R = 0.3 * Lm * (it.mScale || 1); const rad = 0.035 * Lm, head = 0.22 * Lm; const pts = [];
         for (let k = 0; k <= 36; k++) { const a = (k / 36) * Math.PI * 1.5; pts.push(P.clone().addScaledVector(u, R * Math.cos(a)).addScaledVector(v, R * Math.sin(a))); }
         const curve = new THREE.CatmullRomCurve3(pts);
         const tube = add(new THREE.TubeGeometry(curve, 40, rad * 0.8, 8, false), it.colorM || '#8e44ad');
@@ -330,6 +332,39 @@ export class Viewer {
     this.requestRender();
   }
 
+  // ---------------------------------------------------------------- modo alámbrico: cada miembro es su eje (línea) y el nudo de análisis es una esfera
+  // w = { node: [x, y, z], lines: [{ name, kind: 'principal' | 'miembro', a: [..], b: [..], attach }] }
+  setWire(w) {
+    for (const o of [...this.wireGroup.children]) { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); this.wireGroup.remove(o); }
+    for (const e of this.wireEls) e.el.remove();
+    this.wireMeshes = []; this.wireEls = []; this.wireData = w || null;
+    if (!w) { this.wireGroup.visible = false; return; }
+    const diag = this.bounds.getSize(new THREE.Vector3()).length() || 100;
+    const r = 0.0065 * diag, up = new THREE.Vector3(0, 1, 0);
+    const mat = (c) => new THREE.MeshBasicMaterial({ color: c });
+    for (const l of w.lines || []) {
+      const a = new THREE.Vector3(...l.a), b = new THREE.Vector3(...l.b); const d = b.clone().sub(a); const len = d.length(); if (len < 1e-9) continue;
+      const dir = d.clone().normalize(); const col = l.kind === 'principal' ? '#1f3864' : '#2e75b6';
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), mat(col));
+      m.position.copy(a).addScaledVector(dir, len / 2); m.quaternion.setFromUnitVectors(up, dir);
+      m.userData.part = { name: l.name, kind: 'wire', label: l.name, owner: '' }; m.userData.base = col;
+      this.wireGroup.add(m); this.wireMeshes.push(m);
+      if (l.attach && a.length() > 1e-6) {                                                   // punto donde el miembro llega a su apoyo (fuera del nudo)
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(1.9 * r, 14, 10), mat(col)); dot.position.copy(a); dot.userData.part = m.userData.part; dot.userData.base = col;
+        this.wireGroup.add(dot); this.wireMeshes.push(dot);
+      }
+    }
+    const N = new THREE.Vector3(...(w.node || [0, 0, 0]));
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.026 * diag, 24, 16), mat('#e85d0c'));
+    ball.position.copy(N); ball.userData.part = { name: 'Nudo de análisis', kind: 'node', label: 'Nudo de análisis', owner: '' }; ball.userData.base = '#e85d0c'; ball.renderOrder = 5;
+    this.wireGroup.add(ball); this.wireMeshes.push(ball);
+    const e = document.createElement('div'); e.className = 'vlabel'; e.textContent = 'Nudo de análisis'; e.style.borderColor = '#e85d0c'; e.style.color = '#c44a06'; e.style.fontWeight = '700';
+    this.overlay.append(e); this.wireEls.push({ el: e, p: N.clone().add(new THREE.Vector3(0, 0, 0.045 * diag)) });
+    this.wireGroup.visible = this._wireActive;
+  }
+
+  setWireMode(on) { this.wireOn = !!on; this._applyVisibility(); this._applySelection(); this.requestRender(); }
+
   setLoadsVisible(on) { this.showLoads = on; this.loadGroup.visible = on; this.requestRender(); }
 
   setDimFormatter(fn) { this._fmt = fn; }
@@ -339,10 +374,12 @@ export class Viewer {
   setLabels(on) { this.showLabels = on; this.requestRender(); }
 
   setHidden(names) { this.hidden = new Set(names); this._applyVisibility(); this.requestRender(); }
-  _applyVisibility() { for (const p of this.parts) for (const o of p.objs) o.visible = !this.hidden.has(p.kind) && !this.hidden.has(p.name); }
+  get _wireActive() { return this.wireOn && !!this.wireData; }
+  _applyVisibility() { const w = this._wireActive; for (const p of this.parts) for (const o of p.objs) o.visible = !w && !this.hidden.has(p.kind) && !this.hidden.has(p.name); this.wireGroup.visible = w; }
 
   select(names) { this.selected = new Set(names || []); this._applySelection(); this.requestRender(); }
   _applySelection() {
+    for (const m of this.wireMeshes) m.material.color.set(this.selected.has(m.userData.part.name) ? '#f59e0b' : m.userData.base || '#2e75b6');
     const any = [...this.selected].some((n) => this.parts.some((p) => p.name === n));          // una selección que no está en la escena (malla, resultados) no atenúa todo
     for (const p of this.parts) {
       const on = this.selected.has(p.name);
@@ -437,6 +474,11 @@ export class Viewer {
       l.el.style.display = this.showLabels && q.z < 1 ? 'block' : 'none';
       l.el.style.left = `${q.x}px`; l.el.style.top = `${q.y}px`;
     }
+    for (const l of this.wireEls || []) {
+      const q = this._proj(l.p);
+      l.el.style.display = this._wireActive && q.z < 1 ? 'block' : 'none';
+      l.el.style.left = `${q.x}px`; l.el.style.top = `${q.y}px`;
+    }
     for (const l of this.loadEls || []) {
       const q = this._proj(l.p);
       l.el.style.display = this.showLoads && q.z < 1 ? 'block' : 'none';
@@ -458,6 +500,7 @@ export class Viewer {
     rc.setFromCamera(ndc, this.camera);
     const objs = [];
     for (const p of this.parts) for (const o of p.objs) if (o.visible && o.isMesh) objs.push(o);
+    if (this._wireActive) objs.push(...this.wireMeshes);
     const hit = rc.intersectObjects(objs, false)[0];
     return hit ? hit.object.userData.part : null;
   }
