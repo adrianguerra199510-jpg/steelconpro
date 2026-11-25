@@ -80,6 +80,11 @@ jobs:
             $r = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health"
             if (-not $r.ok) { throw "health sin ok" }
           } finally { Stop-Process -Id $p.Id -Force }
+      - name: El servidor MCP (Claude Desktop) esta en el motor compilado
+        shell: pwsh
+        run: |
+          & "dist\engine\SteelConPro-engine.exe" --mcp-check
+          if ($LASTEXITCODE -ne 0) { throw "El servidor MCP no arranca en el motor compilado" }
       - name: Empaquetar con Electron
         working-directory: electron
         run: |

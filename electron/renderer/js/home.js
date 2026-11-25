@@ -65,6 +65,8 @@ function render() {
       h('button', { class: 'item', type: 'button', onclick: async () => (await import('./libraries.js')).openSections() }, svg('shapes', 17), h('span', { text: 'Secciones y Section Designer' })),
       h('button', { class: 'item', type: 'button', onclick: async () => (await import('./libraries.js')).openMaterials() }, svg('database', 17), h('span', { text: 'Materiales' })),
       h('button', { class: 'item', type: 'button', onclick: async () => (await import('./libraries.js')).openTemplates() }, svg('copy', 17), h('span', { text: 'Plantillas' })),
+      h('div', { class: 'head', style: { marginTop: '10px' }, text: 'Asistente' }),
+      h('button', { class: 'item', type: 'button', title: 'Crear, analizar y consultar conexiones desde el chat de Claude Desktop', onclick: openClaude }, svg('link', 17), h('span', { text: 'Conectar con Claude Desktop' })),
       h('div', { class: 'row', style: { padding: '6px 4px 0', justifyContent: 'space-between' } },
         h('button', { class: 'btn ghost sm', type: 'button', title: S.root, onclick: changeRoot }, svg('folder', 15), h('span', { text: 'Carpeta de trabajo' })),
         iconBtn(dark ? 'sun' : 'moon', 'Tema claro / oscuro', () => { setTheme(dark ? 'light' : 'dark'); render(); }))));
@@ -255,4 +257,27 @@ function newProject(folder = '') {
       await go('editor', { path: r.rel });
     } catch (e) { errorBox(e); }
   }
+}
+
+// ---------------------------------------------------------------------------------------------------- Claude Desktop (servidor MCP)
+async function openClaude() {
+  let st;
+  try { st = await call('mcp_desktop', {}); } catch (e) { errorBox(e); return; }
+  const body = h('div', { class: 'col gap-12' });
+  const fill = () => {
+    clear(body);
+    body.append(
+      h('p', { text: 'Con esta conexión, Claude Desktop puede crear conexiones, analizarlas (fórmulas cerradas y modelo de placas con CalculiX) y darle los resultados por chat. Los proyectos que cree Claude se guardan en su carpeta de trabajo y se abren aquí como cualquier otro.' }),
+      h('div', { class: 'card-sec' }, h('div', { class: 'row', style: { gap: '8px' } }, svg(st.installed ? 'check' : 'info', 16),
+        h('b', { text: st.installed ? (st.stale ? 'SteelConPro está en Claude Desktop, pero con una versión anterior del motor: actualice la conexión.' : 'SteelConPro ya está en la configuración de Claude Desktop.') : 'SteelConPro todavía no está en la configuración de Claude Desktop.' })),
+        h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '6px', wordBreak: 'break-all' }, text: `Archivo: ${st.path}` }),
+        st.entry ? h('pre', { style: { fontSize: '11.5px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: '6px' }, text: JSON.stringify({ steelconpro: st.entry }, null, 2) }) : null),
+      h('p', { class: 'hint-text', text: 'Al conectar se copia el motor de cálculo a una carpeta fija de su usuario (la aplicación portable se descomprime en una carpeta temporal distinta cada vez). Use «Actualizar la conexión» después de instalar una versión nueva de SteelConPro.' }),
+      h('p', { class: 'hint-text', text: 'Después de conectar, cierre Claude Desktop por completo y vuelva a abrirlo. Pruebe con: «Crea una columna W14X90 con una viga W18X35 a placa simple de 4 pernos de 3/4\", cortante de 30 kip; analízala y dime si cumple».' }));
+  };
+  fill();
+  const m = modal({ title: 'Conectar con Claude Desktop', icon: 'link', width: 620, body,
+    footer: [btn('Cerrar', { onClick: () => m.close() }), btn(st.installed ? 'Actualizar la conexión' : 'Conectar', { kind: 'primary', icon: 'check', onClick: async () => {
+      try { st = await call('mcp_desktop', { install: true, root: S.root }); fill(); toast('Listo: reinicie Claude Desktop para usar SteelConPro desde el chat.', 'ok', 7000); } catch (e) { errorBox(e); }
+    } })] });
 }

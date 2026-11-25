@@ -18,6 +18,7 @@ binaries = [(_gmsh.libpath, ".")]
 
 hidden = []
 hidden += collect_submodules("scipy.sparse")
+hidden += collect_submodules("mcp.server") + collect_submodules("mcp.shared") + ["mcp.types", "mcp.server.fastmcp"]   # servidor MCP (--mcp)
 hidden += collect_submodules("steelconpro")          # modulos cargados con importlib (conn/__init__.py) y funciones de api.py
 hidden += ["tools", "tools.node_presets", "mpl_toolkits.mplot3d", "scipy.sparse.linalg", "scipy.sparse.csgraph",
            "matplotlib.backends.backend_agg", "openpyxl", "docx", "pandas", "reportlab", "reportlab.platypus",

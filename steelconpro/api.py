@@ -791,6 +791,17 @@ def fem_node_scene(args) -> dict:
     return d
 
 
+def mcp_desktop(args=None) -> dict:
+    """Estado de la conexion con Claude Desktop (servidor MCP de SteelConPro en su configuracion); con `install` la agrega o actualiza usando la
+    carpeta de trabajo `root` de la aplicacion."""
+    from . import mcp_server
+    args = args or {}
+    if args.get("install"):
+        r = mcp_server.install_desktop(root=args.get("root") or None)
+        return {**mcp_server.desktop_status(), "installed_now": True, **r}
+    return mcp_server.desktop_status()
+
+
 def job_status(args) -> dict:
     j = JOBS.get(args["job"])
     if j is None:

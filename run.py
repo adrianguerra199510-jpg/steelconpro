@@ -3,6 +3,8 @@
 
     SteelConPro.exe --serve [--port N]    -> motor local de la aplicacion Electron (HTTP en 127.0.0.1)
     SteelConPro.exe --selftest            -> autopruebas del motor (sin interfaz)
+    SteelConPro.exe --mcp [--root dir]    -> servidor MCP (stdio) para Claude Desktop: crear, analizar y consultar conexiones desde el chat
+    SteelConPro.exe --mcp-install         -> agrega SteelConPro a la configuracion de Claude Desktop
     SteelConPro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
     SteelConPro.exe --meshm a.json b.npz  -> (interno) malla del modelo 3D de una conexion
     SteelConPro.exe --meshs a.json b.npz  -> (interno) malla de placas (cascarones) de una conexion
@@ -158,6 +160,20 @@ def main():
     if args and args[0] == "--meshm":
         from steelconpro.conn.fem.mesher import child
         return child(args[1], args[2])
+    if args and args[0] == "--mcp":                    # servidor MCP para Claude Desktop (stdio)
+        from steelconpro import mcp_server
+        sys.exit(mcp_server.main(args))
+    if args and args[0] == "--mcp-check":              # (prueba del paquete) el servidor MCP se arma y lista sus herramientas
+        import asyncio
+        from steelconpro import mcp_server
+        tools = asyncio.run(mcp_server.build_server().list_tools())
+        print(f"MCP OK: {len(tools)} herramientas")
+        sys.exit(0 if len(tools) >= 20 else 1)
+    if args and args[0] == "--mcp-install":            # configura Claude Desktop para usar este programa
+        import json
+        from steelconpro import mcp_server
+        print(json.dumps(mcp_server.install_desktop(), ensure_ascii=False, indent=2))
+        sys.exit(0)
     if args and args[0] == "--serve":                  # motor para la aplicacion Electron
         from steelconpro.server import main as serve_main
         return serve_main(args[1:])

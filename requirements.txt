@@ -7,3 +7,4 @@ reportlab>=4.0
 pillow>=10.0
 pandas>=2.1
 gmsh==4.15.2
+mcp==1.26.0
