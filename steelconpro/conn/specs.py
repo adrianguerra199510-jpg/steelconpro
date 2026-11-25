@@ -95,6 +95,7 @@ FACES_PLATE = ["Cara +", "Cara −"]
 FACES_BLOCK = ["Cara superior", "Cara frontal", "Cara posterior", "Cara izquierda", "Cara derecha", "Cara inferior"]   # bloque de concreto: ejes locales x (largo), y (ancho), z (alto); frontal = −y
 FACES_ANGLE = ["Pierna sobre la cara", "Pierna saliente +", "Pierna saliente −"]
 FACE_LABELS = {"I": FACES_I, "box": FACES_BOX, "plate": FACES_PLATE}
+LOAD_AT = ["Automático", "En el extremo del elemento", "En los pernos"]   # automático: en los pernos para corte y cartelas, en el extremo para momento
 CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
 MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD)
 SHEAR_OPS = (OP_TAB, OP_DANG, OP_SEAT)
@@ -134,6 +135,7 @@ class Member:
     rel_T: bool = False          # (si rel_auto es falso) giro alrededor del eje del miembro liberado: el miembro no transmite torsión al nudo
     rel_My: bool = False         # giro alrededor de su eje local y liberado (flexión por cortante vertical Vz)
     rel_Mz: bool = False         # giro alrededor de su eje local z liberado (flexión por Vy)
+    load_at: str = "Automático"  # punto de aplicación de las acciones del miembro en el ANÁLISIS de placas (no en el dibujo ni en las fórmulas): ver LOAD_AT
 
 
 @dataclass

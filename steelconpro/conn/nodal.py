@@ -211,7 +211,7 @@ def _box(E, R):
     return (float(E[0] - R), float(E[0] + R), float(E[1] - R), float(E[1] + R), float(E[2] - R), float(E[2] + R))
 
 
-def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, mshape, support: bool = True):
+def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, mshape, support: bool = True, app_pts: dict | None = None):
     """Apoyo y cargas del modelo FEM de un caso de carga: el lado que equilibra del principal se empotra; en el otro lado del principal y en el extremo libre de cada
     miembro conectado se aplica la accion dada (fuerza y momento trasladados al extremo).  Devuelve (apoyos, cargas) del modelo 3D."""
     from .fem.model3d import FaceSel, LoadApp, Support
@@ -243,8 +243,10 @@ def fem_conditions(nd: Nodo, loads: list, ends: dict, lneg: float, lpos: float, 
             continue
         E, dirv, R = ends[l.member]
         E = np.asarray(E, float)
+        # las acciones dadas actúan en el punto de aplicación del miembro (el nudo, o el centro de sus pernos): se trasladan al extremo libre
+        P = np.asarray((app_pts or {}).get(l.member, _node_point(nd, l.member)), float)
         lds.append(LoadApp(f"Carga de {l.member}", FaceSel(l.member, _box(E, R), tuple(float(x) for x in dirv)), tuple(float(x) for x in E),
-                           tuple(float(x) for x in F), tuple(float(x) for x in (M + np.cross(_node_point(nd, l.member) - E, F)))))
+                           tuple(float(x) for x in F), tuple(float(x) for x in (M + np.cross(P - E, F)))))
     return sups, lds
 
 
@@ -301,3 +303,36 @@ def analysis(prj, nd: Nodo) -> dict:
             # la carga de la placa base se calcula por dentro (se muestra en la pestaña Nudo), no se dibuja: las flechas van en los extremos de los miembros
         out.append(b)
     return {"cases": out, "balance_end": int(getattr(nd, "balance_end", -1)), "base": bool(bc)}
+
+
+def load_point_mode(nd: Nodo, member: str) -> str:
+    """'nudo' | 'pernos': dónde actúan las acciones del miembro en el análisis de placas.  Automático: en los pernos para las conexiones de corte
+    (placa simple, doble ángulo, asiento) y las cartelas; en el nudo (extremo del elemento) para placa extrema, alas soldadas y uniones generales."""
+    from .specs import LOAD_AT, OP_TAB, OP_DANG, OP_SEAT, OP_GUSSET, OP_GUSSET_W
+    m = nd.member_named(member)
+    mode = getattr(m, "load_at", LOAD_AT[0]) if m is not None else LOAD_AT[0]
+    if mode == LOAD_AT[1]:
+        return "nudo"
+    if mode == LOAD_AT[2]:
+        return "pernos"
+    kinds = {o.kind for o in nd.operations if o.member == member and o.is_connection}
+    return "pernos" if kinds & {OP_TAB, OP_DANG, OP_SEAT, OP_GUSSET, OP_GUSSET_W} else "nudo"
+
+
+def load_points(nd: Nodo, mdl) -> dict:
+    """{miembro: punto} de aplicación de sus acciones en el análisis cuando van «en los pernos»: el centro de los pernos que atraviesan al miembro
+    (su línea de pernos); si el miembro no tiene pernos, el centro de sus cordones (ponderado por largo).  Los demás quedan en el nudo."""
+    out = {}
+    for m in nd.members:
+        if load_point_mode(nd, m.name) != "pernos":
+            continue
+        pts = [np.asarray(b.p, float) + np.asarray(b.axis, float) / max(np.linalg.norm(b.axis), 1e-12) * 0.5 * (s0 + s1)
+               for b in mdl.bolts for (pn, s0, s1) in b.grip if pn == m.name]
+        if pts:
+            out[m.name] = np.mean(pts, axis=0)
+            continue
+        ws = [(np.asarray(w.p0, float), np.asarray(w.p1, float)) for w in mdl.welds if m.name in (w.A, w.B)]
+        L = [float(np.linalg.norm(b - a)) for a, b in ws]
+        if ws and sum(L) > 1e-9:
+            out[m.name] = sum(0.5 * (a + b) * l for (a, b), l in zip(ws, L)) / sum(L)
+    return out

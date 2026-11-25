@@ -2464,7 +2464,7 @@ def _fem_setup(mdl, nd, fem, ends, lneg, lpos, mshape, base=False):
         mdl.notes.append("Sin casos de carga: el análisis FEM necesita cargas (agréguelas en «Cargas»).")
         sups, lds = nodal.fem_conditions(nd, [], ends, lneg, lpos, mshape, support=not base)
     else:
-        sups, lds = nodal.fem_conditions(nd, cases[min(i, len(cases) - 1)][1], ends, lneg, lpos, mshape, support=not base)
+        sups, lds = nodal.fem_conditions(nd, cases[min(i, len(cases) - 1)][1], ends, lneg, lpos, mshape, support=not base, app_pts=nodal.load_points(nd, mdl))
     mdl.supports += sups
     mdl.loads += lds
 

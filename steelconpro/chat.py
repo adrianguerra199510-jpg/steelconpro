@@ -122,7 +122,9 @@ MIEMBRO = {"name": ("Nombre único del miembro", "texto"), "shape": ("Perfil AIS
            "pos": ("Posición a lo largo del principal (in, desde el nudo; + hacia el extremo +)", "in"),
            "off": ("Desplazamiento del eje en la dirección del peralte (in)", "in"), "off2": ("Desplazamiento lateral (in)", "in"),
            "roll": ("Giro del perfil sobre su eje (°)", "grados"), "gap": ("Separación del extremo a la cara del principal (in)", "in"),
-           "attach_to": ("Miembro al que llega (vacío = al principal)", "texto")}
+           "attach_to": ("Miembro al que llega (vacío = al principal)", "texto"),
+           "load_at": ("Punto de aplicación de sus acciones en el análisis de placas: «Automático» (pernos en corte y cartelas, extremo en momento), "
+                       "«En el extremo del elemento» o «En los pernos»; no cambia las fórmulas", "opcion")}
 
 
 # ================================================================================================== sesión
@@ -386,6 +388,12 @@ def _member_kw(s: Session, d: dict, m: Member | None = None) -> dict:
                 raise ChatError("Un miembro no puede llegar a sí mismo.")
         elif k in ("name",):
             v = str(v)
+        elif k == "load_at":
+            if v not in SP.LOAD_AT:
+                hit = [o for o in SP.LOAD_AT if str(v).lower() in o.lower()]
+                if len(hit) != 1:
+                    raise ChatError(f"load_at = «{v}» no es válido; opciones: {SP.LOAD_AT}.")
+                v = hit[0]
         else:
             v = float(v)
         out[k] = v
@@ -450,7 +458,8 @@ def eliminar_miembro(s: Session, nombre: str) -> dict:
 
 def _member_json(m: Member) -> dict:
     return {"nombre": m.name, "perfil": m.shape, "acero": m.steel, "azimut": m.az, "elevacion": m.el, "posicion": m.pos, "desplazamiento": m.off,
-            "desplazamiento_lateral": m.off2, "giro": m.roll, "separacion": m.gap, "se_une_a": m.attach_to or "(principal)"}
+            "desplazamiento_lateral": m.off2, "giro": m.roll, "separacion": m.gap, "se_une_a": m.attach_to or "(principal)",
+            "punto_de_carga": getattr(m, "load_at", SP.LOAD_AT[0])}
 
 
 def _op_kw(s: Session, kind: str, params: dict) -> dict:

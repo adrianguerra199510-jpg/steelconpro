@@ -123,6 +123,7 @@ class ShellCase:
         self.dep = set()            # nodos dependientes de alguna ecuacion
         self.fixed = set()
         self.extra_nodes = []       # (id, x, y, z)
+        self.extra_xyz = {}
         self.eqs = []               # lineas *EQUATION
         self.bc = []
         self.cl = []
@@ -156,10 +157,7 @@ class ShellCase:
     def coord(self, n):
         if n in self.index:
             return self.xyz[self.index[n]]
-        for (k, x, y, z) in self.extra_nodes:
-            if k == n:
-                return np.array([x, y, z])
-        raise KeyError(n)
+        return self.extra_xyz[n]
 
     def coords(self, ns):
         return self.xyz[[self.index[int(n)] for n in ns]]
@@ -168,6 +166,7 @@ class ShellCase:
         n = self.next_node
         self.next_node += 1
         self.extra_nodes.append((n, float(x[0]), float(x[1]), float(x[2])))
+        self.extra_xyz[n] = np.array([float(x[0]), float(x[1]), float(x[2])])
         return n
 
     def new_elem(self):
@@ -391,16 +390,26 @@ class ShellCase:
                             continue
                         if any(float(np.linalg.norm(xp - h.mean(axis=0))) < 0.5 * float(np.max(np.linalg.norm(h - h.mean(axis=0), axis=1))) + 0.05 for h in holesB):
                             continue
-                        dd, j = tb.query(xp)
-                        if dd > 0.75 * self.h + 0.05:
-                            continue
-                        m = int(nsB[j])
-                        if float(np.linalg.norm(self.coord(m) - x)) < 1e-4:
+                        dd, j = tb.query(xp, k=min(3, len(nsB)))
+                        dd, j = np.atleast_1d(dd), np.atleast_1d(j)
+                        if dd[0] > 0.75 * self.h + 0.05 or abs(d) < 1e-4:
                             continue
                         k = KC * self.trib.get(n, 0.0)
                         if k <= 0:
                             continue
-                        self.gaps.append((self.new_elem(), n, m, k, "contacto"))
+                        # el resorte va del nodo de A a su proyección sobre B (nodo auxiliar que sigue al promedio de los nodos de B más cercanos):
+                        # así actúa solo en la dirección normal; si uniera dos nodos desalineados quedaría inclinado y tomaría cortante
+                        aux = self.new_node(xp)
+                        sel = [(float(a_), int(nsB[b_])) for a_, b_ in zip(dd, j) if a_ <= 0.75 * self.h + 0.05]
+                        wts = np.array([1.0 / max(a_, 1e-6) for a_, _m in sel])
+                        if sel[0][0] < 1e-6:
+                            sel, wts = sel[:1], np.array([1.0])
+                        wts = wts / wts.sum()
+                        for kk in (1, 2, 3):
+                            terms = [f"{aux}, {kk}, 1.0"] + [f"{m_}, {kk}, {-w_:.8f}" for (_a, m_), w_ in zip(sel, wts)]
+                            self.eqs += [str(len(terms)), ", ".join(terms)]
+                        self.dep.add(aux)
+                        self.gaps.append((self.new_elem(), n, aux, k, "contacto"))
                         n_sp += 1
         self.meta["contacts"] = n_sp
 

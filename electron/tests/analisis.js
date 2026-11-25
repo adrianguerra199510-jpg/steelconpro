@@ -16,6 +16,17 @@ const path = require('path'), fs = require('fs'), os = require('os');
   await page.waitForSelector('.home', { timeout: 120000 }); await page.click(`text=${code}`); await page.waitForSelector('.editor', { timeout: 30000 });
   for (let i = 0; i < 80; i++) { if (await page.evaluate(() => !!(window.__E && window.__E.viewer && window.__E.viewer.parts.length > 1 && window.__E.nodal))) break; await wait(500); }
   await wait(1200);
+  // punto de aplicación de la carga (análisis): está en la ficha del miembro y no mueve las flechas del visor
+  const arrows0 = await page.evaluate(() => window.__E.viewer.loadEls.map((l) => l.p.toArray().map((x) => +x.toFixed(3)).join(',')).sort().join(';'));
+  await page.dblclick('.tree-item:has-text("S2")'); await wait(900);
+  check(await page.isVisible('text=Punto de aplicación de la carga (análisis)'), `${code}: la ficha del miembro tiene el punto de aplicación de la carga`);
+  const sel = page.locator('select').filter({ has: page.locator('option', { hasText: 'En los pernos' }) }).first();
+  await sel.selectOption('En el extremo del elemento'); await wait(800);
+  await page.screenshot({ path: path.join(shots, `analisis_${code}_punto_carga.png`) });
+  await sel.selectOption('Automático'); await wait(500);
+  await page.click('button:has-text("Cerrar")'); await wait(800);
+  const arrows1 = await page.evaluate(() => window.__E.viewer.loadEls.map((l) => l.p.toArray().map((x) => +x.toFixed(3)).join(',')).sort().join(';'));
+  check(arrows0 === arrows1, `${code}: las flechas del visor no cambian con el punto de aplicación`);
   await page.click('.calc-big');
   await wait(1500);
   check(await page.evaluate(() => !!window.__E.femRunning || !!window.__E.femDone), `${code}: «Calcular» lanza el análisis del modelo de placas`);

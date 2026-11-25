@@ -100,6 +100,11 @@ export async function openMember(E, name) {
     };
     buildRel();
     body.append(h('div', { class: 'card-sec' }, relBox));
+    // punto de aplicación de las acciones del miembro en el análisis de placas (las flechas del visor y las fórmulas no cambian)
+    const lctx = formCtx(E, m, () => { E.changed({ geometry: false }); });
+    body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Punto de aplicación de la carga (análisis)' }),
+      renderItems([{ path: 'load_at', label: 'Las acciones del miembro actúan', type: 'combo', items: S.C.load_at || ['Automático', 'En el extremo del elemento', 'En los pernos'], wide: true }], lctx),
+      h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: 'Solo cambia el análisis del modelo de placas. «En el extremo del elemento»: las acciones de «Cargas» actúan donde el eje del miembro llega al nudo (los pernos reciben además el momento del cortante por la distancia al nudo). «En los pernos»: actúan en el centro de los pernos del miembro (o de sus cordones, si es soldado). «Automático»: en los pernos para placa simple, doble ángulo, asiento y cartelas; en el extremo para placa extrema, alas soldadas y uniones generales. Las flechas del visor y las verificaciones por fórmulas no cambian.' })));
   }
   if (!isMain) {
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Miembro principal' }),

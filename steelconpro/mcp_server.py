@@ -118,7 +118,8 @@ def build_server(root: str | None = None):
 
     @tool
     def modificar_miembro(nombre: str, cambios: dict) -> dict:
-        """Cambia campos de un miembro: name, shape, steel, az, el, pos, off, off2, roll, gap, attach_to (in y grados)."""
+        """Cambia campos de un miembro: name, shape, steel, az, el, pos, off, off2, roll, gap, attach_to (in y grados) y load_at (punto de aplicación
+        de sus acciones en el análisis de placas: «Automático», «En el extremo del elemento» o «En los pernos»)."""
         return C.modificar_miembro(S, nombre, cambios)
 
     @tool

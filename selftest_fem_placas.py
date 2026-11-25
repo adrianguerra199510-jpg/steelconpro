@@ -72,8 +72,27 @@ def cn02(td):
     s1 = nodos_de(sm, lambda i: sm.parts[i] == "S1")
     ep = nodos_de(sm, lambda i: sm.parts[i] == "Placa extrema S1")
     check(len(s1 & ep) >= 20, f"la viga S1 comparte nodos con su placa extrema soldada ({len(s1 & ep)})")
+    # punto de aplicación de la carga: «Automático» = en los pernos para la placa simple de S2; «En el extremo» = donde el eje llega al nudo
+    from steelconpro.conn import nodal as NOD
+    from steelconpro.conn.specs import LOAD_AT
+    check(NOD.load_point_mode(p.node, "S2") == "pernos" and NOD.load_point_mode(p.node, "S1") == "nudo",
+          "automático: en los pernos para la placa simple (S2), en el extremo para la placa extrema (S1)")
+    pb = NOD.load_points(p.node, mdl).get("S2")
+    bs = [np.asarray(b.p) + np.asarray(b.axis) * 0.5 * (s0 + s1) for b in mdl.bolts for (pn, s0, s1) in b.grip if pn == "S2"]
+    check(pb is not None and np.allclose(pb, np.mean(bs, axis=0)), "el punto de aplicación de S2 es el centro de sus pernos")
+    ld_auto = next(l for l in mdl.loads if l.name == "Carga de S2")
+    import copy
+    q = copy.deepcopy(p)
+    q.node.member_named("S2").load_at = LOAD_AT[1]
+    ld_end = next(l for l in AS.build_model(q, {"case": 0}).loads if l.name == "Carga de S2")
+    dM = np.cross(pb - NOD._node_point(p.node, "S2"), np.asarray(ld_auto.F))
+    check(np.allclose(np.asarray(ld_auto.M) - np.asarray(ld_end.M), dM, atol=1e-6) and np.allclose(ld_auto.F, ld_end.F),
+          f"la carga del análisis se traslada desde los pernos (diferencia de momento {np.round(dM, 1).tolist()} kip·in)")
     case = SC.ShellCase(mdl, sm, job)
     check(len(case.bolt_ax) == len(mdl.bolts), f"los {len(mdl.bolts)} pernos entran al modelo ({len(case.bolt_ax)})")
+    aux = [n2 for (_e, _n1, n2, _k, kind) in case.gaps if kind == "contacto"]
+    check(aux and all(max(abs(float(SC.unit(case.coord(n2) - case.coord(n1)) @ SC.unit(case.plates[q]["n"]))) for q in case.node_plates[n1]) > 1.0 - 1e-6
+                      for (_e, n1, n2, _k, kind) in case.gaps if kind == "contacto"), "los resortes de contacto actúan solo normales a las placas")
     check(len(case.gaps) > 100 and all(k == "contacto" for *_x, k in case.gaps), f"contacto solo-compresión entre placas atornilladas ({len(case.gaps)} resortes)")
     check(len(case.meta["loads"]) == 3 and len(case.meta["supports"]) == 1, "tres cargas (extremos de S1, S2, S3) y el apoyo del principal")
     if RAPIDO:
@@ -88,7 +107,8 @@ def cn02(td):
     b2 = [b for b in R.bolts if b["tag"].startswith("S2")]
     vs = sorted(b["V"] for b in b2)
     # los pernos de la placa simple de S2 llevan el cortante de S2 (25 kip en 3 pernos, con excentricidad)
-    check(len(b2) == 3 and 5.0 < vs[-1] < 25.0 and sum(vs) > 15.0, f"cortante de los pernos de S2 coherente con la reacción de 25 kip ({', '.join(f'{v:.1f}' for v in vs)} kip)")
+    check(len(b2) == 3 and vs[-1] - vs[0] < 1.5 and abs(sum(vs) - 25.0) < 2.5,
+          f"carga en los pernos: los 3 pernos de S2 toman el cortante de 25 kip por partes iguales ({', '.join(f'{v:.1f}' for v in vs)} kip)")
     cks = SCK.checks(R, case, mdl, [p.node.main_name] + [m.name for m in p.node.members], p.units())
     cats = {c.cat for c in cks}
     check({"Miembros", "Placas", "Pernos", "Soldaduras"} <= cats, f"verificaciones por categoría ({', '.join(sorted(cats))})")
