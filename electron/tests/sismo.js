@@ -24,7 +24,7 @@ const os = require('os');
   const check = (c, msg) => { console.log((c ? 'OK   ' : 'FALLA') + ' ' + msg); if (!c) ok = false; };
   try {
     await page.waitForSelector('.home', { timeout: 120000 });
-    await page.click('text=SIS');
+    await page.click('.card :text-is("SIS")');
     await page.waitForSelector('.editor', { timeout: 30000 });
     await page.waitForSelector('.tree-item:has-text("Placa base")', { timeout: 30000 });
     await page.click('button[title^="Diseño sísmico"]');
