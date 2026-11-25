@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Identidad visual de PlacaBasePro: ruta de los recursos graficos y colores de marca."""
+"""Identidad visual de SteelConPro: ruta de los recursos graficos y colores de marca."""
 from __future__ import annotations
 import os
 import sys
@@ -21,9 +21,23 @@ def asset(name: str) -> str:
     return str(Path(__file__).parent / "data" / name)
 
 
+def user_data_dir(base) -> Path:
+    """Carpeta de datos del usuario (SteelConPro). Si solo existe la de la version
+    anterior (PlacaBasePro), se copia una vez para no perder perfiles ni materiales."""
+    import shutil
+    new, old = Path(base) / "SteelConPro", Path(base) / "PlacaBasePro"
+    if not new.exists() and old.exists():
+        try:
+            shutil.copytree(old, new)
+        except OSError:
+            pass
+    new.mkdir(parents=True, exist_ok=True)
+    return new
+
+
 LOGO = lambda: asset("logo.png")          # logo horizontal con lema (fondo transparente)
 ICON = lambda: asset("icon.png")          # icono cuadrado 256 px
-ICO = lambda: asset("placabasepro.ico")   # icono de Windows (.ico multi-tamano)
+ICO = lambda: asset("steelconpro.ico")   # icono de Windows (.ico multi-tamano)
 
 STYLE = f"""
 QToolBar {{ background: {GREY}; border-bottom: 2px solid {ORANGE}; spacing: 4px; padding: 2px; }}

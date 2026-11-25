@@ -916,14 +916,14 @@ def export_pdf(prj: Project, res: Results, path: str,
                             leftMargin=0.6 * inch, rightMargin=0.6 * inch,
                             topMargin=0.55 * inch, bottomMargin=0.55 * inch,
                             title=f"Memoria placa base {prj.element}",
-                            author=prj.author or "PlacaBasePro")
+                            author=prj.author or "SteelConPro")
 
     def _footer(canvas, docu):
         canvas.saveState()
         canvas.setFont("Helvetica", 6.5)
         canvas.setFillColor(colors.HexColor("#777777"))
         canvas.drawString(0.6 * inch, 0.32 * inch,
-                          f"{prj.name} — {prj.element} — PlacaBasePro {__import__('placabase').__version__}")
+                          f"{prj.name} — {prj.element} — SteelConPro {__import__('placabase').__version__}")
         canvas.drawRightString(letter[0] - 0.6 * inch, 0.32 * inch,
                                f"Pagina {docu.page}")
         canvas.restoreState()
