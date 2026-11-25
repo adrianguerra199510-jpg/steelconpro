@@ -400,7 +400,7 @@ def thumbnail(args) -> dict:
 
 
 # ================================================================================================== verificacion
-NODE_FEM: dict = {}             # (firma del nudo, caso) -> FemResult del analisis FEM del nudo
+NODE_FEM: dict = {}             # (firma del nudo, caso) -> FemResult del analisis FEM solido del nudo (desactivado: el analisis es el modelo de placas)
 FEM_CACHE: dict = {}            # firma del proyecto de la placa base de una combinacion -> (Fem3D, resultado crudo)
 JOBS: dict = {}
 
@@ -418,11 +418,39 @@ def _fem_map(prj: Project) -> dict:
     return out
 
 
+CATEGORIES = ["Miembros", "Placas", "Pernos", "Soldaduras", "Anclajes y concreto", "Otras"]
+_CAT_START = [("anclaje", 4), ("llave", 4), ("aplastamiento del concreto", 4), ("perno", 2), ("separacion", 2), ("distancia", 2), ("detallado", 2),
+              ("soldadura", 3), ("cateto", 3), ("tamano", 3), ("metal base", 3), ("placa", 1), ("angulo", 1), ("cartela", 1), ("espesor", 1),
+              ("rigidizador", 1), ("asiento", 1), ("alma", 0), ("seccion", 0), ("miembro", 0), ("perfil", 0), ("pandeo", 0), ("viga", 0), ("columna", 0),
+              ("ala", 0)]
+_CAT_HAS = [("perno", 2), ("soldad", 3), ("filete", 3), ("anclaj", 4), ("concreto", 4), ("placa", 1), ("angulo", 1), ("cartela", 1), ("viga", 0),
+            ("columna", 0), ("alma", 0), ("miembro", 0)]
+
+
+def _categorize(ch):
+    """Categoria (Miembros, Placas, Pernos, Soldaduras, Anclajes y concreto, Otras) y componente de una verificacion de formulas cerradas: la
+    categoria sale del titulo (lo que se verifica) y el componente es la operacion que la produce."""
+    import re
+    import unicodedata
+    if getattr(ch, "cat", ""):
+        return
+    t = re.sub(r"^\[[^\]]*\]\s*", "", ch.title or "")
+    t = "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
+    cat = None
+    for k, i in _CAT_START:
+        if t.startswith(k):
+            cat = CATEGORIES[i]
+            break
+    if cat is None:
+        cat = next((CATEGORIES[i] for k, i in _CAT_HAS if k in t), "Otras")
+    ch.cat, ch.comp, ch.src = cat, getattr(ch, "group", "") or "Otras verificaciones", "formula"
+
+
 def _check_json(us, ch):
     from . import report
     dv, cv, ul = report.ck_vals(us, ch)
     return {"key": ch.key, "title": ch.title, "group": getattr(ch, "group", ""), "demand": dv, "capacity": cv, "unit": ul, "ratio": ch.ratio, "ok": ch.ok,
-            "skip": ch.skip, "ref": ch.ref, "note": ch.note}
+            "skip": ch.skip, "ref": ch.ref, "note": ch.note, "cat": getattr(ch, "cat", ""), "comp": getattr(ch, "comp", ""), "src": getattr(ch, "src", "")}
 
 
 def _node_sig(p: Project) -> str:
@@ -434,33 +462,39 @@ def _node_sig(p: Project) -> str:
 
 
 def _node_fem(p: Project) -> dict:
-    """{caso: FemResult vigente} del analisis FEM del nudo."""
+    """{caso: (ShellResult, ShellCase)} vigentes del analisis del modelo de placas del nudo."""
     sig = _node_sig(p)
-    return {i: R for (sg, i), R in NODE_FEM.items() if sg == sig}
+    return {i: v for (sg, i), v in NODE_SHELL.items() if sg == sig}
+
+
+def _members_of(p: Project):
+    return [p.node.main_name] + [m.name for m in p.node.members]
 
 
 def _fem_node_checks(p: Project):
-    """Verificaciones y avisos que salen del analisis FEM de cada caso de carga del nudo."""
-    from .conn.fem import post
+    """Verificaciones de los componentes (miembros, placas, pernos, soldaduras, anclajes) con los resultados del modelo de placas: por
+    componente se conserva la verificacion del caso de carga que gobierna."""
     from .conn import nodal as NOD
-    from .design import Check
+    from .conn.fem import shellchecks as SCK
     names = [c for c, _l in NOD.cases_of(p.node)]
-    out, warns = [], []
-    for i, R in sorted(_node_fem(p).items()):
+    best, warns = {}, []
+    res = _node_fem(p)
+    for i, (R, case) in sorted(res.items()):
         nm = names[i] if i < len(names) else f"Caso {i + 1}"
-        grp = f"FEM — {nm}"
-        cks = post.fem_checks(R.model, R, p)
-        if R.screened:
-            cks.append(Check("fem_vm_avg", "FEM 3D — esfuerzo de von Mises promediado máximo / φ·Fy", R.screen_ratio, 1.0, "-", "φ·Fy del acero",
-                             "máximo del conjunto; el pico puntual depende de la malla"))
-        for c in cks:
-            c.key = f"{c.key}__n{i}"
-            c.group = grp
-        out += cks
-        for n in R.notes:
-            warns.append(f"FEM del nudo ({nm}): {n}")
-        if R.equil[1] > 0 and R.equil[0] > 0.02 * R.equil[1] + 0.05:
-            warns.append(f"FEM del nudo ({nm}): el equilibrio no cierra (residuo {R.equil[0]:.3g} kip de {R.equil[1]:.3g} kip aplicados).")
+        for c in SCK.checks(R, case, case.mdl, _members_of(p), p.units()):
+            if c.key not in best or c.ratio > best[c.key][0].ratio:
+                best[c.key] = (c, nm)
+        for n in R.notes + ([R.msg] if R.msg else []):
+            w = f"Análisis de placas ({nm}): {n}"
+            if w not in warns:
+                warns.append(w)
+    out = []
+    multi = len(res) > 1
+    for c, nm in best.values():
+        if multi:
+            c.note = (c.note + "; " if c.note else "") + f"caso {nm}"
+        c.group = f"FEM — {c.comp}"
+        out.append(c)
     return out, warns
 
 
@@ -476,8 +510,12 @@ def verify(args) -> dict:
     p = _prj(args["connection"])
     R = solve_conn(p, fem_map=_fem_map(p))
     fc, fw = _fem_node_checks(p)
+    for c in fc:
+        c.src = "fem"
     R.checks += fc
     R.warnings += fw
+    for c in R.checks:
+        _categorize(c)
     us = p.units()
     nd = p.node
     gov = R.governing
@@ -488,7 +526,7 @@ def verify(args) -> dict:
         "ok": bool(R.ok), "max_ratio": R.max_ratio, "governing": gov.title if gov else "",
         "checks": [_check_json(us, c) for c in R.checks], "warnings": list(R.warnings), "combos": list(R.combo_rows or []), "combo_gov": R.combo_gov,
         "memory": R.rec.to_html() if R.rec is not None else "", "operations": ops, "has_fem": bool(_fem_map(p)),
-        "node_fem": sorted(_node_fem(p)), "geometry": _geo_summary(p),
+        "node_fem": sorted(_node_fem(p)), "geometry": _geo_summary(p), "categories": CATEGORIES,
     }
 
 
@@ -539,47 +577,86 @@ def fem_start(args) -> dict:
     return {"job": jid}
 
 
+NODE_SHELL: dict = {}           # (firma del nudo, caso) -> (ShellResult, ShellCase) del analisis del modelo de placas
+
+
+def _shell_mesh(p, mdl, folder, tok, say, f=1.0):
+    """Malla de placas del modelo (Gmsh en proceso hijo).  -> (job dict, ShellMesh, ruta npz, notas) o (None, mensaje)."""
+    from . import mesh3d
+    from .conn.fem import shellmesh as SM
+    plates, notes = SM.build_plates(mdl)
+    params = SM.shell_params(p.fea, mdl, f)
+    jf = Path(folder) / "placas_job.json"
+    npz = Path(folder) / "placas_malla.npz"
+    if npz.exists():
+        npz.unlink()
+    SM.write_job(plates, params, str(jf))
+    say("Mallando las placas con Gmsh ...")
+    rc, out, state = mesh3d._run_proc(mesh3d._self_cmd() + ["--meshs", str(jf), str(npz)], tok, 300)
+    if state == "cancelado":
+        return None, mesh3d.CANCELADO
+    if not npz.exists():
+        return None, "Gmsh no generó la malla de placas.\n\n" + str(out)[-2000:]
+    return (json.loads(jf.read_text(encoding="utf-8")), SM.ShellMesh(str(npz)), str(npz), list(notes)), ""
+
+
 def fem_node_start(args) -> dict:
-    """Analisis FEM del nudo completo (miembros, placas, pernos y soldaduras) para cada caso de carga (o los de `cases`)."""
-    from .conn.fem import driver
+    """Analisis del modelo de placas del nudo (CalculiX) para cada caso de carga (o los de `cases`): malla una vez y resuelve cada caso."""
     from .conn import nodal as NOD
+    from .conn.fem import shellccx as SC, shellpost as SPo
+    from . import mesh3d
     p = _prj(args["connection"])
     cases = NOD.cases_of(p.node)
     if not cases:
-        raise ApiError("El nudo no tiene casos de carga: agreguelos en «Cargas» (el analisis FEM aplica las cargas del analisis nodal).")
+        raise ApiError("El nudo no tiene casos de carga: agréguelos en «Cargas» (el análisis aplica las cargas del análisis nodal).")
     sig = _node_sig(p)
     want = [int(i) for i in args.get("cases", range(len(cases))) if 0 <= int(i) < len(cases)]
-    todo = [i for i in want if (sig, i) not in NODE_FEM or args.get("force")]
+    todo = [i for i in want if (sig, i) not in NODE_SHELL or args.get("force")]
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "state": "running", "messages": [], "done": False, "error": "", "total": len(todo), "finished": 0, "cancel": None}
     JOBS[jid] = job
     if not todo:
         job.update(state="done", done=True)
         return {"job": jid}
-    from .mesh3d import CancelToken
-    tok = CancelToken()
+    tok = mesh3d.CancelToken()
     job["cancel"] = tok
     base = Path(args.get("folder") or os.path.join(os.path.expanduser("~"), "SteelConPro", "fem"))
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder = base / f"{p.element or 'nudo'}_{stamp}"
+    members = _members_of(p)
 
     def run():
         try:
+            folder.mkdir(parents=True, exist_ok=True)
+            say = lambda m: job["messages"].append(m)                                           # noqa: E731
+            say("Armando el modelo de placas ...")
+            mdl0 = AS.build_model(p, {"case": todo[0]})
+            got, err = _shell_mesh(p, mdl0, folder, tok, say)
+            if got is None:
+                job.update(state="cancelled" if err == mesh3d.CANCELADO else "error", error=err, done=True)
+                return
+            jd, sm, npz, mnotes = got
             for k, i in enumerate(todo):
-                pre = f"Caso {k + 1} de {len(todo)}: {cases[i][0]}\n"
-                R, msg = driver.run_fem(p, {"case": i}, str(base / f"{p.element or 'nudo'}_{stamp}" / f"caso{i + 1}"), "nudo",
-                                        progress=lambda m, pre=pre: job["messages"].append(pre + m), cancel=tok)
-                if R is None:
-                    job.update(state="cancelled" if str(msg).startswith(mesh3d.CANCELADO) else "error", error=str(msg), done=True)
+                pre = f"Caso {k + 1} de {len(todo)}: {cases[i][0]}\n" if len(todo) > 1 else ""
+                mdl = mdl0 if i == todo[0] else AS.build_model(p, {"case": i})
+                case = SC.ShellCase(mdl, sm, jd, {"phi_y": 0.9})
+                ok, msg, info = SC.solve(case, str(folder / f"caso{i + 1}"), "placas", getattr(p.fea, "ccx_path", ""), tok,
+                                         lambda m, pre=pre: say(pre + m), plastic=bool(getattr(p.fea, "plastic", True)))
+                if not ok:
+                    job.update(state="cancelled" if msg == mesh3d.CANCELADO else "error", error=msg, done=True)
                     return
-                R.sig = sig
-                NODE_FEM[(sig, i)] = R
+                say(pre + "Leyendo resultados ...")
+                R = SPo.postprocess(case, info, members, cases[i][0])
+                R.msg, R.folder, R.sig = msg, str(folder), sig
+                R.notes = list(dict.fromkeys(R.notes + mnotes))
+                NODE_SHELL[(sig, i)] = (R, case)
+                NODE_MESH[(sig, i)] = {"npz": npz, "model": mdl, "notes": list(mdl.notes) + mnotes}
                 job["finished"] = k + 1
             job.update(state="done", done=True)
         except Exception as e:                                                  # noqa: BLE001
             job.update(state="error", error=f"{type(e).__name__}: {e}", done=True)
             job["trace"] = traceback.format_exc()
 
-    from . import mesh3d
     threading.Thread(target=run, daemon=True).start()
     return {"job": jid}
 
@@ -683,22 +760,34 @@ def fem_mesh_scene(args) -> dict:
 
 
 def fem_node_scene(args) -> dict:
-    """Escena del campo de resultados del analisis FEM del nudo (von Mises, desplazamientos, deformacion plastica) para el visor."""
+    """Escena de resultados del modelo de placas para el visor: campo por elemento (von Mises en las caras, deformacion plastica o desplazamiento),
+    sobre la deformada (`scale` = factor; < 0 = automatico)."""
+    from .conn.fem import shellpost as SPo
     p = _prj(args["connection"])
     i = int(args.get("case", 0))
-    R = NODE_FEM.get((_node_sig(p), i))
-    if R is None:
-        raise ApiError("No hay un analisis FEM vigente de ese caso: corralo primero (los cambios en el nudo lo invalidan).")
-    sc = FS.scene_fem(R, p, field=args.get("field", "vm"), scale=float(args.get("scale", 0.0)), part=args.get("part", "all"), loads=False, bolts=True)
+    ent = NODE_SHELL.get((_node_sig(p), i))
+    if ent is None:
+        raise ApiError("No hay un análisis vigente de ese caso: calcule primero (los cambios en el nudo lo invalidan).")
+    R, _case = ent
+    us = p.units()
+    scale = float(args.get("scale", -1.0))
+    if scale < 0:
+        scale = SPo.auto_scale(R)
+    field = args.get("field", "vm")
+    if field not in [k for k, _l in SPo.FIELDS]:
+        field = "vm"
+    sc = SPo.scene(R, us, field=field, scale=scale, part=args.get("part", "all"))
     d = {"parts": [_scene_to_json(sc, "Resultados", "fem")], "message": sc.message}
     cb = sc.cbar
     if cb is not None:
-        d["cbar"] = {"colors": np.asarray(cb["colors"], float).tolist(), "vmin": float(cb["vmin"]), "vmax": float(cb["vmax"]), "title": sc.title, "note": cb.get("note", "")}
+        d["cbar"] = {"colors": np.asarray(cb["colors"], float).tolist(), "vmin": float(cb["vmin"]), "vmax": float(cb["vmax"]), "title": sc.title, "note": ""}
     P = np.asarray(sc.pts, float).reshape(-1, 3) if len(sc.pts) else np.zeros((1, 3))
     d["bounds"] = [P.min(axis=0).tolist(), P.max(axis=0).tolist()]
-    d["summary"] = {"nodes": int(R.n_nodes), "elems": int(R.n_elems), "umax": float(R.umax), "vmmax": float(R.vmmax), "msg": R.msg, "notes": list(R.notes)}
-    d["parts_list"] = [{"id": k, "label": v} for k, v in FS.part_choices(R)]
-    d["fields"] = [{"id": k, "label": v} for k, v in FS.FIELDS if k != "peeq" or R.plastic]
+    d["summary"] = {"nodes": int(R.n_nodes), "elems": int(R.n_elems), "umax": float(R.umax), "vmmax": float(R.vmmax), "peeqmax": float(R.peeqmax),
+                    "plastic": bool(R.plastic), "scale": scale, "msg": R.msg, "notes": list(R.notes)}
+    parts = sorted({q for q in R.plate_part})
+    d["parts_list"] = [{"id": "all", "label": "Todo el conjunto"}] + [{"id": k, "label": k} for k in parts]
+    d["fields"] = [{"id": k, "label": v} for k, v in SPo.FIELDS]
     return d
 
 
@@ -838,6 +927,9 @@ def report(args) -> dict:
     import tempfile
     p = _prj(args["connection"])
     res = solve_conn(p, fem_map=_fem_map(p))
+    fc, fw = _fem_node_checks(p)                       # resultados del analisis del modelo de placas (si esta vigente)
+    res.checks += fc
+    res.warnings += fw
     figs = save_figures(p, res, tempfile.mkdtemp(prefix="scp_"))
     fmt = args.get("format", "pdf")
     path = args["path"]

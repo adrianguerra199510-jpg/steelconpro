@@ -403,13 +403,20 @@ def _prism_plates(part, ip, pr, notes):
     elif len(poly) == 6:                                                                # perfil L (angulo): dos piernas
         us = sorted({round(q[0], 7) for q in poly})
         vs = sorted({round(q[1], 7) for q in poly})
-        if len(us) == 3 and len(vs) == 3 and min(us[1] - us[0], vs[1] - vs[0]) < tw:
-            t = us[1] - us[0]
-            leg_b, leg_a = us[2], vs[2]
-            tv = vs[1] - vs[0]
-            add(0, [g(t / 2, 0, w0), g(t / 2, leg_a, w0), g(t / 2, leg_a, w1), g(t / 2, 0, w1)], t, U)
-            add(1, [g(t / 2, tv / 2, w0), g(leg_b, tv / 2, w0), g(leg_b, tv / 2, w1), g(t / 2, tv / 2, w1)], tv, V)
-            return out
+        if len(us) == 3 and len(vs) == 3:
+            # angulo en cualquier orientacion: de las 4 esquinas de la caja, el poligono tiene 3; la que falta es opuesta a la esquina exterior
+            pts = {(round(q[0], 7), round(q[1], 7)) for q in poly}
+            corners = [(a_, b_) for a_ in (us[0], us[2]) for b_ in (vs[0], vs[2])]
+            miss = [c_ for c_ in corners if c_ not in pts]
+            if len(miss) == 1 and (us[1], vs[1]) in pts:
+                um, vm = miss[0]
+                uo, vo = (us[2] if um == us[0] else us[0]), (vs[2] if vm == vs[0] else vs[0])
+                tu, tv = abs(us[1] - uo), abs(vs[1] - vo)                             # espesor de la pierna paralela a V y de la paralela a U
+                if min(tu, tv) < tw:
+                    uc, vc = 0.5 * (uo + us[1]), 0.5 * (vo + vs[1])                    # superficies medias de las dos piernas
+                    add(0, [g(uc, vc, w0), g(uc, vm, w0), g(uc, vm, w1), g(uc, vc, w1)], tu, U)
+                    add(1, [g(uc, vc, w0), g(um, vc, w0), g(um, vc, w1), g(uc, vc, w1)], tv, V)
+                    return out
     area = 0.5 * abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1] for i in range(len(poly))))
     per = sum(math.hypot(poly[i][0] - poly[(i + 1) % len(poly)][0], poly[i][1] - poly[(i + 1) % len(poly)][1]) for i in range(len(poly)))
     t_in = 2.0 * area / max(per, 1e-9)
@@ -466,7 +473,8 @@ def build_plates(mdl):
     for part in mdl.parts:
         for ip, pr in enumerate(part.prisms):
             plates += _prism_plates(part, ip, pr, notes)
-    snap_plates(plates)
+    joined = {frozenset((w.A, w.B)) for w in mdl.welds} | {frozenset(b) for b in getattr(mdl, "bonded", [])}
+    snap_plates(plates, allow=lambda a, b: a == b or frozenset((a, b)) in joined)
     add_bolt_holes(mdl, plates)
     out = []
     for pl in plates:                                                                # tras el ajuste pueden quedar vertices repetidos o placas colapsadas
@@ -482,8 +490,10 @@ def build_plates(mdl):
 
 
 # ---------------------------------------------------------------------------------------------- uniones
-def snap_plates(plates, gap_tol=0.06):
-    """Lleva cada borde que apoya contra la superficie de otra placa (a menos de la mitad del espesor de esa placa) hasta su superficie media."""
+def snap_plates(plates, gap_tol=0.06, allow=None):
+    """Lleva cada borde que apoya contra la superficie de otra placa (a menos de la mitad del espesor de esa placa) hasta su superficie media
+    (union continua).  `allow(pieza A, pieza B)`: solo se unen las placas de la misma pieza o de piezas soldadas entre si; el canto de una pieza
+    que solo apoya (el talon de un angulo atornillado) no se une."""
     for P in plates:
         n = len(P.P)
         for i in range(n):
@@ -496,7 +506,7 @@ def snap_plates(plates, gap_tol=0.06):
             m = np.cross(P.n, ed)
             best = None
             for Q in plates:
-                if Q is P:
+                if Q is P or (allow is not None and not allow(P.part, Q.part)):
                     continue
                 nq = Q.n
                 if abs(float(P.n @ nq)) > 0.9:                                     # paralelas: contacto, no union
@@ -589,7 +599,13 @@ def mesh_job(job: dict, out_npz: str) -> dict:
                 ids = [occ.addPoint(*q) for q in pts]
                 lns = [occ.addLine(ids[i], ids[(i + 1) % len(ids)]) for i in range(len(ids))]
                 return occ.addCurveLoop(lns)
-            loops = [loop(pl["P"])] + [loop(h) for h in pl["holes"]]
+            nrm = np.asarray(pl["n"], float)
+
+            def orient(pts, ccw):                                                    # contorno y agujeros con la MISMA orientacion (antihoraria respecto de la normal):
+                A = np.asarray(pts, float)                                           # con orientaciones opuestas OCC deja la cara sin partir por las aristas de las placas
+                s = float(sum(np.cross(A[i], A[(i + 1) % len(A)]) @ nrm for i in range(len(A))))   # que llegan a ella (la union no comparte nodos)
+                return list(pts) if (s >= 0) == ccw else list(pts)[::-1]
+            loops = [loop(orient(pl["P"], True))] + [loop(orient(h, True)) for h in pl["holes"]]
             try:
                 sid = occ.addPlaneSurface(loops)
             except Exception:                                                        # contorno degenerado: se omite

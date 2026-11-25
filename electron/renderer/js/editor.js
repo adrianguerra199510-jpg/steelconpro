@@ -718,6 +718,11 @@ function fillResults(box, err, { forceOpen = false, pick = true } = {}) {
     box.append(h('div', { class: 'warns' }, gw));
   }
   if (r.warnings && r.warnings.length) box.append(h('div', { class: 'warns' }, r.warnings.map((w) => h('div', { class: `warn-row ${/^(ERROR|FATAL)/i.test(w) ? 'fatal' : ''}` }, svg('alert-triangle', 15), h('span', { text: w })))));
+  // ---- vista: resumen por componentes (estándar) o por operación
+  E.resView = E.resView || 'resumen';
+  const seg = (id, label) => h('button', { class: `seg-btn ${E.resView === id ? 'on' : ''}`, text: label, onclick: () => { E.resView = id; fillResults(box, err, { forceOpen, pick }); } });
+  if (r.checks.length) box.append(h('div', { class: 'seg', style: { display: 'flex', gap: '6px', margin: '2px 0 10px' } }, seg('resumen', 'Resumen por componentes'), seg('ops', 'Por operación')));
+  if (E.resView === 'resumen' && r.checks.length) { summaryView(box, r, forceOpen); if (r.combos && r.combos.length > 1) box.append(combosTable(r)); return; }
   // ---- por operación
   const groups = new Map();
   for (const c of r.checks) { const g = c.group || 'Otras verificaciones'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(c); }
@@ -745,6 +750,49 @@ function fillResults(box, err, { forceOpen = false, pick = true } = {}) {
   }
   if (r.combos && r.combos.length > 1) box.append(combosTable(r));
   if (!r.checks.length) box.append(h('p', { class: 'muted', style: { padding: '12px 16px' }, text: 'Todavía no hay verificaciones: agregue operaciones y cargas.' }));
+}
+// resumen estándar: categorías (miembros, placas, pernos, soldaduras, anclajes y concreto) -> componentes -> verificaciones
+const CAT_ICON = { Miembros: 'component', Placas: 'square', Pernos: 'bolt', Soldaduras: 'zap', 'Anclajes y concreto': 'nut', Otras: 'list' };
+function chkRow(c) {
+  return h('div', { class: `chk ${c.skip ? 'na' : ''}` },
+    h('div', { class: 't', text: c.title }), c.ref ? h('div', { class: 'r', text: c.ref }) : null,
+    c.skip ? h('div', { class: 'v', text: c.note || 'No evaluado' }) : h('div', { class: 'v', text: `${fmt(c.demand)} ${c.unit || ''} ≤ ${fmt(c.capacity)} ${c.unit || ''}` + (c.note ? ` — ${c.note}` : '') }),
+    h('div', { class: 'dcw' }, dcBar(c.ratio, c.skip)));
+}
+function summaryView(box, r, forceOpen) {
+  const cats = r.categories || ['Miembros', 'Placas', 'Pernos', 'Soldaduras', 'Anclajes y concreto', 'Otras'];
+  const by = new Map(cats.map((c) => [c, new Map()]));
+  for (const c of r.checks) {
+    const cat = by.has(c.cat) ? c.cat : 'Otras';
+    const comp = c.comp || c.group || 'Otras verificaciones';
+    const m = by.get(cat); if (!m.has(comp)) m.set(comp, []); m.get(comp).push(c);
+  }
+  const maxOf = (list) => { const ev = list.filter((c) => !c.skip); return ev.length ? Math.max(...ev.map((c) => c.ratio)) : null; };
+  const govOf = (list) => list.filter((c) => !c.skip).sort((a, b) => b.ratio - a.ratio)[0];
+  const tbl = h('div', { class: 'sum-table' });
+  for (const cat of cats) {
+    const comps = by.get(cat); if (!comps.size) continue;
+    const all = [...comps.values()].flat();
+    const max = maxOf(all); const gov = govOf(all); const ok = max == null || max <= 1 + 1e-9;
+    const fem = all.some((c) => c.src === 'fem');
+    const head = h('div', { class: 'gh', onclick: () => grp.classList.toggle('closed') },
+      svg(CAT_ICON[cat] || 'list', 15), h('span', { class: 'name', text: `${cat}` }),
+      h('span', { class: 'muted', style: { fontSize: '11.5px', marginLeft: '4px' }, text: `${comps.size} componente${comps.size > 1 ? 's' : ''}${fem ? ' · FEM' : ''}` }),
+      h('span', { class: 'grow' }), max != null ? dcBar(max) : chip('sin evaluar', ''), svg('chevron-down', 14));
+    const govLine = gov ? h('div', { class: 'muted', style: { fontSize: '11.5px', padding: '0 12px 6px 34px' }, text: `Gobierna: ${gov.comp || gov.group} — ${gov.title}` }) : null;
+    const items = [...comps].sort((a, b) => (maxOf(b[1]) || 0) - (maxOf(a[1]) || 0)).map(([comp, list]) => {
+      const mx = maxOf(list); const okc = mx == null || mx <= 1 + 1e-9;
+      const src = list.some((c) => c.src === 'fem') ? 'FEM' : 'fórmulas';
+      const ch = h('div', { class: 'gh sub', onclick: (ev) => { ev.stopPropagation(); sub.classList.toggle('closed'); } },
+        h('span', { class: 'name', text: comp }), h('span', { class: `chip ${src === 'FEM' ? 'info' : ''}`, style: { fontSize: '10.5px' }, text: src }),
+        h('span', { class: 'grow' }), mx != null ? dcBar(mx) : chip('sin evaluar', ''), svg('chevron-down', 13));
+      const sub = h('div', { class: `res-group nested ${okc ? 'closed' : ''}` }, ch, h('div', { class: 'gb' }, list.map(chkRow)));
+      return sub;
+    });
+    const grp = h('div', { class: `res-group cat ${ok && !forceOpen ? 'closed' : ''}`, dataset: { cat } }, head, govLine, h('div', { class: 'gb' }, items));
+    tbl.append(grp);
+  }
+  box.append(tbl);
 }
 function fmt(v) { if (v == null) return '—'; const a = Math.abs(v); return Number(v).toLocaleString('es', { maximumFractionDigits: a >= 100 ? 1 : a >= 1 ? 2 : 3 }); }
 
@@ -817,8 +865,8 @@ function renderMemory() {
 function nodeFemCfg() {
   return { title: 'Modelo FEM (miembros, placas, pernos, soldaduras y placa base)',
     desc: 'Un solo modelo de PLACAS (cascarones sobre la superficie media de cada pieza, como IDEA StatiCa), mallado con Gmsh. Cada miembro tiene el largo con que se dibuja (lo fija el cálculo). '
-      + 'Con placa base, el modelo incluye la placa y sus rigidizadores; el concreto no se malla (apoyo elástico solo-compresión y anclajes como resortes). Las placas que apoyan contra otra se unen en su superficie media y los agujeros de los pernos se abren en cada placa. '
-      + 'Por ahora solo se genera la malla.',
+      + 'Con placa base o con placas sobre un bloque de concreto, el concreto no se malla (apoyo elástico solo-compresión y anclajes a punto fijo). Las piezas soldadas se unen en su superficie media; los pernos son cuerpos rígidos en sus agujeros unidos por resortes (tracción solo positiva) y las placas atornilladas tienen contacto solo-compresión. '
+      + 'CalculiX resuelve cada caso de carga (elástico y, si el acero pasa de φ·Fy, elasto-plástico): «Calcular» verifica, analiza y muestra los esfuerzos y la deformada en el visor.',
     start: (st) => call('fem_node_start', { connection: E.conn(), force: !!(st && st.force) }), scene: (st) => call('fem_node_scene', { connection: E.conn(), case: parseInt(st.combo, 10), field: st.field, scale: st.scale, part: st.part }),
     cases: () => (E.nodal ? E.nodal.cases.map((c, i) => ({ value: String(i), label: c.case })) : []), caseLabel: 'Caso de carga', config: femConfig };
 }
@@ -881,7 +929,7 @@ const field2 = (l, c) => h('div', { class: 'field' }, h('span', { class: 'lbl', 
 function femSection(cfg) {
   const kind = 'node';
   E.fems = E.fems || {}; E.jobs = E.jobs || {};
-  E.fems[kind] = E.fems[kind] || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  E.fems[kind] = E.fems[kind] || { combo: '0', field: 'vm', part: 'all', scale: -1, parts: [], fields: [] };
   E.femCfgs = E.femCfgs || {}; E.femCfgs[kind] = cfg;
   const status = h('div', { class: 'muted', style: { fontSize: '12.5px', whiteSpace: 'pre-line' } });
   E.ui.femStatus = status;
@@ -893,8 +941,8 @@ function femSection(cfg) {
   E.ui.femMeshGo = meshGo; E.ui.femStop = stop;
   syncFemButtons();
   const card = h('div', { class: 'card-sec' }, h('h4', { text: cfg.title }), h('p', { class: 'hint-text', text: cfg.desc }),
-    h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: 'Por ahora solo se genera la malla: aquí se genera y se ve en el visor, y el botón de la malla queda en la barra superior del visor.' }),
-    h('div', { class: 'row', style: { marginTop: '8px' } }, meshGo), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null);
+    h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: 'El análisis se lanza con «Calcular». Aquí también puede generar solo la malla para revisarla; los controles de la malla y de los resultados quedan en la barra superior del visor.' }),
+    h('div', { class: 'row', style: { marginTop: '8px' } }, meshGo, stop), h('div', { style: { height: '6px' } }), status, cfg.config ? cfg.config() : null);
   if (E.femRunning) pollJob(kind, cfg);
   return card;
 }
@@ -902,9 +950,10 @@ function femSection(cfg) {
 // «Calcular»: verificaciones + análisis FEM del modelo único (en segundo plano; los resultados llegan a la barra del visor)
 async function startFem() {
   if (E.femRunning) return;
+  if (!E.nodal || !E.nodal.cases || !E.nodal.cases.length) { toast('Sin casos de carga: solo se verifican las fórmulas cerradas (el análisis del modelo de placas necesita cargas).', 'info'); return; }
   const cfg = nodeFemCfg();
   E.femCfgs = E.femCfgs || {}; E.femCfgs.node = cfg; E.jobs = E.jobs || {}; E.fems = E.fems || {};
-  E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: -1, parts: [], fields: [] };
   try {
     E.femStarted = true; E.femDone = false; E.femKind = 'node'; updateFemTools();
     const r = await cfg.start({});
@@ -912,8 +961,8 @@ async function startFem() {
     pollJob('node', cfg);
   } catch (e) { E.femRunning = false; syncFemButtons(); errorBox(e); }
 }
-// Por ahora el análisis FEM no se lanza con «Calcular» (solo se malla desde la pestaña FEM); `startFem` queda listo para activarlo.
-function calcular() { runVerify.flush(); }
+// «Calcular»: verificaciones de fórmulas cerradas y análisis del modelo de placas (en segundo plano); al terminar, el visor muestra los resultados
+function calcular() { runVerify.flush(); startFem(); }
 
 function pollJob(kind, cfg) {
   E.pollers = E.pollers || {};
@@ -949,7 +998,8 @@ async function showFem(kind, cfg) {
     if (d.parts_list) st.parts = d.parts_list;
     if (d.fields) st.fields = d.fields;
     updateFemTools();
-    if (d.summary) setStatus(`FEM: ${d.summary.nodes.toLocaleString('es')} nodos · |U|máx = ${S.us.q('L', d.summary.umax, 3)} · von Mises máx = ${S.us.q('S', d.summary.vmmax, 1)}`);
+    if (d.summary) setStatus(`Modelo de placas: ${d.summary.nodes.toLocaleString('es')} nodos · ${d.summary.elems.toLocaleString('es')} elementos · |U|máx = ${S.us.q('L', d.summary.umax, 3)}`
+      + (d.summary.plastic ? ` · εp máx = ${(100 * d.summary.peeqmax).toFixed(2)} %` : ' · elástico') + (d.summary.scale > 0 ? ` · deformada ×${d.summary.scale}` : ''));
     if (d.message) toast(Array.isArray(d.message) ? d.message[0] : String(d.message), 'info');
   } catch (e) { errorBox(e); }
 }
@@ -961,7 +1011,7 @@ function updateFemTools() {
   ui.femMeshBtn.title = 'Ver la malla de elementos finitos del modelo completo';
   if (!E.femDone) return;
   E.fems = E.fems || {};
-  const st = E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: 0, parts: [], fields: [] };
+  const st = E.fems.node = E.fems.node || { combo: '0', field: 'vm', part: 'all', scale: -1, parts: [], fields: [] };
   const fill = (sel, opts, value, onch) => { sel.replaceChildren(...opts.map((o) => h('option', { value: o.value, text: o.label }))); sel.value = String(value); sel.onchange = () => onch(sel.value); };
   const cfg = E.femCfgs.node;
   const cases = cfg.cases();
@@ -970,7 +1020,7 @@ function updateFemTools() {
   const show = () => showFem('node', cfg);
   fill(ui.femCase, cases, st.combo, (v) => { st.combo = v; show(); });
   fill(ui.femField, fields.map((f) => ({ value: f.id, label: f.label })), st.field, (v) => { st.field = v; show(); });
-  fill(ui.femScale, [['0', 'Sin deformar'], ['10', 'Deformada ×10'], ['50', 'Deformada ×50'], ['200', 'Deformada ×200'], ['1000', 'Deformada ×1000']].map(([value, label]) => ({ value, label })), String(st.scale), (v) => { st.scale = parseFloat(v); show(); });
+  fill(ui.femScale, [['-1', 'Deformada automática'], ['0', 'Sin deformar'], ['1', 'Deformada ×1'], ['10', 'Deformada ×10'], ['50', 'Deformada ×50'], ['200', 'Deformada ×200']].map(([value, label]) => ({ value, label })), String(st.scale), (v) => { st.scale = parseFloat(v); show(); });
   fill(ui.femPart, parts.map((p) => ({ value: p.id, label: p.label })), st.part, (v) => { st.part = v; show(); });
 }
 async function toggleFemMesh() {
@@ -994,7 +1044,7 @@ function openReport() {
   const mem = h('div', { class: 'memory', style: { padding: '4px 18px 18px', overflow: 'auto', flex: 1 } });
   const nod = h('div', { class: 'scroll', style: { padding: '4px 14px 14px' } });
   const t = tabs([
-    { id: 'res', label: 'Resultados por operación', icon: 'check', render: () => { fillResults(box, null, { forceOpen: true, pick: false }); return box; } },
+    { id: 'res', label: 'Resultados', icon: 'check', render: () => { fillResults(box, null, { forceOpen: true, pick: false }); return box; } },
     { id: 'mem', label: 'Memoria de cálculo (fórmulas)', icon: 'file-text', render: () => { mem.innerHTML = E.res && E.res.memory ? E.res.memory : '<p class="muted" style="padding:14px">Sin memoria: calcule primero.</p>'; return mem; } },
     { id: 'nod', label: 'Análisis nodal', icon: 'zap', render: () => { const keep = E.ui.nodBox; E.ui.nodBox = nod; renderNodal(); E.ui.nodBox = keep; return nod; } },
   ], { cls: 'pill' });
