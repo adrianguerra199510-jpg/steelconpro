@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Punto de entrada de PlacaBasePro.
+"""Punto de entrada de SteelConPro.
 
-    PlacaBasePro.exe                       -> interfaz grafica
-    PlacaBasePro.exe --selftest            -> autopruebas del motor (sin interfaz)
-    PlacaBasePro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
-    PlacaBasePro.exe proyecto.pbase --pdf mem.pdf --docx s.docx
+    SteelConPro.exe                       -> interfaz grafica
+    SteelConPro.exe --selftest            -> autopruebas del motor (sin interfaz)
+    SteelConPro.exe --mesh a.geo b.inp    -> (interno) malla con la API de Gmsh
+    SteelConPro.exe proyecto.pbase --pdf mem.pdf --docx s.docx
                                      --3d carpeta --geo modelo3d.geo
                                            -> calculo por lotes sin interfaz
                                               (--3d corre Gmsh + CalculiX y verifica con sus resultados)

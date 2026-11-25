@@ -1,6 +1,8 @@
-<p align="center"><img src="placabase/data/logo.png" width="420" alt="PlacaBasePro"></p>
+<p align="center"><img src="placabase/data/logo.png" width="420" alt="SteelConPro"></p>
 
-# PlacaBasePro 3.2.11
+# SteelConPro 3.2.11
+
+> **SteelConPro** es el proyecto actual (diseño de conexiones de acero). Parte del código base de PlacaBasePro 3.2.11 (placas base), que sigue siendo su primer módulo. Las secciones "Novedades de la 3.2.x" de abajo son el historial de esa base.
 
 Diseño y verificación de placas base para perfiles **W, HSS cuadrado/rectangular,
 HSS circular y Pipe**, con dibujo paramétrico, anclajes ACI 318-19, llave de corte,
@@ -198,7 +200,7 @@ solo el punto maximo, bajo la escala de colores.
 
 ## Identidad visual (2.1)
 
-Icono propio del programa y del .exe (`placabase/data/placabasepro.ico`), logo en la ventana, pantalla de inicio, "Acerca de" y el encabezado de las memorias PDF y Word; barra con acento naranja y boton CALCULAR de marca. Los recursos estan en `placabase/data/` y los colores en `placabase/brand.py`.
+Icono propio del programa y del .exe (`placabase/data/steelconpro.ico`), logo en la ventana, pantalla de inicio, "Acerca de" y el encabezado de las memorias PDF y Word; barra con acento naranja y boton CALCULAR de marca. Los recursos estan en `placabase/data/` y los colores en `placabase/brand.py`.
 
 ## Novedades de la 2.1: combinaciones de carga, flexion del perno y nueva organizacion
 
@@ -493,8 +495,8 @@ reporte de una conexion solo si se corrio con esa conexion tal como esta.
 
 ## 1. Usar y compartir
 
-**Si recibio `PlacaBasePro_portable.zip`:** descomprimalo donde quiera y abra
-`PlacaBasePro\PlacaBasePro.exe`. No hay que instalar nada: Gmsh va dentro del
+**Si recibio `SteelConPro_portable.zip`:** descomprimalo donde quiera y abra
+`SteelConPro\SteelConPro.exe`. No hay que instalar nada: Gmsh va dentro del
 programa y CalculiX en `solvers\calculix`. No separe el `.exe` de su carpeta.
 
 **Para compilarlo desde este codigo fuente (Windows):**
@@ -505,8 +507,8 @@ programa y CalculiX en `solvers\calculix`. No separe el `.exe` de su carpeta.
 El script crea un entorno virtual, instala las dependencias (incluida la libreria
 de Gmsh), corre las autopruebas, compila, copia `solvers\` y deja:
 
-- `dist\PlacaBasePro\PlacaBasePro.exe` — el programa listo para usar.
-- `PlacaBasePro_portable.zip` — la misma carpeta comprimida, para compartir.
+- `dist\SteelConPro\SteelConPro.exe` — el programa listo para usar.
+- `SteelConPro_portable.zip` — la misma carpeta comprimida, para compartir.
 
 `ejecutar_sin_compilar.bat` corre la aplicacion directamente con Python, util
 mientras se prueba.
@@ -514,9 +516,9 @@ mientras se prueba.
 ### Uso por línea de comandos
 
 ```
-PlacaBasePro.exe                                      interfaz gráfica
-PlacaBasePro.exe --selftest                           autopruebas del motor
-PlacaBasePro.exe PB-01.pbase --pdf m.pdf --docx m.docx --inp m.inp
+SteelConPro.exe                                      interfaz gráfica
+SteelConPro.exe --selftest                           autopruebas del motor
+SteelConPro.exe PB-01.pbase --pdf m.pdf --docx m.docx --inp m.inp
 ```
 
 En modo lote devuelve código de salida 0 si cumple y 2 si no cumple, así que se
@@ -539,7 +541,7 @@ y Pipe STD/XS). **Para el catálogo completo y verificado**, use
 `aisc-shapes-database-v14.1.xlsx`. El importador reconoce las columnas nativas de
 ese archivo (`Type`, `AISC_Manual_Label`, `d`, `bf`, `tf`, `tw`, `Ht`, `B`, `tdes`,
 `OD`, `A`, `Ix`, `Sx`, `Zx`, …), guarda el resultado en
-`%APPDATA%\PlacaBasePro\shapes.json` y los perfiles importados sustituyen a los
+`%APPDATA%\SteelConPro\shapes.json` y los perfiles importados sustituyen a los
 integrados. Hágalo una vez; queda permanente.
 
 ### 2.2 Pernos en pulgadas y base de materiales

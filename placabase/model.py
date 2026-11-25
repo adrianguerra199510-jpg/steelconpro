@@ -579,7 +579,7 @@ def _used_extras(projects):
 
 def save_book(path: str, projects: list):
     shapes, mats = _used_extras(projects)
-    data = {"formato": "PlacaBasePro-libro", "version": 2,
+    data = {"formato": "SteelConPro-libro", "version": 2,
             "conexiones": [asdict(p) for p in projects],
             "perfiles": shapes, "materiales": mats}
     with open(path, "w", encoding="utf-8") as f:
@@ -590,7 +590,7 @@ def load_book(path: str) -> list:
     """Lee un libro (varias conexiones) o un proyecto antiguo de una sola."""
     with open(path, encoding="utf-8") as f:
         d = json.load(f)
-    if isinstance(d, dict) and d.get("formato") == "PlacaBasePro-libro":
+    if isinstance(d, dict) and d.get("formato") in ("SteelConPro-libro", "PlacaBasePro-libro"):
         for sd in d.get("perfiles", []):
             if not CATALOG.get(sd["label"]):
                 CATALOG.shapes[sd["label"]] = Shape(**sd)

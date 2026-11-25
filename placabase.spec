@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec de PlacaBasePro (formato carpeta).
+# PyInstaller spec de SteelConPro (formato carpeta).
 # Uso:  pyinstaller --noconfirm --clean placabase.spec
 # build_portable.bat agrega despues la carpeta solvers\ y arma el .zip final.
 import os
@@ -39,9 +39,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
-    name="PlacaBasePro",
+    name="SteelConPro",
     console=False,            # sin ventana de consola
-    icon="placabase/data/placabasepro.ico",
+    icon="placabase/data/steelconpro.ico",
     upx=False,
 )
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="PlacaBasePro")
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="SteelConPro")

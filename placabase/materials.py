@@ -227,9 +227,8 @@ CONCRETES = [ConcreteMat(n, v) for n, v in CONCRETE_PRESETS]
 def _mat_file():
     import os
     from pathlib import Path
-    base = Path(os.environ.get("APPDATA", Path.home())) / "PlacaBasePro"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "materials.json"
+    from .brand import user_data_dir
+    return user_data_dir(os.environ.get("APPDATA", Path.home())) / "materials.json"
 
 
 def _register(kind: str, d: dict, user=True):

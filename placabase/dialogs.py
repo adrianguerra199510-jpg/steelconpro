@@ -121,7 +121,7 @@ class SectionDialog(QDialog):
 
 class MaterialsDialog(QDialog):
     """Biblioteca de materiales del usuario (acero, anclajes, concreto).
-    Se guarda en %APPDATA%/PlacaBasePro/materials.json."""
+    Se guarda en %APPDATA%/SteelConPro/materials.json."""
 
     COLS = {"steel": ["Nombre", "Fy", "Fu"],
             "anchor": ["Nombre", "Fy", "Fu", "Ductil (si/no)"],
