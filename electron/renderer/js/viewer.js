@@ -261,7 +261,7 @@ export class Viewer {
   }
 
   // ---------------------------------------------------------------- cargas (flechas de fuerza y arcos de momento, como en PlacaBase Pro)
-  // items: [{ pos:[x,y,z], F:[fx,fy,fz], M:[mx,my,mz], textF, textM, color }]; la flecha de fuerza llega al punto de aplicacion
+  // items: [{ pos:[x,y,z], F:[fx,fy,fz], M:[mx,my,mz], textF, textM, color }]; la flecha de fuerza nace en el punto de aplicacion y sale hacia afuera (sentido de la fuerza)
   clearLoads() {
     for (const o of [...this.loadGroup.children]) { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); this.loadGroup.remove(o); }
     for (const l of this.loadEls) l.el.remove();
@@ -296,9 +296,9 @@ export class Viewer {
       const F = new THREE.Vector3(...(it.F || [0, 0, 0])); const f = F.length();
       if (f > 1e-9) {
         const len = Math.max(0.3, f / fmax) * Lmax; const dir = F.clone().normalize();
-        const tail = P.clone().addScaledVector(dir, -len);
-        arrow(tail, P, c);
-        label(tail.clone().addScaledVector(dir, -0.02 * diag), it.textF, c);
+        const tip = P.clone().addScaledVector(dir, len);                      // la flecha nace en el elemento (punto de aplicación) y sale hacia afuera, en el sentido de la fuerza
+        arrow(P.clone(), tip, c);
+        label(tip.clone().addScaledVector(dir, 0.02 * diag), it.textF, c);
       }
       const M = new THREE.Vector3(...(it.M || [0, 0, 0])); const mm = M.length();
       if (mm > 1e-9) {

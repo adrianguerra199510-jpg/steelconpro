@@ -534,3 +534,6 @@ cierra con V.
 - La **soldadura de contorno** (`trim_weld`) sigue la curva de intersección: sus tramos tienen los dos extremos sobre la pared exterior del tubo y sobre el cilindro (sin la holgura de antes: ya no hace falta un `trim_gap` negativo), con normales hacia el rincón. El revisor de geometría (`prism_mask`/`prism_dist`), el comprobador de mallas cerradas, el mallador sólido (resta del cilindro) y el modelo de placas (facetas con la arista recortada) entienden el corte.
 - Solo para tubos redondos contra tubos redondos; con otras secciones el recorte contra un volumen sigue acortando el miembro por su extremo. Ejemplo `TP-G22` (aros de travesaños y una diagonal por cara con boca de pez en los dos extremos) y pruebas en `selftest_miembro_a_miembro.py`.
 
+## Flechas de carga
+- Toda flecha de fuerza (cargas de los miembros, cargas del nudo y reacciones) **nace en el elemento**, en su punto de aplicación (extremo libre del miembro), y **sale hacia afuera en el sentido de la fuerza**; su rótulo queda más allá de la punta. Los momentos siguen dibujándose como arcos alrededor del punto.
+
