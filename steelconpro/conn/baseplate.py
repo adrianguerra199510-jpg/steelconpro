@@ -21,7 +21,7 @@ import numpy as np
 
 from .specs import (CT_BASEPLATE, CT_NODE, END_LABELS, OP_BASE, Nodo, Operation)
 
-PROJECT_BLOCKS = ("section", "plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea")
+PROJECT_BLOCKS = ("section", "plate", "bolts", "lug", "stiff", "welds", "conc", "loads", "fea", "seis")
 
 
 def base_member(nd: Nodo, op: Operation):
@@ -55,7 +55,34 @@ def derive(prj, nd: Nodo = None, into=None):
             q.section.label, q.section.steel = nd.main_shape, nd.main_steel
         elif m is not None:
             q.section.label, q.section.steel = m.shape, m.steel
+    _cap_overstrength(q)
     return q
+
+
+def _cap_overstrength(q):
+    """AISC 341-22 D2.6b/c: en las combinaciones con Ωo·QE la resistencia requerida de la base es la menor entre la combinacion y la
+    capacidad del miembro que lleva la placa (1.1·Ry·Fy·Z en flexion si la base es empotrada; 2·Ry·Fy·Z/H en cortante)."""
+    from .. import seismic as SE
+    S = q.seis
+    if not (S.enabled and S.cap_limit and S.aisc341):
+        return
+    lim = SE.capacity_limits(q)
+    for c in q.combo_list():
+        if c.kind != "Ωo":
+            continue
+        g = [c.Pu - c.PE, c.Mux - c.MxE, c.Muy - c.MyE, c.Vux - c.VxE, c.Vuy - c.VyE]
+        capped = False
+        for attr, key, use in (("Mux", "Mx", S.base_moment), ("Muy", "My", S.base_moment), ("Vux", "Vx", True), ("Vuy", "Vy", True)):
+            v = getattr(c, attr)
+            if use and abs(v) > lim[key]:
+                setattr(c, attr, lim[key] if v > 0 else -lim[key])
+                capped = True
+        if capped:
+            if c.e_known:
+                c.MxE, c.MyE, c.VxE, c.VyE = c.Mux - g[1], c.Muy - g[2], c.Vux - g[3], c.Vuy - g[4]
+            if "(lim. D2.6)" not in c.name:
+                c.name += " (lim. D2.6)"
+    q.apply_combo(q.combo_idx)
 
 
 def _rz(deg):

@@ -1,7 +1,7 @@
 // Ventanas del editor: miembros, cargas del nudo y datos del proyecto (nombre, unidades).
 import { call } from './api.js';
 import { S } from './state.js';
-import { h, svg, btn, iconBtn, modal, field, selectInput, textInput, numInput, errorBox, toast, confirmBox } from './ui.js';
+import { h, svg, btn, iconBtn, modal, field, selectInput, textInput, numInput, checkInput, errorBox, toast, confirmBox } from './ui.js';
 import { renderItems } from './forms.js';
 import { sectionPicker } from './sectionpicker.js';
 
@@ -175,6 +175,97 @@ export function openLoads(E) {
     btn('Agregar carga', { icon: 'plus', onClick: () => { nd.loads.push({ case: nd.loads.length ? nd.loads[nd.loads.length - 1].case : 'Caso 1', member: nd.members[0] ? nd.members[0].name : nd.main_name, N: 0, Vy: 0, Vz: 0, T: 0, My: 0, Mz: 0, side: 0 }); draw(); E.changed({ loads: true }); } }));
   const mod = modal({ title: 'Cargas del nudo', icon: 'zap', width: 980, floating: true, pos: { x: 340, y: 80 }, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
     onClose: () => { if (JSON.stringify([nd.loads, nd.balance_end]) === before) E.dropSnap(); E.refreshTree(); } });
+}
+
+// ---------------------------------------------------------------------------------------------------- diseño sísmico
+// ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10: datos de la conexión, tipo de cada caso de carga del nudo y generación de las combinaciones.
+export function openSeismic(E) {
+  const c = E.conn();
+  const nd = c.node;
+  const us = E.us();
+  const C = (S.C && S.C.seismic) || { systems: [], sdc: ['A', 'B', 'C', 'D', 'E', 'F'], omega0: {} };
+  E.snap();
+  if (!nd.case_kind) nd.case_kind = {};
+  const sd = c.seis;
+  const before = JSON.stringify([sd, nd.case_kind, nd.loads]);
+  const GEN = ['G', 'E', 'Ωo'];
+  const set = (k, v) => { sd[k] = v; E.changed({ geometry: false }); };
+  const chk = (k, label) => checkInput({ value: sd[k], label, onChange: (v) => { set(k, v); sync(); } });
+  const num = (k, dec, kind) => numInput({ value: kind ? us.out(kind, sd[k]) : sd[k], dec, onChange: (v) => set(k, kind ? us.inn(kind, v) : v) });
+  const omegaI = num('Omega0', 2);
+  const sysSel = selectInput({ value: sd.system, options: C.systems, onChange: (v) => {
+    sd.system = v; if (C.omega0[v] != null) { sd.Omega0 = C.omega0[v]; omegaI.querySelector('input').value = String(sd.Omega0); } E.changed({ geometry: false }); refreshInfo(); } });
+  const info = h('p', { class: 'hint-text', text: '' });
+  const refreshInfo = async () => {
+    try {
+      const r = await call('seismic_info', { connection: E.conn() });
+      const L = r.limits;
+      info.textContent = `Miembro de la placa base: ${r.member}, Ry = ${r.Ry}.  Límites de la resistencia requerida (AISC 341-22 D2.6): 1.1·Ry·Fy·Zx = ${us.fmt('M', L.Mx)}, `
+        + `1.1·Ry·Fy·Zy = ${us.fmt('M', L.My)}, 2·Ry·Fy·Zx/H = ${us.fmt('F', L.Vy)}, 2·Ry·Fy·Zy/H = ${us.fmt('F', L.Vx)}.`;
+    } catch (e) { info.textContent = ''; }
+  };
+  // ---- tipo de cada caso de carga
+  const tb = h('tbody');
+  const drawCases = () => {
+    tb.replaceChildren();
+    const names = [...new Set(nd.loads.map((l) => l.case))];
+    const opts = [{ value: '', label: 'Combinación factorizada' }, { value: 'D', label: 'D — muerta (servicio)' }, { value: 'L', label: 'L — viva (servicio)' },
+      { value: 'S', label: 'S — nieve (servicio)' }, { value: 'QEx', label: 'QEx — sismo en X (servicio)' }, { value: 'QEy', label: 'QEy — sismo en Y (servicio)' }];
+    const gen = { G: 0, E: 0, 'Ωo': 0 };
+    for (const n of names) {
+      const k = nd.case_kind[n] || '';
+      if (GEN.includes(k)) { gen[k] += 1; continue; }
+      const cell = selectInput({ value: k, options: opts, onChange: (v) => { if (v) nd.case_kind[n] = v; else delete nd.case_kind[n]; E.changed({ loads: true }); } });
+      tb.append(h('tr', null, h('td', { text: n }), h('td', null, cell)));
+    }
+    if (gen.G + gen.E + gen['Ωo']) {
+      tb.append(h('tr', null, h('td', { class: 'muted', text: 'Generadas' }),
+        h('td', { class: 'muted', text: `${gen.G} de gravedad, ${gen.E} sísmicas (ρ·QE), ${gen['Ωo']} con sobrerresistencia (Ωo·QE)` })));
+    }
+    if (!names.length) tb.append(h('tr', null, h('td', { colspan: 2, class: 'muted', text: 'Sin casos de carga: escríbalos en Cargas (D, L, S, QEx, QEy sin factorar, por miembro).' })));
+  };
+  const genBtn = btn('Generar combinaciones', { icon: 'zap', kind: 'primary', onClick: async () => {
+    try {
+      const r = await call('seismic_generate', { connection: E.conn() });
+      E.replaceConn(r.connection); E.changed({ loads: true });
+      Object.assign(c, E.conn());
+      toast(r.count ? `${r.count} combinaciones de ASCE 7-05 generadas en el nudo` : 'No hay casos de servicio con cargas: marque D, L, S, QEx o QEy', r.count ? 'ok' : 'warn', 6000);
+      mod.close();
+      openSeismic(E);
+    } catch (e) { errorBox(e); }
+  } });
+  const grp = h('div', { class: 'col gap-12' });
+  const sync = () => { grp.style.display = sd.enabled ? '' : 'none'; };
+  grp.append(
+    h('div', { class: 'card-sec' }, h('h4', { text: 'Sitio y sistema' }), h('div', { class: 'form-grid' },
+      field('Categoría de diseño sísmico (SDC)', selectInput({ value: sd.sdc, options: C.sdc, onChange: (v) => set('sdc', v) }), { help: 'ASCE 7-05 11.6. ACI 318-19 17.10 solo aplica en SDC C a F.' }),
+      field('Sistema sismorresistente', sysSel, { help: 'Define Ωo por defecto (ASCE 7-05 Tabla 12.2-1), si las soldaduras columna-placa son de demanda crítica (AISC 341-22 A3.4b) y los avisos de riostras.' }),
+      field('Ωo (sobrerresistencia)', omegaI), field('ρ (redundancia)', num('rho', 2)), field('SDS', num('SDS', 3), { help: 'Ev = 0.2·SDS·D (12.4.2.2).' }),
+      field('f1 (factor de L con sismo)', num('f1', 2), { help: 'ASCE 7-05 2.3.2 excepción 1: 0.5 si L0 ≤ 100 psf (salvo garajes y reunión pública); si no, 1.0.' }),
+      field('Ry (0 = automático)', num('Ry', 2), { help: 'AISC 341-22 Tabla A3.2 según el acero del miembro de la placa base.' }),
+      field(`H, altura del piso (${us.label('L')})`, num('H', us.dec('L'), 'L')),
+      field('', chk('base_moment', 'La base transmite momento (empotrada)'))), info),
+    h('div', { class: 'card-sec' }, h('h4', { text: 'Tipo de cada caso de carga del nudo' }),
+      h('p', { class: 'hint-text', text: 'Escriba en Cargas los casos de SERVICIO (sin factorar) y márquelos aquí. Los casos de servicio no se diseñan: el generador arma con ellos los casos factorizados de ASCE 7-05 para todos los miembros del nudo.' }),
+      h('table', { class: 't compact' }, h('thead', null, h('tr', null, h('th', { text: 'Caso' }), h('th', { text: 'Tipo' }))), tb)),
+    h('div', { class: 'card-sec' }, h('h4', { text: 'Combinaciones (ASCE 7-05)' }), h('div', { class: 'form-grid' },
+      field('', chk('gravity', 'Incluir gravedad: 1.4D ; 1.2D + 1.6L + 0.5S ; 1.2D + 1.6S + f1·L')),
+      field('', chk('ortho', 'Direcciones ortogonales 100 % + 30 % (12.5)')),
+      field('', chk('cap_limit', 'Limitar Ωo·QE de la placa base por la capacidad de la columna (AISC 341-22 D2.6)'))),
+      h('p', { class: 'hint-text', text: '(1.2 + 0.2·SDS)·D + ρ·QE + f1·L + 0.2·S ; (0.9 − 0.2·SDS)·D + ρ·QE (12.4.2.3) y las mismas con Ωo·QE (12.4.3.2), con ±QE en cada dirección. Reemplaza los casos generados antes; los escritos a mano se conservan.' }),
+      genBtn),
+    h('div', { class: 'card-sec' }, h('h4', { text: 'Placa base: anclaje dúctil (ACI 318-19 17.10.5.3(a))' }), h('div', { class: 'form-grid' },
+      field('', chk('ductile', 'Verificar anclaje dúctil')),
+      field(`Longitud desadherida en el concreto (${us.label('L')})`, num('sleeve', us.dec('L'), 'L'), { help: 'Estiramiento = camisa + mortero + stand-off + tp ≥ 8·da.' }),
+      field('', chk('upset', 'Rosca recalcada (upset): no se exige futa/fya ≥ 1.3')))));
+  drawCases();
+  sync();
+  refreshInfo();
+  const body = h('div', { class: 'col gap-12' },
+    h('div', { class: 'card-sec' }, checkInput({ value: sd.enabled, label: 'Diseño sísmico (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)', onChange: (v) => { set('enabled', v); sync(); } })),
+    grp);
+  const mod = modal({ title: 'Diseño sísmico', icon: 'activity', width: 820, cls: 'tall', floating: true, pos: { x: 340, y: 40 }, body, footer: [btn('Cerrar', { kind: 'primary', icon: 'check', onClick: () => mod.close() })],
+    onClose: () => { if (JSON.stringify([sd, nd.case_kind, nd.loads]) === before) E.dropSnap(); E.refreshTree(); } });
 }
 
 // ---------------------------------------------------------------------------------------------------- proyecto y unidades

@@ -1623,12 +1623,6 @@
       "label": "Concreto fisurado en servicio",
       "help": "Concreto fisurado en servicio\nMarque si el concreto estara fisurado en la zona del anclaje bajo cargas de servicio, que es la hipotesis por defecto de ACI. Sin fisurar, las resistencias del concreto aumentan.",
       "type": "check"
-     },
-     {
-      "path": "conc.seismic",
-      "label": "Diseno sismico (ACI 17.10, factor 0.75)",
-      "help": "Diseno sismico (ACI 17.10, factor 0.75)\nAplica el factor 0.75 a la resistencia del concreto de los anclajes. No verifica por usted el requisito de que el anclaje sea gobernado por la fluencia ductil del acero.",
-      "type": "check"
      }
     ]
    },

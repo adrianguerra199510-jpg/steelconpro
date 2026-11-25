@@ -305,6 +305,9 @@ class Nodo:
     loads: list = field(default_factory=list)        # [Load]
     show_hw: bool = True         # dibujar los herrajes (placas, angulos, pernos)
     balance_end: int = -1        # lado del principal (−1 / +1) cuya accion sobre el nudo sale del equilibrio (analisis nodal, conn/nodal.py)
+    # ---- diseno sismico (steelconpro/seismic.py): tipo de cada caso de carga y composicion de los casos generados
+    case_kind: dict = field(default_factory=dict)    # caso -> "" (combinacion factorizada), servicio "D"/"L"/"S"/"QEx"/"QEy", generado "G"/"E"/"Ωo"
+    case_meta: dict = field(default_factory=dict)    # caso generado -> {"kind", "g": {servicio: coef}, "e": {servicio: coef}} (parte no sismica y sismica)
 
     def __post_init__(self):
         raw = list(self.members or [])

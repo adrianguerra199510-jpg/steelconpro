@@ -402,6 +402,349 @@ except Exception as _e_:
     FAIL.append(f"columna descentrada: {type(_e_).__name__}: {_e_}")
 
 
+# ================================================================ SISMO (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
+print()
+print("SISMO")
+try:
+    # --- modelo: migracion de la casilla vieja, guardado y firma 3D
+    _sp = Project(); _sp.conc.seismic = True
+    _sp.combos.append(__import__("steelconpro.model", fromlist=["LoadCombo"]).LoadCombo("Comb 2", 300, 900, 0, 20, 0))
+    _sp.normalize()
+    if not (_sp.seis.enabled and all(c.kind == "E" for c in _sp.combos) and not _sp.conc.seismic):
+        FAIL.append("sismo/modelo: la casilla vieja conc.seismic no se migro")
+    _sp.seis.cases[3] = [0.0, 1000.0, 0.0, 0.0, 20.0]
+    _sq = Project.from_json(_sp.to_json())
+    if _sq.seis.cases[3][1] != 1000.0 or _sq.combos[1].kind != "E" or not _sq.seis.enabled:
+        FAIL.append("sismo/modelo: guardar/abrir no conserva los datos sismicos")
+    _s1 = _sp.sig3d(); _sp.seis.SDS = 1.7
+    if _sp.sig3d() != _s1:
+        FAIL.append("sismo/modelo: cambiar datos sismicos no debe invalidar el 3D")
+    _nb = _sp.combo_loads_noE(1)
+    if abs(_nb.loads.Pu) > 1e-9:
+        FAIL.append("sismo/modelo: combinacion E sin parte conocida debe quedar en cero sin E")
+    print(f"{'sismo: modelo y migracion':34} ok")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/modelo: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- generador de combinaciones ASCE 7-05 y limite por capacidad AISC 341-22 D2.6
+    from steelconpro import seismic as SE
+    _g = Project(); _g.seis.enabled = True; _g.seis.prune = False
+    _g.seis.cases = [[100.0, 0, 0, 0, 0], [50.0, 0, 0, 0, 0], [0.0] * 5,
+                     [0.0, 1000.0, 0, 0, 20.0], [0.0] * 5]
+    _cs = SE.generate(_g)
+    _k = [c.kind for c in _cs]
+    _E = [c for c in _cs if c.kind == "E"]; _O = [c for c in _cs if c.kind == "Ωo"]
+    if (len(_cs), _k.count(""), len(_E), len(_O)) != (11, 3, 4, 4):
+        FAIL.append(f"sismo/generador: se esperaban 11 combinaciones (3 G, 4 E, 4 Ω), hay "
+                    f"{len(_cs)} ({_k.count('')}, {len(_E)}, {len(_O)})")
+    _e1 = [c for c in _E if abs(c.Pu - 190.0) < 1e-6]
+    if len(_e1) != 2 or sorted(c.Mux for c in _e1) != [-1000.0, 1000.0]:
+        FAIL.append("sismo/generador: (1.2+0.2SDS)D + ρQE + f1L debe dar Pu = 190, Mux = ±1000")
+    elif not (_e1[0].e_known and abs(_e1[0].PE - 20.0) < 1e-6 and abs(abs(_e1[0].MxE) - 1000.0) < 1e-6):
+        FAIL.append("sismo/generador: parte E de la combinacion = Ev 0.2·SDS·D + ρ·QE")
+    if not any(abs(c.Pu - 70.0) < 1e-6 for c in _E):
+        FAIL.append("sismo/generador: (0.9 − 0.2SDS)D debe dar Pu = 70")
+    if sorted({round(abs(c.Mux), 6) for c in _O}) != [3000.0]:
+        FAIL.append("sismo/generador: Ωo·QE con Ωo = 3 debe dar |Mux| = 3000 (bajo el limite por capacidad)")
+    if abs(SE.ry_of("ASTM A992") - 1.1) > 1e-9 or abs(SE.ry_of("ASTM A36") - 1.5) > 1e-9 \
+            or abs(SE.ry_of("ASTM A500 Gr.B (HSS rect.)") - 1.4) > 1e-9:
+        FAIL.append("sismo/generador: Ry de AISC 341-22 Tabla A3.2")
+    _lim = SE.capacity_limits(_g)
+    if abs(_lim["Mx"] - 1.1 * 1.1 * 50.0 * _g.section.eff().Zx) > 1e-6 \
+            or abs(_lim["Vy"] - 2.0 * 1.1 * 50.0 * _g.section.eff().Zx / _g.seis.H) > 1e-6:
+        FAIL.append("sismo/generador: limites 1.1·Ry·Fy·Zx y 2·Ry·Fy·Zx/H")
+    _g.seis.cases[3] = [0.0, 10000.0, 0, 0, 20.0]
+    _Oc = [c for c in SE.generate(_g) if c.kind == "Ωo"]
+    if any(abs(abs(c.Mux) - _lim["Mx"]) > 1e-6 for c in _Oc) or any(abs(c.MxE + 0.0) < 1e-9 for c in _Oc):
+        FAIL.append("sismo/generador: Ωo·QE = 30000 debe quedar limitado a 1.1·Ry·Mp")
+    _g.seis.cap_limit = False
+    if max(abs(c.Mux) for c in SE.generate(_g) if c.kind == "Ωo") < 29999.0:
+        FAIL.append("sismo/generador: sin limite por capacidad debe quedar Ωo·QE completo")
+    _g.seis.cap_limit = True; _g.section.rotation = 90.0
+    _l90 = SE.capacity_limits(_g)
+    if abs(_l90["Mx"] - _lim["My"]) > 1e-6 or abs(_l90["My"] - _lim["Mx"]) > 1e-6:
+        FAIL.append("sismo/generador: con rotacion 90° se intercambian los limites de Mx y My")
+    _g.section.rotation = 0.0
+    _g.seis.ortho = True; _g.seis.cases[4] = [0.0, 0, 500.0, 15.0, 0]
+    _co = SE.generate(_g)
+    if len(_co) != 35:
+        FAIL.append(f"sismo/generador: con 100 % + 30 % se esperaban 35 combinaciones, hay {len(_co)}")
+    _pr = SE.prune(_g, _co)
+    if not (0 < len(_pr) <= len(_co)) or any(c not in _co for c in _pr):
+        FAIL.append("sismo/generador: prune debe devolver un subconjunto no vacio")
+    if len(SE.prune(_g, _co[:1])) != 1:
+        FAIL.append("sismo/generador: prune con una sola combinacion la conserva")
+    _z = Project(); _z.seis.enabled = True
+    if len(SE.generate(_z)) < 1:
+        FAIL.append("sismo/generador: con cargas en cero debe devolver al menos una combinacion")
+    print(f"{'sismo: generador ASCE 7-05':34} {len(_cs)} comb. (100/30: {len(_co)}, tras prune {len(_pr)})  "
+          f"1.1RyMp = {_lim['Mx']:.0f} kip·in")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/generador: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- ACI 318-19 17.10: regla del 20 % y factor 0.75 solo en traccion
+    from steelconpro import seismic as SE
+    from steelconpro.model import LoadCombo as _LC
+
+    def _sc(kind, PE=0.0, MxE=0.0, VxE=0.0, Pu=400.0, Mux=5200.0, Vux=30.0, sdc="D", known=True):
+        q = Project(); q.seis.enabled = True; q.seis.sdc = sdc
+        c = _LC("t", Pu, Mux, 0.0, Vux, 0.0); c.kind = kind
+        c.PE, c.MxE, c.VxE, c.e_known = PE, MxE, VxE, known
+        q.combos = [c]; q.apply_combo(0)
+        return q
+
+    _ck = lambda q: {c.key: c for c in solve(q).checks}
+    _qE = _sc("E", MxE=5200.0)
+    _st = SE.seismic_state(_qE)
+    _g0, _gE = _ck(_sc("")), _ck(_qE)
+    if not (_st.active and _st.fN > 0.99 and abs(_st.k_t - 0.75) < 1e-12):
+        FAIL.append(f"sismo/ACI 17.10: traccion 100 % sismica debe dar k = 0.75 (fN = {_st.fN:.2f})")
+    if abs(_gE["aci_ncb"].capacity - 0.75 * _g0["aci_ncb"].capacity) > 1e-6 \
+            or abs(_gE["aci_np"].capacity - 0.75 * _g0["aci_np"].capacity) > 1e-6:
+        FAIL.append("sismo/ACI 17.10.5.4: arrancamiento y extraccion deben llevar 0.75")
+    if abs(_gE["aci_vcb"].capacity - _g0["aci_vcb"].capacity) > 1e-9 \
+            or abs(_gE["aci_vcp"].capacity - _g0["aci_vcp"].capacity) > 1e-9:
+        FAIL.append("sismo/ACI 17.10.6: el cortante NO lleva el factor 0.75")
+    _qs = _sc("E", MxE=200.0)
+    _ss = SE.seismic_state(_qs)
+    if not (_ss.fN <= 0.20 and _ss.k_t == 1.0):
+        FAIL.append(f"sismo/ACI 17.10.5.1: traccion sismica <= 20 % no lleva factor (fN = {_ss.fN:.3f})")
+    _qc = _sc("E", MxE=0.0, Mux=0.0, Pu=900.0)
+    if SE.seismic_state(_qc).fN != 0.0:
+        FAIL.append("sismo/ACI 17.10: sin traccion la fraccion sismica debe ser 0")
+    if SE.seismic_state(_sc("E", MxE=5200.0, sdc="B")).active:
+        FAIL.append("sismo/ACI 17.10.1: en SDC B no aplica 17.10")
+    if SE.seismic_state(_sc("E", known=False)).fN != 1.0:
+        FAIL.append("sismo/ACI 17.10: parte E desconocida debe tomarse como 100 % sismica")
+    _qv = _sc("E", VxE=30.0, MxE=0.0)
+    if SE.seismic_state(_qv).fV < 0.99:
+        FAIL.append("sismo/ACI 17.10.6: fraccion sismica del cortante")
+    print(f"{'sismo: ACI 17.10 (20 %, 0.75)':34} fN = {_st.fN:.2f} -> k = {_st.k_t}   fN = {_ss.fN:.3f} -> k = {_ss.k_t}")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/ACI 17.10: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- verificaciones sismicas: anclaje ductil (17.10.5.3(a)), barras de refuerzo (17.10.4) y memoria
+    from steelconpro.model import LoadCombo as _LC2
+
+    def _sd(**mut):
+        q = Project(); q.seis.enabled = True; q.seis.sdc = "D"; q.seis.ductile = True
+        c = _LC2("E", 400.0, 5200.0, 0.0, 30.0, 0.0); c.kind = "E"; c.MxE = 5200.0; c.e_known = True
+        q.combos = [c]; q.apply_combo(0)
+        for path, val in mut.items():
+            o = q
+            for part in path.split(".")[:-1]:
+                o = getattr(o, part)
+            setattr(o, path.split(".")[-1], val)
+        R = solve(q)
+        return R, {c.key: c for c in R.checks}
+
+    _R105, _c105 = _sd(**{"bolts.steel": "ASTM F1554 Gr.105"})
+    _R36, _c36 = _sd(**{"bolts.steel": "ASTM F1554 Gr.36"})
+    _Rup, _cup = _sd(**{"bolts.steel": "ASTM F1554 Gr.105", "seis.upset": True})
+    if "seis_futa" not in _c105 or _c105["seis_futa"].ok:
+        FAIL.append("sismo/ductil: F1554 Gr.105 (futa/fya = 1.19) no cumple 17.10.5.3(a)(v)")
+    if not _c36.get("seis_futa") or not _c36["seis_futa"].ok:
+        FAIL.append("sismo/ductil: F1554 Gr.36 cumple futa/fya >= 1.3")
+    if not _cup.get("seis_futa") or not _cup["seis_futa"].skip:
+        FAIL.append("sismo/ductil: con rosca recalcada no se exige futa/fya")
+    if _c36["seis_stretch"].ok or abs(_c36["seis_stretch"].demand - 10.0) > 1e-9 \
+            or abs(_c36["seis_stretch"].capacity - 3.5) > 1e-9:
+        FAIL.append("sismo/ductil: estiramiento 8·da = 10 in contra 0 + 1.5 + 0 + 2 = 3.5 in debe fallar")
+    _Rsl, _csl = _sd(**{"seis.sleeve": 8.0})
+    if not _csl["seis_stretch"].ok:
+        FAIL.append("sismo/ductil: con camisa de 8 in el estiramiento cumple")
+    if "seis_duct_ratio" not in _c36 or "seis_duct_mat" not in _c36:
+        FAIL.append("sismo/ductil: faltan las verificaciones de anclaje ductil")
+    _Rrb, _crb = _sd(**{"conc.u_on": True, "conc.u_fy": 75.0})
+    if "seis_rebar" not in _crb or _crb["seis_rebar"].ok:
+        FAIL.append("sismo/ACI 17.10.4: barra de fy = 75 ksi no es Gr.60/80")
+    if not _sd(**{"conc.u_on": True, "conc.u_fy": 60.0})[1]["seis_rebar"].ok:
+        FAIL.append("sismo/ACI 17.10.4: barra Gr.60 cumple")
+    if "REQUISITOS SISMICOS" not in _R36.rec.to_html():
+        FAIL.append("sismo/memoria: falta la seccion de requisitos sismicos")
+    if not any("Ωo" in w for w in _R36.warnings):
+        FAIL.append("sismo/avisos: traccion > 20 % sin combinaciones Ωo debe avisar")
+    _Rb, _cb = _sd(**{"seis.sdc": "B"})
+    if any(k.startswith("seis_") for k in _cb) or not any("17.10" in w for w in _Rb.warnings):
+        FAIL.append("sismo/SDC B: sin verificaciones de 17.10 y con aviso")
+    print(f"{'sismo: ductil / refuerzo / memoria':34} futa/fya Gr.105 D/C = {_c105['seis_futa'].ratio:.2f}  "
+          f"estiramiento D/C = {_c36['seis_stretch'].ratio:.2f}  r_c/r_s = {_c36['seis_duct_ratio'].ratio:.2f}")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/verificaciones: {type(_e_).__name__}: {_e_}")
+
+
+# ------------------------------------------------ sismo en el nudo: casos de servicio, generador y placa base
+def _sis_node(qex_my=0.0):
+    from steelconpro.model import load_book as _lb
+    from steelconpro.conn.specs import Load as _Ld
+    q = _lb("ejemplos/CN-04_columna_con_placa_base.scp")[0]
+    nd = q.node
+    for l in nd.loads:
+        l.case = "D"
+    nd.loads += [_Ld("L", "V1", Vz=-8.0), _Ld("L", "V2", Vz=-8.0),
+                 _Ld("QEx", "D1", N=20.0), _Ld("QEx", "V1", My=qex_my),
+                 _Ld("M1", "V1", Vz=-30.0)]
+    nd.case_kind = {"D": "D", "L": "L", "QEx": "QEx"}
+    q.seis.enabled = True
+    return q
+
+
+try:
+    from steelconpro import seismic as SE
+    from steelconpro.conn import nodal as NOD
+    _q = _sis_node()
+    _n = SE.generate_node_cases(_q)
+    _nd = _q.node
+    _names = [c for c, _ in NOD.cases_of(_nd)]
+    _gen = [c for c in _names if _nd.case_kind.get(c) in ("G", "E", "Ωo")]
+    _kinds = [_nd.case_kind[c] for c in _gen]
+    if (_n, _kinds.count("G"), _kinds.count("E"), _kinds.count("Ωo")) != (11, 3, 4, 4):
+        FAIL.append(f"sismo/nudo: se esperaban 11 casos generados (3 G, 4 E, 4 Ω): {_n} {_kinds}")
+    if any(c in _names for c in ("D", "L", "QEx")) or "M1" not in _names:
+        FAIL.append("sismo/nudo: los casos de servicio no se disenan y los escritos a mano se conservan")
+    _e1 = next(c for c in _gen if c.startswith("E1:"))
+    _ld = {(l.case, l.member): l for l in _nd.loads}
+    if abs(_ld[(_e1, "D1")].N - (1.4 * 2.0 + 20.0)) > 1e-9 or abs(_ld[(_e1, "V1")].Vz - (1.4 * -15.0 + 1.0 * -8.0)) > 1e-9:
+        FAIL.append("sismo/nudo: E1 = (1.2 + 0.2SDS)D + f1·L + 0.2S + ρQEx por miembro")
+    if not (_q.node.case_meta.get(_e1, {}).get("e", {}).get("QEx") == 1.0):
+        FAIL.append("sismo/nudo: falta la parte sismica (case_meta) del caso generado")
+    _n2 = SE.generate_node_cases(_q)
+    if _n2 != 11 or len([c for c, _ in NOD.cases_of(_q.node)]) != 12:
+        FAIL.append("sismo/nudo: regenerar no debe duplicar casos")
+    _q0 = _sis_node(); _q0.node.case_kind = {}
+    if SE.generate_node_cases(_q0) != 0 or len(NOD.cases_of(_q0.node)) != 4:
+        FAIL.append("sismo/nudo: sin casos de servicio marcados no se genera nada ni se borra lo escrito")
+    from steelconpro.model import Project as _P
+    _rt = _P.from_json(_q.to_json())
+    if _rt.node.case_kind != _q.node.case_kind or _rt.node.case_meta.get(_e1) != _q.node.case_meta.get(_e1):
+        FAIL.append("sismo/nudo: guardar/abrir no conserva el tipo y la composicion de los casos")
+    print(f"{'sismo: generador en el nudo':34} {_n} casos generados  ({_e1})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/nudo: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- placa base desde el nudo: parte sismica de cada combinacion y limite por capacidad (AISC 341-22 D2.6)
+    from steelconpro import seismic as SE
+    from steelconpro.conn import nodal as NOD, baseplate as BPm
+    import copy as _cp
+    _q = _sis_node(qex_my=400.0)
+    SE.generate_node_cases(_q)
+    _bp = BPm.derive(_q)
+    _cb = {c.name: c for c in _bp.combo_list()}
+    _e1 = next(n for n in _cb if n.startswith("E1:"))
+    _c = _cb[_e1]
+    if not (_c.kind == "E" and _c.e_known):
+        FAIL.append("sismo/placa base: la combinacion E1 del nudo debe llegar con tipo E y parte sismica conocida")
+    # parte no sismica = caso escrito a mano con solo los coeficientes g
+    _qg = _sis_node(qex_my=400.0)
+    _m = _q.node.case_meta[_e1]["g"]
+    _svc = {}
+    for l in _qg.node.loads:
+        if _qg.node.case_kind.get(l.case):
+            _svc.setdefault(l.case, []).append(l)
+    _qg.node.loads = []
+    for k, a_ in _m.items():
+        for l in _svc.get(k, []):
+            l2 = _cp.deepcopy(l); l2.case = "g"
+            for f in ("N", "Vy", "Vz", "T", "My", "Mz"):
+                setattr(l2, f, a_ * getattr(l, f))
+            _qg.node.loads.append(l2)
+    _qg.node.case_kind = {}
+    _g = NOD.base_combos(_qg, _qg.node)
+    _gs = {}
+    for c in _g:
+        pass
+    _gp = [sum(getattr(c, f) for c in _g) for f in ("Pu", "Mux", "Muy", "Vux", "Vuy")]
+    _ne = [_c.Pu - _c.PE, _c.Mux - _c.MxE, _c.Muy - _c.MyE, _c.Vux - _c.VxE, _c.Vuy - _c.VyE]
+    if any(abs(x - y) > 1e-6 * max(1.0, abs(y)) for x, y in zip(_ne, _gp)):
+        FAIL.append(f"sismo/placa base: total − parte E debe ser la carga de la parte no sismica ({_ne} vs {_gp})")
+    # limite por capacidad en las Ωo: momento enorme en la viga
+    _qb = _sis_node(qex_my=4.0e6)
+    SE.generate_node_cases(_qb)
+    _bb = BPm.derive(_qb)
+    _lim = SE.capacity_limits(_bb)
+    _om = [c for c in _bb.combo_list() if c.kind == "Ωo"]
+    _mm = max(max(abs(c.Mux), abs(c.Muy)) for c in _om)
+    if not _om or _mm > max(_lim["Mx"], _lim["My"]) + 1e-6 or _mm < min(_lim["Mx"], _lim["My"]) - 1e-6:
+        FAIL.append(f"sismo/placa base: Ωo debe quedar limitado a 1.1·Ry·Fy·Z ({_mm:.0f} vs {_lim['Mx']:.0f}/{_lim['My']:.0f})")
+    _es = [c for c in _bb.combo_list() if c.kind == "E"]
+    if max(max(abs(c.Mux), abs(c.Muy)) for c in _es) < 1.0e5:
+        FAIL.append("sismo/placa base: las combinaciones E (ρ·QE) no se limitan por capacidad")
+    _st = SE.seismic_state(_bb.with_combo([c.name for c in _bb.combo_list()].index(_e1)))
+    # sin sismo: igual que antes
+    _q0 = _sis_node(); _q0.node.case_kind = {}; _q0.seis.enabled = False
+    if any(c.kind or c.e_known for c in BPm.derive(_q0).combo_list()):
+        FAIL.append("sismo/placa base: sin tipos de caso las combinaciones quedan como antes")
+    print(f"{'sismo: placa base desde el nudo':34} E1 {_c.name[:28]}  fN = {_st.fN:.2f}  Ωo max |M| = {_mm:.0f} (lim {_lim['Mx']:.0f})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/placa base: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- API del motor (lo que usa la interfaz Electron)
+    from steelconpro import api as _api
+    from dataclasses import asdict as _ad
+    _q = _sis_node()
+    _r = _api.seismic_generate({"connection": _api._dump(_q)})
+    _qq = _api._prj(_r["connection"])
+    if _r.get("count") != 11 or len([k for k in _qq.node.case_kind.values() if k in ("G", "E", "Ωo")]) != 11:
+        FAIL.append(f"sismo/API: seismic_generate debe devolver la conexion con 11 casos generados ({_r.get('count')})")
+    _i = _api.seismic_info({"connection": _api._dump(_qq)})
+    if not (_i["limits"]["Mx"] > 0 and _i["omega0"] and _i["systems"] and _i["sdc"] and _i["member"]):
+        FAIL.append("sismo/API: seismic_info debe dar los limites por capacidad, Ωo por sistema, sistemas y SDC")
+    _c = _api.constants()
+    if "seismic" not in _c or any(it.get("path") == "conc.seismic" for t in _c["schema_baseplate"]
+                                   for g in t.get("groups", []) for it in g.get("items", [])):
+        FAIL.append("sismo/API: constants() con datos sismicos y sin la casilla vieja conc.seismic en el esquema")
+    # archivo de nudo con la casilla vieja conc.seismic: tras normalizar, los casos del nudo quedan sismicos (0.75 en traccion)
+    from steelconpro.model import load_book as _lbv
+    from steelconpro.conn import baseplate as _BPv
+    _qv = _lbv("ejemplos/CN-04_columna_con_placa_base.scp")[0]
+    _qv.conc.seismic = True
+    _qn = _api._prj(_api.normalize({"connection": _api._dump(_qv)})["connection"])
+    if not (_qn.seis.enabled and _qn.node.case_kind.get("Caso 1") == "E"
+            and all(c.kind == "E" for c in _BPv.derive(_qn).combo_list())):
+        FAIL.append("sismo/API: un nudo con la casilla vieja debe quedar con sus casos marcados como sismicos (E)")
+    print(f"{'sismo: API':34} seismic_generate -> {_r['count']} casos; limite 1.1RyMp = {_i['limits']['Mx']:.0f} kip·in ({_i['member']})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"sismo/API: {type(_e_).__name__}: {_e_}")
+
+
+try:
+    # --- ejemplo SIS-01: abre con el sismo activo, casos de servicio y generados, y se verifica
+    from steelconpro.model import load_book as _lb
+    from steelconpro.conn import solve_conn as _sc, nodal as NOD
+    _ex = _lb("ejemplos/SIS-01_portico_SMF_placa_base.scp")[0]
+    _ks = set(_ex.node.case_kind.values())
+    if not (_ex.seis.enabled and {"D", "L", "QEx", "E", "Ωo"} <= _ks):
+        FAIL.append("ejemplo SIS-01: debe traer el sismo activo, casos de servicio y casos E y Ωo generados")
+    _R = _sc(_ex)
+    _bp = [c for c in _R.checks if c.key.startswith("bp_")]
+    if not _bp or not any(c.key == "bp_seis_rebar" for c in _bp) or "REQUISITOS SISMICOS" not in _R.rec.to_html():
+        FAIL.append("ejemplo SIS-01: la placa base debe incluir las verificaciones y la memoria sismicas")
+    if not _R.ok:
+        FAIL.append(f"ejemplo SIS-01: el ejemplo debe cumplir (D/C max = {_R.max_ratio:.3f})")
+    print(f"{'ejemplo SIS-01 (SMF, SDC D)':34} {len(NOD.cases_of(_ex.node))} casos  D/C max = {_R.max_ratio:.3f}  "
+          f"({_R.governing.title[:60] if _R.governing else '-'})")
+except Exception as _e_:
+    traceback.print_exc()
+    FAIL.append(f"ejemplo SIS-01: {type(_e_).__name__}: {_e_}")
+
+
 if "--3d" in sys.argv:
     # prueba de extremo a extremo con Gmsh + CalculiX (~30 s con la malla rapida)
     import tempfile

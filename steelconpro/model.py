@@ -39,6 +39,18 @@ STIFF_SHAPES = ["Rectangular", "Triangular", "Rectangular con esquina recortada"
 STIFF_SPACING = ["Automatico (repartido)", "Separacion fija", "Alineado con los pernos"]
 STIFF_POSITIONS = ["Alas (paralelo a Y)", "Alma (paralelo a X)", "Ambos",
                    "Perimetro HSS (4 caras)"]
+# ---- diseno sismico (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
+SDC_LIST = ["A", "B", "C", "D", "E", "F"]
+SEIS_SYSTEMS = ["Portico especial a momento (SMF)",
+                "Portico intermedio a momento (IMF)",
+                "Portico ordinario a momento (OMF)",
+                "Arriostrado concentrico especial (SCBF)",
+                "Arriostrado concentrico ordinario (OCBF)",
+                "Arriostrado excentrico (EBF)",
+                "Columna de gravedad (no forma parte del SFRS)",
+                "Sistema no detallado para sismo (R = 3, solo AISC 360)"]
+SEIS_CASES = ["D", "L", "S", "QEx", "QEy"]
+COMBO_KINDS = ["", "E", "Ωo"]     # gravedad o manual / sismica (ρ·QE) / sobrerresistencia (Ωo·QE)
 
 
 @dataclass
@@ -316,7 +328,7 @@ class Concrete:
     cracked: bool = True
     lam: float = 1.0             # lambda_a
     cond_A: bool = False         # refuerzo suplementario (ACI T.17.5.3)
-    seismic: bool = False        # aplica 0.75 de ACI 17.10
+    seismic: bool = False        # OBSOLETO (versiones <= 3.2.11): se migra a Project.seis al abrir
     # barras U que refuerzan el arrancamiento (ACI 17.5.2): se usan en lugar del concreto si resisten mas
     u_on: bool = False
     u_type: str = "Opcion A — barras U (patas rectas, ld)"      # ver U_TYPES
@@ -383,6 +395,52 @@ class LoadCombo:
     Muy: float = 0.0             # kip*in
     Vux: float = 30.0            # kip
     Vuy: float = 0.0             # kip
+    # ---- diseno sismico
+    kind: str = ""               # ver COMBO_KINDS: "" gravedad/manual, "E" sismica, "Ωo" sobrerresistencia
+    PE: float = 0.0              # parte sismica (Ev + ρ·QE u Ωo·QE) incluida en los valores de arriba
+    MxE: float = 0.0
+    MyE: float = 0.0
+    VxE: float = 0.0
+    VyE: float = 0.0
+    e_known: bool = False        # False: la parte sismica es desconocida (se toma toda la combinacion como sismica)
+
+
+def _zero_cases():
+    return [[0.0] * 5 for _ in SEIS_CASES]
+
+
+@dataclass
+class Seismic:
+    """Datos del diseno sismico.  Cargas de servicio por caso (sin factorar), en ejes de la columna:
+    cases[i] = [P (compresion +), Mx, My, Vx, Vy] para SEIS_CASES[i] = D, L, S, QEx, QEy."""
+    enabled: bool = False
+    sdc: str = "D"               # categoria de diseno sismico (ASCE 7-05 11.6)
+    system: str = SEIS_SYSTEMS[0]
+    Omega0: float = 3.0          # factor de sobrerresistencia (ASCE 7-05 Tabla 12.2-1)
+    rho: float = 1.0             # factor de redundancia (12.3.4): 1.0 o 1.3
+    SDS: float = 1.0             # aceleracion espectral de diseno en periodo corto
+    f1: float = 1.0              # factor de la carga viva en combinaciones con E (2.3.2 excepcion 1: 0.5)
+    Ry: float = 0.0              # esfuerzo esperado / minimo (AISC 341-22 Tabla A3.2); 0 = automatico
+    H: float = 157.48            # altura del piso de la columna, in (4.0 m)
+    base_moment: bool = True     # la base transmite momento (empotrada)
+    cap_limit: bool = True       # limitar las combinaciones Ωo por la capacidad de la columna (AISC 341 D2.6b/c)
+    ortho: bool = False          # combinar direcciones 100 % + 30 % (ASCE 7-05 12.5)
+    gravity: bool = True         # generar tambien las combinaciones de gravedad (2.3.2)
+    prune: bool = True           # conservar solo las combinaciones que gobiernan alguna verificacion
+    ductile: bool = False        # verificar anclaje ductil (ACI 17.10.5.3(a))
+    sleeve: float = 0.0          # longitud desadherida del perno dentro del concreto (camisa), in
+    upset: bool = False          # rosca recalcada (upset): exime futa/fya >= 1.3
+    cases: list = field(default_factory=_zero_cases)
+
+    @property
+    def aci_applies(self) -> bool:
+        """ACI 318-19 17.10.1: anclajes en estructuras de SDC C, D, E o F."""
+        return self.enabled and self.sdc in ("C", "D", "E", "F")
+
+    @property
+    def aisc341(self) -> bool:
+        """AISC 341 aplica salvo en el sistema no detallado (R = 3)."""
+        return self.enabled and not self.system.startswith("Sistema no detallado")
 
 
 @dataclass
@@ -442,6 +500,7 @@ class Project:
     conc: Concrete = field(default_factory=Concrete)
     loads: Loads = field(default_factory=Loads)
     fea: FEAOpts = field(default_factory=FEAOpts)
+    seis: Seismic = field(default_factory=Seismic)
     # combinaciones de carga: `loads` guarda la combinacion ACTIVA (la que se dibuja) mas los datos comunes
     # (inclinacion, friccion); el calculo corre todas las combinaciones
     combos: list = field(default_factory=lambda: [LoadCombo()])
@@ -464,6 +523,19 @@ class Project:
         c = cs[i]
         q.combo_idx = i
         q.loads.Pu, q.loads.Mux, q.loads.Muy, q.loads.Vux, q.loads.Vuy = c.Pu, c.Mux, c.Muy, c.Vux, c.Vuy
+        return q
+
+    def combo_loads_noE(self, i: int) -> "Project":
+        """Copia del proyecto con la combinacion i SIN su parte sismica (para la regla del 20 % de ACI 17.10).
+        Si la parte sismica no se conoce, toda la combinacion se toma como sismica (cargas en cero)."""
+        q = self.with_combo(i)
+        c = q.combos[q.combo_idx]
+        L = q.loads
+        if c.e_known:
+            L.Pu, L.Mux, L.Muy = c.Pu - c.PE, c.Mux - c.MxE, c.Muy - c.MyE
+            L.Vux, L.Vuy = c.Vux - c.VxE, c.Vuy - c.VyE
+        else:
+            L.Pu = L.Mux = L.Muy = L.Vux = L.Vuy = 0.0
         return q
 
     def apply_combo(self, i: int):
@@ -502,6 +574,20 @@ class Project:
         changes = []
         if str(self.fea.weld_criterion).startswith("Plastico"):      # archivos de versiones anteriores: texto antiguo del criterio
             self.fea.weld_criterion = WELD_CRITERIA[0]
+        if self.conc.seismic:                                    # casilla de versiones <= 3.2.11
+            self.conc.seismic = False
+            self.seis.enabled = True
+            for c in self.combo_list():
+                if not c.kind:
+                    c.kind = "E"
+            nd = getattr(self, "node", None)                     # nudo: sus casos factorizados pasan a ser sismicos (parte E desconocida)
+            if nd is not None:
+                ck = dict(getattr(nd, "case_kind", None) or {})
+                for x in nd.loads:
+                    ck.setdefault(x.case, "E")
+                nd.case_kind = ck
+            changes.append("Diseno sismico: la casilla de la pestana Concreto se paso a la pestana Sismica; "
+                           "las combinaciones existentes se marcaron como sismicas (E).")
         if self.loads.tilted and self.stiff.enabled:
             self.stiff.enabled = False
             changes.append("Rigidizadores desactivados: no se permiten con la columna inclinada.")
@@ -522,7 +608,7 @@ class Project:
         las unidades de presentacion o el metodo de reparto de fuerzas."""
         d = asdict(self)
         for k in ("name", "element", "author", "date", "metric", "u_len", "u_force", "u_stress", "u_moment",
-                  "combos", "combo_idx"):
+                  "combos", "combo_idx", "seis"):
             d.pop(k, None)
         d.get("fea", {}).pop("ccx_path", None)
         d.get("fea", {}).pop("gmsh_path", None)

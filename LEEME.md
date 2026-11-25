@@ -78,6 +78,36 @@ pandeo local del alma por el corte; las operaciones de conexión con miembros qu
 no las obtiene de un análisis de la conexión (no hay CBFEM).** El análisis FEM sólido existe solo para la placa base. No hay operación de *huecos* (agujeros libres): los de los pernos se consideran en sus verificaciones, pero no se dibujan en las placas.
 La soldadura entre elementos une placas con la cara a la que están unidas; no une dos miembros cualesquiera.
 
+### Diseño sísmico (ASCE 7-05 / AISC 341-22 / ACI 318-19 17.10)
+
+Botón **Diseño sísmico** (icono de onda) en la sección *Cargas* del árbol. Por conexión:
+
+1. **Sitio y sistema**: SDC (A–F), sistema (SMF, IMF, OMF, SCBF, OCBF, EBF, columna de gravedad o no detallado R = 3), Ωo (ASCE 7-05 Tabla 12.2-1, propuesto según
+   el sistema), ρ, SDS, f1 (factor de L, 2.3.2 excepción 1), Ry (0 = AISC 341-22 Tabla A3.2 según el acero) y H (altura del piso). Se muestran los límites
+   1.1·Ry·Fy·Z y 2·Ry·Fy·Z/H del miembro que lleva la placa base.
+2. **Tipo de cada caso de carga**: escriba en *Cargas* los casos de **servicio** (sin factorar) por miembro y márquelos como D, L, S, QEx o QEy. Los casos de
+   servicio no se diseñan.
+3. **Generar combinaciones**: crea en el nudo, para todos los miembros, los casos factorizados de ASCE 7-05 (el equilibrio es lineal):
+   gravedad (2.3.2, opcional) `1.4D`, `1.2D + 1.6L + 0.5S`, `1.2D + 1.6S + f1·L`; sísmicas (12.4.2.3) `(1.2 + 0.2·SDS)·D + ρ·QE + f1·L + 0.2·S` y
+   `(0.9 − 0.2·SDS)·D + ρ·QE`; con sobrerresistencia (12.4.3.2) las mismas con `Ωo·QE`. ±QE en cada dirección y, si se marca, 100 % + 30 % (12.5).
+   Se llaman `G#`, `E#` y `Ω#`; al regenerar se reemplazan (los casos escritos a mano se conservan).
+
+**Placa base** (cada combinación lleva su tipo y su parte sísmica, que sale del caso virtual de solo E):
+- AISC 341-22 D2.6: en las combinaciones Ω el momento y el cortante de la placa se limitan a 1.1·Ry·Fy·Z (si la base es empotrada) y 2·Ry·Fy·Z/H
+  (se marcan "lim. D2.6"); la memoria trae los límites.
+- ACI 318-19 17.10 (solo SDC C a F): fracción sísmica de la tracción y del cortante; si la de tracción pasa del 20 % (17.10.5.1) se aplica **0.75 a los modos de
+  concreto en tracción** (arrancamiento, extracción, desprendimiento lateral y adherencia, 17.10.5.4); **el cortante no se reduce** (17.10.6); τcr × 0.8 y
+  τuncr × 0.4 en adherencia. Opcional, **anclaje dúctil** (17.10.5.3(a)): acero dúctil, Nua/(1.2·Nsa) ≥ relación del concreto, estiramiento ≥ 8·da
+  (camisa + mortero + stand-off + tp) y futa/fya ≥ 1.3 (F1554 Gr.105 no cumple salvo rosca recalcada). Barras U/Omega solo Gr.60/80 (17.10.4).
+- Avisos: adhesivo sin calificación ACI 355.4, concreto no fisurado, parte sísmica > 20 % sin combinaciones Ωo, soldaduras de demanda crítica (A3.4b),
+  fuerzas de las riostras (D2.6a/b), 12.5.4. Sección **S. REQUISITOS SÍSMICOS** en la memoria.
+- Sin casos del nudo, las combinaciones escritas en la operación de placa base tienen la columna **Tipo** (—, E, Ωo); una E/Ωo escrita a mano se toma 100 % sísmica.
+- La casilla anterior "Diseño sísmico (ACI 17.10, factor 0.75)" de la pestaña Concreto se quitó: los archivos que la tenían abren con el diseño sísmico activo y sus
+  casos marcados como sísmicos.
+
+Ejemplo: `ejemplos/SIS-01_portico_SMF_placa_base.scp`. Próximas partes: conexiones de riostras SCBF/OCBF/EBF (AISC 341 F1–F3) y placas extremas precalificadas
+(AISC 358 Cap. 6).
+
 ## Biblioteca de secciones y Section Designer
 
 *Bibliotecas > Secciones* (o desde la pantalla de inicio) lista todas las secciones: catálogo AISC (1 660 perfiles), personalizadas y libres, con búsqueda por familia y propiedades. *Nueva sección* abre el **Section Designer**:
@@ -303,7 +333,7 @@ verifican por separado.
 | FEM 3D | tracción máxima por perno, presión de contacto, von Mises promediado en la placa, soldadura por zona | AISC J3.6, J8, J2.4 / criterio del programa |
 
 Opciones globales: concreto fisurado/no fisurado, condición A/B de refuerzo
-suplementario, diseño sísmico (factor 0.75 de ACI 17.10.5.2), concreto liviano λa,
+suplementario, diseño sísmico (ACI 17.10 por combinación, ver *Diseño sísmico*), concreto liviano λa,
 y descuento de la fricción placa-mortero del cortante en pernos.
 
 ---
@@ -365,9 +395,9 @@ Léalas antes de firmar nada con esto.
    placa, anclajes post-instalados adheridos, ni el refuerzo del pedestal.
 7. El modelo 3D es **lineal elástico** con contacto y pernos unilaterales (resortes). No hay
    plasticidad ni pandeo; la rigidez del cordon es una idealizacion.
-8. Para diseño sísmico, ACI 17.10 además exige que el anclaje sea gobernado por la
-   fluencia dúctil del acero; el programa aplica el 0.75 pero **no** verifica ese
-   requisito de jerarquía por usted.
+8. Diseño sísmico: el programa no calcula QE (viene del modelo del edificio), no suma por usted las fuerzas de las
+   conexiones de riostras (AISC 341 D2.6a/b) ni verifica la opción 17.10.5.3(c) (elemento que no fluye); la jerarquía
+   dúctil del anclaje (17.10.5.3(a)) se verifica solo si se activa.
 
 ---
 
