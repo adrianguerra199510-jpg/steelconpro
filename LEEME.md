@@ -535,5 +535,5 @@ cierra con V.
 - Solo para tubos redondos contra tubos redondos; con otras secciones el recorte contra un volumen sigue acortando el miembro por su extremo. Ejemplo `TP-G22` (aros de travesaños y una diagonal por cara con boca de pez en los dos extremos) y pruebas en `selftest_miembro_a_miembro.py`.
 
 ## Flechas de carga
-- Toda flecha de fuerza (cargas de los miembros, cargas del nudo y reacciones) **nace en el elemento**, en su punto de aplicación (extremo libre del miembro), y **sale hacia afuera en el sentido de la fuerza**; su rótulo queda más allá de la punta. Los momentos siguen dibujándose como arcos alrededor del punto.
+- Toda flecha de fuerza (cargas de los miembros, cargas del nudo y reacciones) **nace en el elemento**, en su punto de aplicación (extremo libre del miembro), y **sale hacia afuera en el sentido de la fuerza**; su rótulo queda más allá de la punta. Los momentos siguen dibujándose como arcos alrededor del punto. **El tamaño de las flechas es fijo**: depende del tamaño del elemento donde se aplican (0.6 × su dimensión mayor, acotado entre 0.14 y 0.3 de la diagonal del conjunto), nunca del valor de la fuerza; el valor va solo en el rótulo.
 

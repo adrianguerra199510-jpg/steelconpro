@@ -272,8 +272,17 @@ export class Viewer {
     this.clearLoads();
     if (!items || !items.length) { this.requestRender(); return; }
     const diag = this.bounds.getSize(new THREE.Vector3()).length() || 100;
-    const fmax = Math.max(1e-9, ...items.map((i) => Math.hypot(...(i.F || [0, 0, 0]))));
-    const Lmax = 0.26 * diag, rad = 0.0075 * diag, head = 0.045 * diag;
+    // el tamaño de las flechas es FIJO: depende del tamaño del elemento en el que se aplican (su dimensión mayor), no del valor de la fuerza
+    const sizes = {};
+    const elemSize = (name) => {
+      const base = String(name || '').replace(/ \((reacción|reaccion)\)$/, '');
+      if (sizes[base] != null) return sizes[base];
+      let dim = 0;
+      const part = this.parts.find((p) => p.name === base && p.kind !== 'weld');
+      if (part) { const b = new THREE.Box3(); for (const o of part.objs) if (o.isMesh) b.expandByObject(o); if (!b.isEmpty()) dim = Math.max(...b.getSize(new THREE.Vector3()).toArray()); }
+      if (!(dim > 0)) dim = 0.6 * diag;                                                    // sin pieza propia (carga del nudo): un tamaño típico del conjunto
+      return (sizes[base] = Math.min(Math.max(0.6 * dim, 0.14 * diag), 0.3 * diag));
+    };
     const mat = (c) => new THREE.MeshBasicMaterial({ color: c, depthTest: false, transparent: true, opacity: 0.95 });
     const add = (geo, c) => { const m = new THREE.Mesh(geo, mat(c)); m.renderOrder = 30; m.raycast = () => {}; this.loadGroup.add(m); return m; };
     const label = (p, text, c) => {
@@ -282,7 +291,7 @@ export class Viewer {
       this.overlay.append(e); this.loadEls.push({ el: e, p: p.clone() });
     };
     const up = new THREE.Vector3(0, 1, 0);
-    const arrow = (tail, tip, c) => {
+    const arrow = (tail, tip, c, rad, head) => {
       const d = tip.clone().sub(tail); const len = d.length(); if (len < 1e-9) return;
       const dir = d.clone().normalize();
       const sh = add(new THREE.CylinderGeometry(rad, rad, Math.max(len - head, 1e-6), 10), c);
@@ -295,17 +304,18 @@ export class Viewer {
       const c = it.color || '#d62728';
       const F = new THREE.Vector3(...(it.F || [0, 0, 0])); const f = F.length();
       if (f > 1e-9) {
-        const len = Math.max(0.3, f / fmax) * Lmax; const dir = F.clone().normalize();
+        const len = elemSize(it.name); const dir = F.clone().normalize();
+        const rad = 0.035 * len, head = 0.22 * len;
         const tip = P.clone().addScaledVector(dir, len);                      // la flecha nace en el elemento (punto de aplicación) y sale hacia afuera, en el sentido de la fuerza
-        arrow(P.clone(), tip, c);
-        label(tip.clone().addScaledVector(dir, 0.02 * diag), it.textF, c);
+        arrow(P.clone(), tip, c, rad, head);
+        label(tip.clone().addScaledVector(dir, 0.06 * len), it.textF, c);
       }
       const M = new THREE.Vector3(...(it.M || [0, 0, 0])); const mm = M.length();
       if (mm > 1e-9) {
         const ax = M.clone().normalize();
         const ref = Math.abs(ax.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
         const u = new THREE.Vector3().crossVectors(ax, ref).normalize(); const v = new THREE.Vector3().crossVectors(ax, u);
-        const R = 0.075 * diag; const pts = [];
+        const Lm = elemSize(it.name); const R = 0.3 * Lm; const rad = 0.035 * Lm, head = 0.22 * Lm; const pts = [];
         for (let k = 0; k <= 36; k++) { const a = (k / 36) * Math.PI * 1.5; pts.push(P.clone().addScaledVector(u, R * Math.cos(a)).addScaledVector(v, R * Math.sin(a))); }
         const curve = new THREE.CatmullRomCurve3(pts);
         const tube = add(new THREE.TubeGeometry(curve, 40, rad * 0.8, 8, false), it.colorM || '#8e44ad');

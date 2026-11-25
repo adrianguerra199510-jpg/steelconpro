@@ -766,7 +766,7 @@ function applyLoads() {
   if (!a || !a.cases.length || E.femView) { v.setLoads([]); return; }
   const c = a.cases[Math.min(E.loadCase || 0, a.cases.length - 1)];
   const nrm = (x) => Math.hypot(x[0], x[1], x[2]);
-  v.setLoads(c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ pos: d.pos, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
+  v.setLoads(c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ name: d.name, pos: d.pos, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
     textF: nrm(d.F) > 1e-9 ? `${d.name}: ${us.q('F', nrm(d.F), 2)}` : '', textM: nrm(d.M) > 1e-9 ? `${d.name}: ${us.q('M', nrm(d.M), 1)}` : '' })));
 }
 
