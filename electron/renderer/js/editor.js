@@ -767,16 +767,18 @@ function applyLoads() {
   if (!a || !a.cases.length || E.femView) { v.setLoads([]); return; }
   const c = a.cases[Math.min(E.loadCase || 0, a.cases.length - 1)];
   const nrm = (x) => Math.hypot(x[0], x[1], x[2]);
-  const wire = !!(E.wireOn && v.wireData);                                         // modo alámbrico: la reacción y la resultante se dibujan en el nudo de análisis
+  // la reacción y la resultante de las cargas se dibujan SIEMPRE en el nudo de análisis (el mismo punto en el modo normal y en el alámbrico)
+  const wire = !!(E.wireOn && v.wireData);
   const node = (v.wireData && v.wireData.node) || [0, 0, 0];
-  const items = c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ name: d.name, pos: wire && d.kind === 'reaction' ? node : d.pos, lScale: wire && d.kind === 'reaction' ? 0.7 : 1, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
+  const items = c.draw.filter((d) => (d.kind === 'member' || d.kind === 'ext') ? E.showLoadsOn : E.showReactionsOn).map((d) => ({ name: d.name, pos: d.kind === 'reaction' ? node : d.pos, lScale: d.kind === 'reaction' ? 0.7 : 1, F: d.F, M: d.M, color: FORCE_COL[d.kind] || '#d62728', colorM: '#8e44ad',
     textF: nrm(d.F) > 1e-9 ? `${d.name}: ${us.q('F', nrm(d.F), 2)}` : '', textM: nrm(d.M) > 1e-9 ? `${d.name}: ${us.q('M', nrm(d.M), 1)}` : '' }));
   const nm = E.conn().node.main_name;
-  if (wire && E.showReactionsOn && c.R && !c.draw.some((d) => d.kind === 'reaction') && (nrm(c.R) > 1e-9 || nrm(c.M) > 1e-9)) {              // con placa base la reacción es la carga de la placa: en el alámbrico se dibuja igual en el nudo
+  if (E.showReactionsOn && !wire) items.push({ name: 'Nudo de análisis', pos: node, node: true });   // en el modo normal se marca el nudo (en el alámbrico ya está su esfera)
+  if (E.showReactionsOn && c.R && !c.draw.some((d) => d.kind === 'reaction') && (nrm(c.R) > 1e-9 || nrm(c.M) > 1e-9)) {              // con placa base la reacción es la carga de la placa: se dibuja igual en el nudo
     items.push({ name: `${nm} (reacción)`, pos: node, lScale: 0.7, F: c.R, M: c.M, color: FORCE_COL.reaction, colorM: '#8e44ad',
       textF: nrm(c.R) > 1e-9 ? `${nm} (reacción): ${us.q('F', nrm(c.R), 2)}` : '', textM: nrm(c.M) > 1e-9 ? `${nm} (reacción): ${us.q('M', nrm(c.M), 1)}` : '' });
   }
-  if (wire && E.showReactionsOn && c.sum_F && (nrm(c.sum_F) > 1e-9 || nrm(c.sum_M) > 1e-9)) {
+  if (E.showReactionsOn && c.sum_F && (nrm(c.sum_F) > 1e-9 || nrm(c.sum_M) > 1e-9)) {
     items.push({ name: `${nm} (resultante)`, pos: node, lScale: 0.7, F: c.sum_F, M: c.sum_M, mScale: 0.7, color: '#b45309', colorM: '#b45309',
       textF: nrm(c.sum_F) > 1e-9 ? `Resultante de las cargas: ${us.q('F', nrm(c.sum_F), 2)}` : '', textM: nrm(c.sum_M) > 1e-9 ? `Resultante de las cargas: ${us.q('M', nrm(c.sum_M), 1)}` : '' });
   }

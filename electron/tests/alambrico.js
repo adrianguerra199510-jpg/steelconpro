@@ -18,6 +18,11 @@ const path = require('path'), fs = require('fs'), os = require('os');
     for (let i = 0; i < 80; i++) { if (await page.evaluate(() => !!(window.__E && window.__E.viewer && window.__E.viewer.parts.length > 1 && window.__E.nodal))) break; await page.waitForTimeout(500); }
     await page.waitForTimeout(1500);
     const solidAntes = await page.evaluate(() => window.__E.viewer.parts.some((p) => p.objs.some((o) => o.visible)));
+    // posiciones de la reacción, la resultante y la marca del nudo (deben coincidir en el modo normal y en el alámbrico)
+    const eqPos = () => page.evaluate(() => Object.fromEntries(window.__E.viewer.loadEls.filter((l) => /reacci|resultante|Nudo de análisis/i.test(l.el.textContent))
+      .map((l) => [l.el.textContent.replace(/:.*$/, ''), l.p.toArray().map((x) => +x.toFixed(3))])));
+    const nrmPos = await page.evaluate(() => window.__E.viewer.loadEls.length) ? await eqPos() : {};
+    await (await page.$('.viewer-wrap')).screenshot({ path: path.join(shots, `normal_${code}.png`) });
     await page.click('[title^="Modo alámbrico"]'); await page.waitForTimeout(1000);
     const r = await page.evaluate(() => {
       const v = window.__E.viewer, w = v.wireData;
@@ -29,6 +34,9 @@ const path = require('path'), fs = require('fs'), os = require('os');
     check(JSON.stringify(r.node) === '[0,0,0]' && r.nodeLabel.includes('Nudo de análisis'), `${code}: el nudo de análisis está marcado en el origen`);
     check(r.loads > 0 && r.labels.some((t) => /resultante/i.test(t)) && r.labels.some((t) => /reacci/i.test(t)), `${code}: se ven las cargas, la resultante de las cargas y la reacción del equilibrio`);
     await (await page.$('.viewer-wrap')).screenshot({ path: path.join(shots, `alambrico_${code}.png`) });
+    const wirePos = await eqPos();
+    check(Object.keys(nrmPos).includes('Nudo de análisis') && Object.keys(nrmPos).some((k) => /reacci/i.test(k)) && Object.keys(nrmPos).some((k) => /resultante/i.test(k)), `${code}: en el modo normal se ven el nudo de análisis, la reacción y la resultante`);
+    check(Object.keys(nrmPos).filter((k) => k !== 'Nudo de análisis').every((k) => JSON.stringify(nrmPos[k]) === JSON.stringify(wirePos[k])), `${code}: la reacción y la resultante están en el mismo lugar en los dos modos (${JSON.stringify(nrmPos)})`);
     // seleccionar un miembro desde su eje
     const name = await page.evaluate(() => { const v = window.__E.viewer; const m = v.wireMeshes.find((x) => x.userData.part.kind === 'wire' && x.userData.part.name !== window.__E.conn().node.main_name); return m && m.userData.part.name; });
     await page.evaluate((n) => window.__E.viewer.onPick && window.__E.viewer.onPick(n, { name: n, kind: 'wire', owner: '' }, {}), name);

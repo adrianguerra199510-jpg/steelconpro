@@ -303,6 +303,11 @@ export class Viewer {
     };
     for (const it of items) {
       const P = new THREE.Vector3(...it.pos);
+      if (it.node) {                                                          // marca del nudo de análisis (la misma esfera del modo alámbrico, visible a través del acero)
+        const b = add(new THREE.SphereGeometry(0.02 * diag, 20, 14), '#e85d0c'); b.position.copy(P);
+        label(P.clone().add(new THREE.Vector3(0, 0, 0.045 * diag)), 'Nudo de análisis', '#e85d0c');
+        continue;
+      }
       const c = it.color || '#d62728';
       const F = new THREE.Vector3(...(it.F || [0, 0, 0])); const f = F.length();
       if (f > 1e-9) {
