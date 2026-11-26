@@ -109,8 +109,59 @@ def modelo():
         check(len(mdl.bolts) == 8 and not [p_ for p_ in mdl.parts if p_.name.startswith("Rigidizador V1")], "4E: 8 pernos y sin rigidizadores")
 
 
+def nudo():
+    """Verificaciones del nudo SMF (AISC 341-22 E3.4a, E3.6e, E3.6f; AISC 360-22 J10.6, J10.8) y la plantilla fija «smf» de Nuevo proyecto."""
+    print("\n== Nudo de pórtico especial (AISC 341) y plantilla fija ==")
+    import math
+    from steelconpro import api, chat as C
+    from steelconpro.shapes import CATALOG
+    from steelconpro.conn import typologies as TY, assembly as AS, geocheck as GC
+    from steelconpro.conn.specs import CT_NODE, END_LABELS
+    from steelconpro.model import Project
+    check(any(k == "smf" for k, _ in TY.TYPES) and any(t["id"] == "smf" for t in api.typologies()["types"]), "la plantilla «smf» está entre las tipologías de Nuevo proyecto")
+    col, bm = CATALOG.get("W14X109"), CATALOG.get("W21X55")
+    I = {}
+    D.design(D.DG4("8ES", bolt_size="1", bolt_grade="A325-N", tp=0.875, ts=0.5, Vg=40.0, cont_plates=True, cont_t=0.5), info=I)
+    Mpb1 = I["Mpe"] + I["Vu"] * (I["Lp"] + col.d / 2)
+    for prm, n, ncol in (({}, 1, 2), ({"two_sided": True, "cont_t": 0.5}, 2, 2), ({"two_sided": True}, 2, 2), ({"top": True}, 1, 1), ({"two_sided": True, "top": True, "dg4": "4E", "bolt_size": "1-1/4", "bolt_grade": "A490-N", "plate_t": 1.25}, 2, 1)):
+        c = api.connection_new({"typology": "smf", "params": prm, "u_len": "in", "u_force": "kip", "u_stress": "ksi", "u_moment": "kip-in"})
+        p = Project(); p.ctype = CT_NODE; p.node = TY.build_nodo("smf", prm)
+        err = [e for e in GC.check(AS.build_model(p)) if e["sev"] == "error"]
+        check(not err, f"plantilla {prm or 'por omisión'}: sin errores de geometría ({len(err)}: {[e['text'][:80] for e in err[:1]]})")
+        v = api.verify({"connection": c})
+        ck = {x["key"]: x for x in v["checks"]}
+        need = ["smf_scwb", "smf_pz", "smf_pzt", "smf_cp_t", "smf_cp_b", "smf_cp_t16", "smf_cp_bt", "smf_cp_ww", "smf_cp_wf"]
+        check(all(k in ck for k in need), f"plantilla {prm or 'por omisión'}: las verificaciones del nudo están ({[k for k in need if k not in ck]} faltan)")
+        if not all(k in ck for k in need):
+            continue
+        check(f"{ncol}·Zc" in ck["smf_scwb"]["note"] and f"de {n} viga(s)" in ck["smf_scwb"]["note"], f"  columna fuerte–viga débil con {ncol} columna(s) y {n} viga(s)")
+        if prm == {}:
+            Prc = float(ck["smf_scwb"]["note"].split("Prc = ")[1].split(" ")[0])
+            check(near(ck["smf_scwb"]["demand"], Mpb1, 0.002) and near(ck["smf_scwb"]["capacity"], 2 * col.Zx * (50.0 - Prc / col.A), 0.002),
+                  f"  E3.4a: ΣM*pb = Mpe + Vu·(Lp + dc/2) = {Mpb1:.0f} y ΣM*pc = 2·Zc·(Fy − Prc/Ag) = {ck['smf_scwb']['capacity']:.0f} kip·in")
+            Ru = I["Muc"] / (bm.d - bm.tf) - Mpb1 / 157.48
+            Rv = 0.6 * 50 * col.d * col.tw * (1 + 3 * col.bf * col.tf ** 2 / (bm.d * col.d * col.tw))
+            check(near(ck["smf_pz"]["demand"], Ru, 0.002) and near(ck["smf_pz"]["capacity"], Rv, 0.002), f"  E3.6e: Ru = Muc/(d − tf) − Vc = {Ru:.0f}, Rv (J10.6(b)) = {Rv:.0f} kip")
+            check(near(ck["smf_pzt"]["demand"], (bm.d - 2 * bm.tf + col.d - 2 * col.tf) / 90), "  E3.6e.2: (dz + wz)/90")
+            check(near(ck["smf_cp_t"]["demand"], 0.5 * bm.tf) and near(ck["smf_cp_b"]["capacity"], col.bf / 2), "  E3.6f.2: placas ≥ 0.5·tbf con una viga; ancho bs + twc/2 = bfc/2")
+            check(near(ck["smf_cp_bt"]["capacity"], 0.56 * math.sqrt(29000 / 36.0)), "  esbeltez de la placa de continuidad 0.56·√(E/Fy)")
+        if prm == {"two_sided": True}:
+            check(abs(ck["smf_cp_t"]["capacity"] - 0.625) < 1e-9 and ck["smf_cp_t"]["demand"] <= ck["smf_cp_t"]["capacity"], "  espesor automático de las placas de continuidad con dos vigas: tbf = 0.522 → 5/8 in")
+            dg = [x for x in v["checks"] if "_dg4_" in x["key"] and "V2" in x["title"] and not x.get("skip")]
+            check(max(x["demand"] / x["capacity"] for x in dg) < 1.0, "  las placas de continuidad de V1 también rigidizan la columna frente a V2 (DG4 de V2 con placas de continuidad)")
+        if prm == {"two_sided": True, "cont_t": 0.5}:
+            check(near(ck["smf_cp_t"]["demand"], bm.tf) and ck["smf_cp_t"]["demand"] > ck["smf_cp_t"]["capacity"], "  con dos vigas, placas ≥ tbf: 1/2 in no alcanza (tbf = 0.522)")
+            check(ck["smf_pz"]["demand"] > ck["smf_pz"]["capacity"] and "placa adosada" in ck["smf_pz"]["note"], "  la zona del panel con dos vigas no alcanza e indica la placa adosada")
+    with tempfile.TemporaryDirectory() as ws:                    # MCP: misma plantilla por chat
+        s = C.Session(ws)
+        C.nueva_conexion(s, "SMF", tipologia="smf", parametros={"dg4": "4ES", "plate_t": 1.125, "bolt_size": "1-1/4", "bolt_grade": "A490-N", "H": 144.0})
+        check(abs(s.p.seis.H - 144.0) < 1e-9 and s.p.node.operations[0].ep_dg4 == "4ES" and s.p.node.main_end == END_LABELS[0], "por chat (MCP): la plantilla toma el tipo, los pernos y la altura del piso")
+        check(C.revisar_geometria(s)["errores"] == 0, "por chat (MCP): sin errores de geometría")
+
+
 if __name__ == "__main__":
     ejemplos()
     modelo()
+    nudo()
     print("\nTODO BIEN" if not FAILS else f"\n{len(FAILS)} FALLAS")
     sys.exit(1 if FAILS else 0)

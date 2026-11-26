@@ -381,7 +381,25 @@ class Nodo:
         pos = [float(m.pos) for m in self.members if not self.parent_name(m)] or [0.0]
         neg = L + max(0.0, -min(pos))
         up = L + max(0.0, max(pos))
-        return (neg if k != 2 else 0.0, up if k != 1 else 0.0)
+        return (neg if k != 2 else self._ep_cover(-1), up if k != 1 else self._ep_cover(1))
+
+    def _ep_cover(self, side: int) -> float:
+        """Si el principal termina en el nudo, lo que se prolonga más allá del origen para recibir las placas extremas que llegan a él (la columna de un nudo de
+        cubierta se prolonga sobre la viga para alojar la placa extendida): semialto de cada placa + 1 in, medido en el eje del principal; 0 si no hay."""
+        from . import assembly as AS
+        best = 0.0
+        for o in self.operations:
+            if o.kind not in (OP_EP_FLUSH, OP_EP_EXT):
+                continue
+            m = self.member_named(o.member)
+            if m is None or self.parent_name(m):
+                continue
+            shp = AS.shape_of(m.shape)
+            if shp is None:
+                continue
+            hh = AS.endplate_layout(o, shp, o.kind == OP_EP_EXT)["hh"]
+            best = max(best, side * float(m.pos) + hh + 1.0)
+        return max(best, 0.0)
 
     def member_named(self, name):
         return next((m for m in self.members if m.name == name), None)

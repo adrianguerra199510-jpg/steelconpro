@@ -117,6 +117,11 @@ def _apply_typology(p, args):
         return
     from .conn import typologies as T
     p.node = T.build_nodo(kind, args.get("params") or {})
+    if kind == "smf":                                                # altura del piso: cortante de la columna en la zona del panel (AISC 341 E3.6e)
+        try:
+            p.seis.H = float((args.get("params") or {}).get("H") or p.seis.H)
+        except (TypeError, ValueError):
+            pass
     if kind == "base":
         p.combo_list()
         p.apply_combo(0)

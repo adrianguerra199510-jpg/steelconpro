@@ -272,8 +272,19 @@ def v39():
     return p
 
 
+def v40():
+    """Plantilla fija «Pórtico especial: placa extrema precalificada (AISC DG4)» con vigas a los dos lados: verificación del nudo (AISC 341-22)."""
+    from steelconpro.conn import typologies as TY
+    p = Project()
+    p.ctype = CT_NODE
+    p.element = "TP-V40"
+    p.name = "Ejemplo: plantilla pórtico especial 8ES con vigas a los dos lados (nudo AISC 341)"
+    p.node = TY.build_nodo("smf", {"two_sided": True})
+    return p
+
+
 EJEMPLOS = [(f"TP-V{k:02d}", fn) for k, fn in enumerate([v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21,
-                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39], 1)]
+                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40], 1)]
 
 
 def nombre_archivo(p) -> str:

@@ -315,8 +315,12 @@ def design(st, Mu_case=0.0, Vu_case=0.0, rec=None, us=None, info=None) -> list:
     elif Fsu > 0:
         ck[-1].note += f"; Fsu = Ffu − min φRn = {Fsu:.0f} kip"
     # ---- 20. zona del panel (AISC 360-22 J10.6(a), sin el cortante de la columna: conservador)
-    add_check(ck, rec, "dg4_pz", "Zona del panel — cortante (Ffu, conexión a un lado)", Ffu, 0.9 * 0.6 * cm.Fy * dc * twc, "kip", "AISC 360-22 J10.6(a), φ = 0.90 (DG4 paso 20)",
-              "sin descontar el cortante de la columna (conservador); el diseño sísmico de la zona del panel de AISC 341 E3.6e se verifica aparte")
+    if st.seismic:
+        not_evaluated(ck, "dg4_pz", "Zona del panel (diseño sísmico)", "AISC 341-22 E3.6e",
+                      "se verifica en el nudo (grupo «Nudo de pórtico especial»), con todas las vigas que llegan a la columna")
+    else:
+        add_check(ck, rec, "dg4_pz", "Zona del panel — cortante (Ffu, conexión a un lado)", Ffu, 0.9 * 0.6 * cm.Fy * dc * twc, "kip", "AISC 360-22 J10.6(a), φ = 0.90 (DG4 paso 20)",
+                  "sin descontar el cortante de la columna (conservador); el diseño sísmico de la zona del panel de AISC 341 E3.6e se verifica aparte")
     # ---- rango ensayado (tabla 3.6 / 3.7)
     rg = RANGES[bool(st.seismic)][typ]
     vals = {"tp": tp, "bp": bp, "g": g, "pf": None, "pb": pb if typ == "8ES" else None, "d": d, "tf": tf, "bf": bf, "db": db}
@@ -355,5 +359,5 @@ def warnings(st) -> list:
     if I.get("out_of_range"):
         w.append(f"Placa extrema {st.typ} (DG4): fuera del rango ensayado de la tabla {'3.6' if st.seismic else '3.7'}: " + "; ".join(I["out_of_range"]) + ".")
     w.append(f"Placa extrema {st.typ} según AISC Design Guide 4 (2.ª ed.): " + ("diseño sísmico con Mpe = 1.1·Ry·Fy·Zx" if st.seismic else "diseño no sísmico con el momento de cada caso")
-             + "; la zona del panel se verifica con AISC 360-22 J10.6(a) (el diseño sísmico de AISC 341 E3.6e, aparte).")
+             + ("; zona del panel, columna fuerte–viga débil y placas de continuidad: AISC 341-22 en el nudo." if st.seismic else "; zona del panel con AISC 360-22 J10.6(a)."))
     return w

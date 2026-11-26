@@ -88,6 +88,32 @@ def _ep_drawn(op, beam, ext) -> dict:
             "e_ext": (float(lay["hh"]) - max(abs(y) for y in ys)) if out_ else 1.5}
 
 
+def _col_ends(nd) -> bool:
+    """La columna (principal) termina en el nudo (no pasa)."""
+    from ..specs import END_LABELS
+    return bool(nd.main_end) and nd.main_end != END_LABELS[0]
+
+
+def _cont_op(nd, m):
+    """Operación «Placas de continuidad» que rigidiza la columna frente a las alas de la viga m: la suya o la de otra viga que llega al principal a la misma
+    altura con el mismo peralte (las placas atraviesan la columna y sirven a las vigas de los dos lados)."""
+    own = next((o for o in nd.operations if o.kind == OP_CONT and o.member == m.name), None)
+    if own is not None:
+        return own
+    from ...shapes import CATALOG
+    sm = CATALOG.get(m.shape)
+    for o in nd.operations:
+        if o.kind != OP_CONT:
+            continue
+        mo = nd.member_named(o.member)
+        so = CATALOG.get(mo.shape) if mo is not None else None
+        if mo is None or so is None or sm is None or nd.parent_name(mo) or nd.parent_name(m):
+            continue
+        if abs(float(mo.pos) - float(m.pos)) < 0.25 and abs(so.d - sm.d) < 0.25 and abs(float(mo.el) - float(m.el)) < 1.0:
+            return o
+    return None
+
+
 def _dg4_spec(nd, op, m, beam):
     """Datos de la placa extrema precalificada (AISC DG4) desde la operación, la viga (Lh y cortante de gravedad de su ficha) y la columna."""
     from ... import seismic as SE
@@ -99,9 +125,9 @@ def _dg4_spec(nd, op, m, beam):
         tp=op.plate_t, pfo=op.ep_pfo or g0[0], pfi=op.ep_pfi or g0[1], pb=(op.ep_pb or g0[2]) if op.ep_dg4 == "8ES" else 0.0, de=op.ep_de or g0[3],
         ts=op.ep_st_t, stiff_steel=op.plate_steel, flange_weld="CJP" if (op.wf_top.startswith("CJP") and op.wf_bot.startswith("CJP")) else "Filete",
         flange_w=op.weld_size, web_w=op.weld_size,
-        cont_plates=any(o.kind == OP_CONT and o.member == m.name for o in nd.operations),
-        cont_t=next((o.cont_t for o in nd.operations if o.kind == OP_CONT and o.member == m.name), 0.5),
-        col_top=bool(nd.main_end), seismic=bool(op.ep_seis), Ry=SE.ry_of(m.steel), Lh=float(getattr(m, "sism_Lh", 0.0)), Vg=float(getattr(m, "sism_Vg", 0.0)))
+        cont_plates=_cont_op(nd, m) is not None,
+        cont_t=(_cont_op(nd, m) or Operation(kind=OP_CONT, cont_t=0.5)).cont_t,
+        col_top=_col_ends(nd), seismic=bool(op.ep_seis), Ry=SE.ry_of(m.steel), Lh=float(getattr(m, "sism_Lh", 0.0)), Vg=float(getattr(m, "sism_Vg", 0.0)))
 
 
 def build_items(nd: Nodo):
@@ -164,7 +190,7 @@ def build_items(nd: Nodo):
                 items.append(Item(op, m, "na", None, None, ["La verificación de placa extrema exige una columna I a la que la viga llega por la cara del ala."]))
                 continue
             ext = op.kind == OP_EP_EXT
-            spec = EndPlate(beam=m.shape, beam_steel=m.steel, col=nd.main_shape, col_steel=nd.main_steel, cont_plates=any(o.kind == OP_CONT and o.member == m.name for o in nd.operations),
+            spec = EndPlate(beam=m.shape, beam_steel=m.steel, col=nd.main_shape, col_steel=nd.main_steel, cont_plates=_cont_op(nd, m) is not None,
                             plate_steel=op.plate_steel, bp=(op.ep_w if op.ep_w > 0 else (beam.bf if beam is not None else 7.0) + 1.5), tp=op.plate_t,
                             **({'g': op.ep_g} if op.ep_g > 0 else {}), bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
                             **_ep_drawn(op, beam, ext), ext_t=ext, ext_c=ext, fw_size=op.weld_size, ww_size=op.weld_size,
@@ -270,8 +296,9 @@ def run(prj, nd: Nodo, fem_map=None):
         _solve(prj, nd, it, vals, rec)
         for w in _solve_warnings(it):
             R.warnings.append(f"{it.m.name}: {w}")
+    smf_members = {it.m.name for it in items if it.kind == "dg4" and it.engine is not None and it.spec is not None and it.spec.seismic}
     for oi, o in enumerate(nd.operations):
-        if o.kind == OP_CONT:
+        if o.kind == OP_CONT and o.member not in smf_members:
             c4 = Check(f"cont_{o.member}", f"[Placas de continuidad — {o.member}] Verificación de la placa de continuidad — NO EVALUADO", 0.0, 1.0, "-",
                        "AISC 360-22 J10", "Flexión local del ala, fluencia y aplastamiento del alma de la columna: verifíquelo aparte.", skip=True)
             c4.group = f"{oi + 1}. {o.kind} — {o.member}"
@@ -281,6 +308,10 @@ def run(prj, nd: Nodo, fem_map=None):
                        "Las verificaciones de la conexión sí consideran el corte (sección del alma, bloque de cortante).", skip=True)
             c5.group = f"{oi + 1}. {o.kind} — {o.member}"
             R.checks.append(c5)
+    if smf_members:                                                   # nudo de pórtico especial: columna fuerte–viga débil, zona del panel, placas de continuidad
+        from . import smf as SMF
+        for c in SMF.node_checks(prj, nd, items, float(getattr(getattr(prj, "seis", None), "H", 157.48) or 157.48)):
+            R.checks.append(c)
     from .. import ops as GOPS
     from ..assembly import build_model
     GOPS.add_checks(prj, nd, R, rec, build_model(prj))

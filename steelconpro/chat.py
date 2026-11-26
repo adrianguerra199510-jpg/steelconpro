@@ -292,7 +292,7 @@ def buscar_perfil(s: Session, texto: str, limite: int = 25) -> dict:
 
 
 def tipologias(s: Session) -> dict:
-    return {"tipologias": api.typologies()["types"], "nota": "Use nueva_conexion(tipologia=id, parametros={key: valor}); las longitudes en in."}
+    return {"tipologias": api.typologies()["types"], "nota": "Use nueva_conexion(tipologia=id, parametros={key: valor}); las longitudes en in y las fuerzas en kip."}
 
 
 def operaciones_disponibles(s: Session, tipo: str = "") -> dict:
