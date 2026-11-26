@@ -4,7 +4,7 @@
     base   Plato base: columna que nace en la placa base, con las diagonales que llegan cerca de la base (cada una con su cartela).
     col    Nodo de columna intermedia o superior: la columna continúa (o termina) en el nudo y llegan las diagonales.
     vigas  Nodo de vigas: dos miembros que se cruzan en el nudo (una X), uno de ellos es el principal.
-    smf    Pórtico especial a momento (plantilla fija): columna W con una o dos vigas W unidas a sus alas con placa extrema precalificada
+    smf    Pórtico especial a momento (plantilla fija, proyecto favorito del inicio; no aparece en «Nueva conexión»): columna W con una o dos vigas W unidas a sus alas con placa extrema precalificada
            (AISC Design Guide 4: 4E, 4ES u 8ES) diseñada para sismo, y placas de continuidad.  Con ella se verifican la placa (DG4) y el
            nudo (AISC 341-22: columna fuerte–viga débil, zona del panel y detalle de las placas de continuidad).  Los valores por
            omisión son los del ejemplo 4.4 de la guía (W21X55 a W14X109, 8ES, pernos A325 de 1 in, placa de 7/8 in, Vu = 40 kip).
@@ -19,6 +19,7 @@ from .presets import MAIN_NAME
 
 TYPES = [("base", "Plato base"), ("col", "Nodo de columna intermedia o superior"), ("vigas", "Nodo de vigas"),
          ("smf", "Pórtico especial: placa extrema precalificada (AISC DG4)")]
+FIXED = {"smf"}          # plantillas fijas: no van en el diálogo «Nueva conexión»; se crean como proyecto favorito del inicio (api.FIXED_FAVORITES)
 HSS_STEEL = "ASTM A500 Gr.C (HSS rect.)"
 I_STEEL = "ASTM A992"
 

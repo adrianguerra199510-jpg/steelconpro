@@ -1,5 +1,4 @@
-// Diálogo «Nueva conexión»: en blanco o a partir de una tipología de nudo (plato base, columna intermedia o superior, nodo de vigas) o de la plantilla
-// fija del pórtico especial con placa extrema precalificada (AISC DG4).
+// Diálogo «Nueva conexión»: en blanco o a partir de una tipología de nudo (plato base, columna intermedia o superior, nodo de vigas).
 import { call } from './api.js';
 import { S } from './state.js';
 import { h, btn, modal, field, numInput, checkInput, selectInput, errorBox, clear } from './ui.js';
@@ -10,7 +9,6 @@ const ICON = {
   base: '<line x1="50" y1="12" x2="50" y2="78"/><line x1="50" y1="78" x2="84" y2="48"/><line x1="50" y1="78" x2="16" y2="48"/><rect x="34" y="78" width="32" height="6" rx="1" fill="currentColor"/>',
   col: '<line x1="50" y1="6" x2="50" y2="94"/><line x1="50" y1="50" x2="84" y2="24"/><line x1="50" y1="50" x2="16" y2="24"/><line x1="50" y1="50" x2="84" y2="76"/><line x1="50" y1="50" x2="16" y2="76"/><circle cx="50" cy="50" r="5" fill="currentColor"/>',
   vigas: '<line x1="14" y1="78" x2="86" y2="22"/><line x1="14" y1="22" x2="86" y2="78"/><circle cx="50" cy="50" r="5" fill="currentColor"/>',
-  smf: '<line x1="50" y1="6" x2="50" y2="94"/><line x1="54" y1="44" x2="94" y2="44"/><line x1="54" y1="56" x2="94" y2="56"/><rect x="52" y="34" width="5" height="32" fill="currentColor"/><line x1="46" y1="44" x2="6" y2="44" stroke-dasharray="6 5"/><line x1="46" y1="56" x2="6" y2="56" stroke-dasharray="6 5"/>',
   blank: '<circle cx="50" cy="50" r="6" fill="currentColor"/>',
 };
 const icon = (k) => { const w = document.createElement('span'); w.style.cssText = 'width:52px;height:52px;flex:none;color:var(--brand,#e8731a)'; w.innerHTML = `<svg viewBox="0 0 100 100" width="52" height="52" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">${ICON[k] || ICON.blank}</svg>`; return w; };
@@ -26,7 +24,7 @@ export async function pickTypology(us = S.us) {
     const form = h('div', { class: 'form-grid', style: { marginTop: '6px' } });
     const draw = () => {
       clear(cards); clear(form);
-      const items = [{ id: '', name: 'En blanco', sub: 'Solo el miembro principal; agregue miembros y operaciones a mano.' }, ...d.types.map((t) => ({ id: t.id, name: t.name, sub: ({ base: 'Columna sobre placa base con diagonales y cartelas.', col: 'Columna que continúa o termina en el nudo, con diagonales y cartelas.', vigas: 'Dos miembros que se cruzan; uno pasa por el nudo y el otro llega a él.', smf: 'Plantilla fija: columna W con una o dos vigas con placa extrema 4E, 4ES u 8ES, placas de continuidad y verificación del nudo (AISC 341-22).' })[t.id] }))];
+      const items = [{ id: '', name: 'En blanco', sub: 'Solo el miembro principal; agregue miembros y operaciones a mano.' }, ...d.types.map((t) => ({ id: t.id, name: t.name, sub: ({ base: 'Columna sobre placa base con diagonales y cartelas.', col: 'Columna que continúa o termina en el nudo, con diagonales y cartelas.', vigas: 'Dos miembros que se cruzan; uno pasa por el nudo y el otro llega a él.' })[t.id] }))];
       for (const it of items) {
         cards.append(h('button', { type: 'button', class: `tpl-card ${sel === it.id ? 'on' : ''}`, style: { display: 'flex', gap: '12px', alignItems: 'center', textAlign: 'left', padding: '10px 12px', border: `1px solid ${sel === it.id ? 'var(--brand)' : 'var(--border)'}`, borderRadius: '10px', background: sel === it.id ? 'var(--brand-soft, #fff3ea)' : 'var(--surface)', cursor: 'pointer' }, onclick: () => { sel = it.id; draw(); } },
           icon(it.id || 'blank'), h('div', null, h('div', { style: { fontWeight: 700 }, text: it.name }), h('div', { class: 'muted', style: { fontSize: '12.5px' }, text: it.sub }))));

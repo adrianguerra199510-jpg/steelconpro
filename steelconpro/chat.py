@@ -274,7 +274,7 @@ def nueva_conexion(s: Session, nombre: str, elemento: str = "", tipologia: str =
     if unidades:
         _set_units(p, unidades)
     if tipologia:
-        ids = [t["id"] for t in api.typologies()["types"]]
+        ids = [t["id"] for t in api.typologies({"all": True})["types"]]
         if tipologia not in ids:
             raise ChatError(f"Tipología desconocida «{tipologia}»; las disponibles son {ids} (ver tipologias).")
         api._apply_typology(p, {"typology": tipologia, "params": parametros or {}})
@@ -292,7 +292,7 @@ def buscar_perfil(s: Session, texto: str, limite: int = 25) -> dict:
 
 
 def tipologias(s: Session) -> dict:
-    return {"tipologias": api.typologies()["types"], "nota": "Use nueva_conexion(tipologia=id, parametros={key: valor}); las longitudes en in y las fuerzas en kip."}
+    return {"tipologias": api.typologies({"all": True})["types"], "nota": "Use nueva_conexion(tipologia=id, parametros={key: valor}); las longitudes en in y las fuerzas en kip."}
 
 
 def operaciones_disponibles(s: Session, tipo: str = "") -> dict:

@@ -105,10 +105,12 @@ def book_new(_=None) -> dict:
     return {"connections": [_dump(p)]}
 
 
-def typologies(_=None) -> dict:
-    """Tipologías de nudo para el diálogo de «Nueva conexión»: [{id, name, fields}]."""
+def typologies(args=None) -> dict:
+    """Tipologías de nudo para el diálogo de «Nueva conexión»: [{id, name, fields}].  Las plantillas fijas (T.FIXED, p. ej. el pórtico especial DG4) no van en
+    ese diálogo sino como proyecto favorito del inicio; `all` las incluye (Claude Desktop)."""
     from .conn import typologies as T
-    return {"types": [{"id": k, "name": n, "fields": T.schema(k)} for k, n in T.TYPES]}
+    every = bool((args or {}).get("all"))
+    return {"types": [{"id": k, "name": n, "fields": T.schema(k)} for k, n in T.TYPES if every or k not in T.FIXED]}
 
 
 def _apply_typology(p, args):
@@ -1110,11 +1112,45 @@ def _thumb_for(path: Path, root: Path):
     return out
 
 
+FIXED_FAVORITES = [("smf", "Plantillas/Pórtico especial - placa extrema precalificada DG4.scp", "Pórtico especial: placa extrema precalificada (AISC DG4)")]
+
+
+def _ws_seed_favorites(root: Path, meta: dict) -> dict:
+    """Plantillas fijas del inicio: la primera vez que se lista un espacio de trabajo se crea cada una como proyecto y se marca como favorito.  Se anota en
+    meta["seeded"]: si el usuario la borra o la quita de favoritos, no se vuelve a crear."""
+    seeded = meta.setdefault("seeded", [])
+    changed = False
+    for kind, rel, title in FIXED_FAVORITES:
+        if kind in seeded:
+            continue
+        path = root / rel
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            p = new_connection()
+            p.name = title
+            p.date = datetime.date.today().isoformat()
+            p.element = "SMF-01"
+            _apply_typology(p, {"typology": kind, "params": {}})
+            save_book(str(path), [p])
+        fav = meta.setdefault("favorites", [])
+        if rel not in fav:
+            fav.append(rel)
+        seeded.append(kind)
+        changed = True
+    if changed:
+        _ws_save_meta(root, meta)
+    return meta
+
+
 def ws_list(args) -> dict:
     """Carpetas y proyectos (.scp) del espacio de trabajo: nombre, carpeta, fecha, numero de conexiones y si es favorito."""
     root = Path(args["root"])
     root.mkdir(parents=True, exist_ok=True)
     meta = _ws_meta(root)
+    try:
+        meta = _ws_seed_favorites(root, meta)
+    except Exception:                                              # noqa: BLE001 — una plantilla que no se pudo crear no impide listar
+        pass
     folders, projects = [], []
     for d in sorted(root.rglob("*")):
         rel = d.relative_to(root)

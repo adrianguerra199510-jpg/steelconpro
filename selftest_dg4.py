@@ -118,7 +118,17 @@ def nudo():
     from steelconpro.conn import typologies as TY, assembly as AS, geocheck as GC
     from steelconpro.conn.specs import CT_NODE, END_LABELS
     from steelconpro.model import Project
-    check(any(k == "smf" for k, _ in TY.TYPES) and any(t["id"] == "smf" for t in api.typologies()["types"]), "la plantilla «smf» está entre las tipologías de Nuevo proyecto")
+    check(not any(t["id"] == "smf" for t in api.typologies()["types"]) and any(t["id"] == "smf" for t in api.typologies({"all": True})["types"]),
+          "la plantilla «smf» no está en el diálogo «Nueva conexión» (sí para Claude Desktop)")
+    with tempfile.TemporaryDirectory() as ws:
+        r = api.ws_list({"root": ws, "thumbs": False})
+        fav = [p_ for p_ in r["projects"] if p_["favorite"] and "Pórtico especial" in p_["name"]]
+        check(len(fav) == 1, f"la plantilla fija está como proyecto favorito del inicio ({[p_['path'] for p_ in r['projects']]})")
+        if fav:
+            b = __import__("steelconpro.model", fromlist=["load_book"]).load_book(os.path.join(ws, fav[0]["path"]))
+            check(b[0].node.operations[0].ep_dg4 == "8ES" and len(b[0].node.members) == 1, "  el proyecto favorito es la 8ES del ejemplo 4.4 (una viga)")
+            os.remove(os.path.join(ws, fav[0]["path"]))
+            check(not api.ws_list({"root": ws, "thumbs": False})["projects"], "  si el usuario lo borra, no se vuelve a crear")
     col, bm = CATALOG.get("W14X109"), CATALOG.get("W21X55")
     I = {}
     D.design(D.DG4("8ES", bolt_size="1", bolt_grade="A325-N", tp=0.875, ts=0.5, Vg=40.0, cont_plates=True, cont_t=0.5), info=I)
