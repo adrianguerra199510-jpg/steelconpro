@@ -9,7 +9,7 @@ import { baseplateForm } from './bpform.js';
 
 const OPK = () => S.C.ops;
 export const OP_ICON = { 'Placa simple (corte)': 'square', 'Doble ángulo (corte)': 'square', 'Asiento (ángulo)': 'square', 'Placa extrema a ras (momento)': 'layers', 'Placa extrema extendida (momento)': 'layers',
-  'Alas soldadas y alma atornillada (momento)': 'zap', 'Cartela atornillada (diagonal)': 'triangle', 'Cartela con miembro soldado (diagonal)': 'triangle', 'Corte del extremo (cope)': 'scissors',
+  'Alas soldadas y alma atornillada (momento)': 'zap', 'Empalme de viga con cubreplacas (momento)': 'layers', 'Cartela atornillada (diagonal)': 'triangle', 'Cartela con miembro soldado (diagonal)': 'triangle', 'Corte del extremo (cope)': 'scissors',
   'Placas de continuidad': 'layers', 'Placa base (apoyo sobre concreto)': 'box', 'Placa (refuerzo, cartela o rigidizador)': 'square', 'Pernos entre elementos': 'nut', 'Soldadura de filete entre elementos': 'zap', 'Corte de elementos': 'scissors', 'Ángulo (herraje)': 'square', 'Huecos y ranuras': 'nut', 'Recorte contra otro elemento': 'scissors', 'Plano de trabajo': 'layers', 'Alinear cara': 'crosshair' };
 export const OP_COLOR = { 'Conexión de corte': '#4a90d9', 'Conexión de momento': '#e8731a', 'Conexión de diagonal': '#4fae6a', 'Placas, pernos y soldaduras': '#8b5cf6', 'Modificar elementos': '#8a94a0',
   'Rigidizar el miembro principal': '#9b6fc9', 'Apoyo del miembro': '#c9a227' };
@@ -23,6 +23,7 @@ const HELP = {
   'Placa extrema a ras (momento)': 'Placa soldada al extremo del miembro y atornillada al ala del principal; pernos entre las alas.',
   'Placa extrema extendida (momento)': 'Placa extrema que se extiende por encima (y debajo) de las alas; pernos dentro y fuera de ellas.',
   'Alas soldadas y alma atornillada (momento)': 'Alas soldadas al principal; el alma lleva una placa simple atornillada.',
+  'Empalme de viga con cubreplacas (momento)': 'Une dos vigas en línea (el miembro sigue al principal, que termina en el nudo) con una cubreplaca en cada ala y dos placas en el alma; alas y alma atornilladas o soldadas.',
   'Cartela atornillada (diagonal)': 'Cartela soldada al principal y atornillada a la diagonal; las diagonales del mismo plano comparten cartela.',
   'Cartela con miembro soldado (diagonal)': 'Cartela soldada al principal con la diagonal soldada a la cartela (sin pernos).',
   'Corte del extremo (cope)': 'Recorta las alas (y parte del alma) en el extremo de los miembros elegidos.',
@@ -41,7 +42,7 @@ const HELP = {
 
 const CONN_FIELDS = (kind, C) => {
   const K = C.op;
-  const bolted = [K.TAB, K.DANG, K.SEAT, K.EP_FLUSH, K.EP_EXT, K.WELD, K.GUSSET];
+  const bolted = [K.TAB, K.DANG, K.SEAT, K.EP_FLUSH, K.EP_EXT, K.WELD, K.GUSSET, K.SPLICE];
   return {
     bolt_size: bolted.includes(kind), bolt_grade: bolted.includes(kind),
     n_bolts: [K.TAB, K.DANG, K.WELD, K.GUSSET].includes(kind), bolt_s: [K.TAB, K.DANG, K.WELD, K.GUSSET].includes(kind),
@@ -65,7 +66,7 @@ export async function openOperation(E, index, { isNew = false } = {}) {
   const members = nd.members.map((m) => m.name);
   let mdlRoot;
   const refresh = () => E.changed({ geometry: true });
-  const ctx = { us, get: () => op, onChange: (path) => { refresh(); mdlRoot && mdlRoot.refresh && mdlRoot.refresh(); mdlRoot && mdlRoot.onField && path && mdlRoot.onField(path); }, hide: () => false };
+  const ctx = { us, get: () => op, onChange: (path) => { refresh(); kind === K.SPLICE && refreshers.forEach((f) => f()); mdlRoot && mdlRoot.refresh && mdlRoot.refresh(); mdlRoot && mdlRoot.onField && path && mdlRoot.onField(path); }, hide: () => false };
 
   // ---- partes de los formularios
   const memberSelect = (label, all) => field(label, selectInput({ value: op.member, options: all ? nd_names(nd) : members, onChange: (v) => { op.member = v; ctx.onChange(); } }));
@@ -95,9 +96,27 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     if (isTab) items.push(numField('Separación entre columnas', 'bolt_g', 'L', 1, 24),
       numField('Alto de la placa (0 = automático)', 'tab_H', 'L', 0, 60, null, null, 'A lo largo del peralte de la viga. 0 = (filas − 1)·separación + 3 in.'),
       numField('Ancho de la placa (0 = automático)', 'tab_W', 'L', 0, 40, null, null, 'A lo largo de la viga, desde la cara del soporte. 0 = hasta la última columna + 1.5 in.'));
-    items.push(numField(kind.startsWith('Cartela') ? 'Espesor de la cartela' : 'Espesor de placa / ángulo', 'plate_t', 'L', 0.0625, 4, 0.0625),
+    if (kind === K.SPLICE) {                                                  // empalme de viga con cubreplacas
+      const flB = () => op.sp_flange !== 'Soldada', weB = () => op.sp_web !== 'Soldada';
+      const only = { sp_nf: flB, sp_gf: flB, sp_e: () => flB() || weB(), sp_lf: () => !flB(), sp_nw: weB, sp_cw: weB, bolt_g: weB, sp_lw: () => !weB(), bolt_size: () => flB() || weB(), bolt_grade: () => flB() || weB(), bolt_s: () => flB() || weB(), weld_size: () => !flB() || !weB() };
+      ctx.hide = (path) => (only[path] ? !only[path]() : false);
+      items.push({ path: 'sp_flange', label: 'Cubreplacas de las alas', type: 'combo', items: C.beam_conns, help: 'Atornilladas: dos líneas de pernos a cada lado de la junta. Soldadas: filetes en los bordes largos y en el extremo de la placa, sobre cada viga.' },
+        { path: 'sp_web', label: 'Placas del alma', type: 'combo', items: C.beam_conns, help: 'Dos placas, una a cada lado del alma. Atornilladas (doble cortante) o soldadas con filetes en C sobre cada viga.' },
+        { path: 'sp_inner', label: 'Cubreplacas interiores en cada ala (a cada lado del alma)', type: 'check', wide: true, help: 'Además de la exterior, dos placas bajo el ala: con pernos, trabajan en doble cortante.' },
+        numField('Separación entre las vigas', 'sp_gap', 'L', 0, 4),
+        numField('Espesor de la cubreplaca exterior', 'plate_t', 'L', 0.25, 4, 0.0625), numField('Espesor de las interiores (0 = automático)', 'sp_ti', 'L', 0, 4, 0.0625),
+        numField('Ancho de la cubreplaca exterior (0 = automático)', 'sp_bf', 'L', 0, 40), { path: 'plate_steel', label: 'Acero de las placas', type: 'combo', items: C.plate_steels.map((s) => s.name) },
+        { path: 'sp_nf', label: 'Pernos por línea en cada ala, a cada lado', type: 'int', lo: 1, hi: 12 }, numField('Gramil de las alas (0 = automático)', 'sp_gf', 'L', 0, 20),
+        numField('Separación de los pernos', 'bolt_s', 'L', 1, 12), numField('Distancia al extremo y al borde (0 = automático)', 'sp_e', 'L', 0, 6),
+        numField('Largo de los filetes de las alas sobre cada viga (0 = automático)', 'sp_lf', 'L', 0, 60),
+        numField('Espesor de cada placa del alma', 'sp_tw', 'L', 0.1875, 2, 0.0625), { path: 'sp_nw', label: 'Pernos por columna en el alma (0 = los que caben)', type: 'int', lo: 0, hi: 20 },
+        { path: 'sp_cw', label: 'Columnas de pernos del alma, a cada lado', type: 'int', lo: 1, hi: 4 }, numField('Separación entre columnas del alma', 'bolt_g', 'L', 1, 12),
+        numField('Largo de los filetes del alma sobre cada viga (0 = automático)', 'sp_lw', 'L', 0, 60), numField('Cateto de los filetes', 'weld_size', 'L', 0.0625, 1, 0.0625),
+        { path: 'sp_cap', label: 'Diseñar también para esta fracción de la resistencia de la viga (0 = solo los casos; 1 = resistencia completa)', type: 'num', lo: 0, hi: 1, step: 0.05, dec: 2, wide: true,
+          help: 'Las fuerzas de diseño son las del caso o, si es mayor, esta fracción de φMn y φVn de la viga (empalme de resistencia parcial o completa).' });
+    } else items.push(numField(kind.startsWith('Cartela') ? 'Espesor de la cartela' : 'Espesor de placa / ángulo', 'plate_t', 'L', 0.0625, 4, 0.0625),
       { path: 'plate_steel', label: 'Acero de la placa', type: 'combo', items: C.plate_steels.map((s) => s.name) });
-    if (vis.weld_size) items.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo de soldadura', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides, help: 'Solo para filete. Lado 1 = cara + de la pieza (en las alas de la viga: exterior); lado 2 = cara − (interior). «Ambos lados» pone el cordón por las dos caras.' });
+    if (vis.weld_size && kind !== K.SPLICE) items.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo de soldadura', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides, help: 'Solo para filete. Lado 1 = cara + de la pieza (en las alas de la viga: exterior); lado 2 = cara − (interior). «Ambos lados» pone el cordón por las dos caras.' });
     if (vis.ep_ext) items.push(numField('Extensión de la placa extrema', 'ep_ext', 'L', 0.5, 24));
     if (kind === K.EP_FLUSH || kind === K.EP_EXT) items.push(numField('Ancho de la placa (0 = automático)', 'ep_w', 'L', 0, 60), numField('Alto total de la placa (0 = automático)', 'ep_h', 'L', 0, 120),
       numField('Gramil de los pernos (0 = automático)', 'ep_g', 'L', 0, 40), { type: 'custom', render: () => epRows(op, ctx, us) });

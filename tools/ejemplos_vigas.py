@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 from steelconpro.model import Project, save_book                                  # noqa: E402
 from steelconpro.conn import assembly as AS                                       # noqa: E402
 from steelconpro.conn.specs import (CT_NODE, Nodo, Member, Operation, Load, TAB_MODES, BEAM_CONNS,   # noqa: E402
-                                    OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_CONT, OP_COPE)
+                                    OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_CONT, OP_COPE, END_LABELS)
 
 OUT = ROOT / "ejemplos"
 HSS = "ASTM A500 Gr.C (HSS rect.)"
@@ -283,8 +283,38 @@ def v40():
     return p
 
 
+def _empalme(code, titulo, **kw):
+    from steelconpro.conn.specs import OP_SPLICE
+    p = Project()
+    p.ctype = CT_NODE
+    p.element = code
+    p.name = "Ejemplo: " + titulo
+    nd = Nodo(main_name="V1", main_shape="W18X50", main_steel="ASTM A992", main_el=0.0, main_az=0.0, main_end=END_LABELS[1])
+    nd.members = [Member(name="V2", shape="W18X50", steel="ASTM A992", az=0.0, el=0.0)]
+    nd.operations = [Operation(kind=OP_SPLICE, member="V2", bolt_size="7/8", bolt_grade="A325-N", plate_t=0.5, plate_steel="ASTM A572 Gr.50", weld_size=0.25, **kw)]
+    nd.loads = [Load("Caso 1", "V2", Vz=-30.0, My=1500.0)]
+    p.node = nd
+    return p
+
+
+def v41():
+    """Empalme de viga W18X50 con cubreplacas atornilladas en las alas (3 pernos por línea a cada lado) y dos placas atornilladas en el alma
+    (dos columnas de pernos a cada lado: con una sola, el perno de la esquina no alcanza por desgarramiento hacia el extremo de la viga)."""
+    return _empalme("TP-V41", "empalme de viga con cubreplacas atornilladas en alas y alma", sp_cw=2)
+
+
+def v42():
+    """Empalme con las cubreplacas de las alas soldadas (filetes) y el alma atornillada."""
+    return _empalme("TP-V42", "empalme de viga con alas soldadas y alma atornillada", sp_flange="Soldada", sp_cw=2)
+
+
+def v43():
+    """Empalme todo soldado, con cubreplacas interiores en las alas."""
+    return _empalme("TP-V43", "empalme de viga soldado con cubreplacas exteriores e interiores", sp_flange="Soldada", sp_web="Soldada", sp_inner=True)
+
+
 EJEMPLOS = [(f"TP-V{k:02d}", fn) for k, fn in enumerate([v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21,
-                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40], 1)]
+                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43], 1)]
 
 
 def nombre_archivo(p) -> str:

@@ -122,6 +122,23 @@ OPERACIONES[SP.OP_EP_EXT] = ("Conexión a momento con placa extrema extendida; c
                                "ep_de": ("DG4: última fila exterior al borde de la placa (in; 0 = típico)", "in", None),
                                "ep_st_t": ("DG4 4ES/8ES: espesor del rigidizador (in; 0 = el requerido)", "in", None),
                                "ep_seis": ("DG4: diseño sísmico (Mpe = 1.1·Ry·Fy·Zx); falso = el momento de cada caso", "bool", None)})
+OPERACIONES[SP.OP_SPLICE] = ("Empalme de viga con cubreplacas: el miembro sigue al principal en línea (al agregarla, el miembro se alinea con el eje del principal y "
+                              "el principal pasa a terminar en el nudo). Cubreplaca exterior en cada ala (y dos interiores opcionales), dos placas en el alma; alas y alma "
+                              "atornilladas o soldadas por separado. Verificación AISC 360-22 con las fuerzas del caso o una fracción de la resistencia de la viga.",
+                              {"member": ("Miembro que sigue al principal", "miembro", None), **_BOLT,
+                               "sp_flange": ("Cubreplacas de las alas", "opcion", SP.BEAM_CONNS), "sp_web": ("Placas del alma", "opcion", SP.BEAM_CONNS),
+                               "sp_inner": ("Cubreplacas interiores en cada ala (pernos en doble cortante)", "bool", None),
+                               "sp_gap": ("Separación entre las vigas (in)", "in", None), "plate_t": ("Espesor de la cubreplaca exterior (in)", "in", None),
+                               "sp_ti": ("Espesor de las interiores (in; 0 = automático)", "in", None), "sp_bf": ("Ancho de la exterior (in; 0 = automático)", "in", None),
+                               "plate_steel": ("Acero de las placas", "opcion", None), "sp_nf": ("Pernos por línea en cada ala, a cada lado de la junta", "int", None),
+                               "sp_gf": ("Gramil de las alas (in; 0 = automático)", "in", None), "bolt_s": ("Separación de los pernos (in)", "in", None),
+                               "sp_e": ("Distancia al extremo de la viga y al borde (in; 0 = automático)", "in", None),
+                               "sp_lf": ("Soldada: largo de los filetes de las alas sobre cada viga (in; 0 = automático)", "in", None),
+                               "sp_tw": ("Espesor de cada placa del alma (in)", "in", None), "sp_nw": ("Pernos por columna en el alma (0 = los que caben)", "int", None),
+                               "sp_cw": ("Columnas de pernos del alma a cada lado", "int", None), "bolt_g": ("Separación entre columnas del alma (in)", "in", None),
+                               "sp_lw": ("Soldada: largo de los filetes del alma sobre cada viga (in; 0 = automático)", "in", None),
+                               "weld_size": ("Cateto de los filetes (in)", "in", None),
+                               "sp_cap": ("Diseñar también para esta fracción de φMn y φVn de la viga (0 = solo los casos; 1 = completa)", "float", None)})
 OPERACIONES[SP.OP_GUSSET_W] = (OPERACIONES[SP.OP_GUSSET_W][0], {k: v for k, v in OPERACIONES[SP.OP_GUSSET][1].items() if not k.startswith("bolt") and k != "n_bolts"})
 _OP_FIELDS = {f.name: f for f in fields(Operation)}
 

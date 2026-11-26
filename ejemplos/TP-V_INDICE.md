@@ -44,7 +44,10 @@ Estado del revisor de geometría: **0 errores y 0 avisos en los 38 ejemplos**; `
 | TP-V37 | Placa simple a columna de tubo redondo | `Placa simple` | borde de la placa con silla; cordón en varios tramos |
 | TP-V38 | Placa simple de viga HSS a tubo redondo horizontal, esviaje 30° | `Placa simple` | la viga se retrasa para no entrar al tubo |
 | TP-V39 | Placa extrema 8ES precalificada (AISC DG4, ejemplo 4.4), diseño sísmico | `Placa extrema extendida` (`ep_dg4 = 8ES`), `Placas de continuidad` | valida contra la guía: φMnp = 8600, Yp = 277.6, tp,req = 0.87 in, Yc = 377.7 con placas de continuidad |
-| TP-V40 | Plantilla fija «Pórtico especial: placa extrema precalificada (AISC DG4)», 8ES con vigas a los dos lados | tipología `smf` (Nuevo proyecto), `Placa extrema extendida` ×2, `Placas de continuidad` | verificación del nudo AISC 341-22: columna fuerte–viga débil, zona del panel (falla: pide placa adosada), placas de continuidad (espesor ≥ tbf con dos vigas) |
+| TP-V40 | Plantilla fija «Pórtico especial: placa extrema precalificada (AISC DG4)», 8ES con vigas a los dos lados | tipología `smf` (plantilla favorita del inicio), `Placa extrema extendida` ×2, `Placas de continuidad` | verificación del nudo AISC 341-22: columna fuerte–viga débil, zona del panel (falla: pide placa adosada), placas de continuidad (espesor ≥ tbf con dos vigas) |
+| TP-V41 | Empalme de viga W18X50 con cubreplacas atornilladas en alas y alma | `Empalme de viga con cubreplacas` (alas y alma atornilladas, 2 columnas en el alma) | pernos de las alas en simple cortante, F13.1 con los agujeros del ala, alma con excentricidad y Mw |
+| TP-V42 | Empalme de viga con alas soldadas y alma atornillada | `Empalme de viga con cubreplacas` (`sp_flange = Soldada`) | filetes longitudinales y transversal de las cubreplacas (J2-10) |
+| TP-V43 | Empalme de viga todo soldado, con cubreplacas exteriores e interiores | `Empalme de viga con cubreplacas` (`sp_flange = sp_web = Soldada`, `sp_inner`) | filetes en C de las placas del alma (método elástico) |
 
 ## Limitaciones conocidas (no soportado o avisado)
 - Placa extrema, asiento y alas soldadas con la viga esviada o inclinada contra el ALMA de una columna I (dentro de las alas): la viga choca con las alas; se avisa

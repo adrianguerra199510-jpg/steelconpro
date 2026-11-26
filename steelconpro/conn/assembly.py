@@ -22,7 +22,7 @@ from . import ops as OPS
 from .ops import member_faces, FaceFrame
 from . import polyclip as PCLIP
 from .geocheck import part_mask
-from .specs import (GENERIC_OPS, OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W,
+from .specs import (GENERIC_OPS, OP_CUT, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_SPLICE, OP_GUSSET, OP_GUSSET_W,
                     OP_COPE, OP_CONT, TAB_MODES, OP_BASE, GUSSET_OPS, END_LABELS, Operation, Member)
 
 EMBED = 0.35            # las placas entran un poco en el miembro principal para que no quede una rendija en las uniones esviadas
@@ -972,6 +972,171 @@ def _weld_geometry(ctx, tag):
             ctx.notes.append(f"{ctx.m.name}: parte de las alas de la viga queda fuera de la cara del principal: sin soldadura en {len(fw) - len(keep)} cordón(es).")
         ctx.welds += keep
     return 0.12
+
+
+# ================================================================================================== empalme de viga con cubreplacas
+def splice_layout(op, shp) -> dict:
+    """Medidas del empalme de viga con cubreplacas (todas en in), medidas a lo largo de la viga desde el CENTRO de la junta (x > 0 = lado del miembro):
+    cubreplaca exterior de cada ala (ancho bo, espesor to), interiores opcionales (ancho bi, espesor ti, a cada lado del alma desde li0 hasta li1),
+    placas del alma (alto Hw, espesor tw), pernos (xs de las alas y del alma, gramil gf, filas del alma ys) y semilargos de las placas (xf, xw)."""
+    from .common import bolt_db, edge_min, hole_std
+    db = bolt_db(op.bolt_size)
+    dh = hole_std(db)
+    d, bf, tf, tw = shp.d, shp.bf, shp.tf, shp.tw
+    kd = shp.kdes if getattr(shp, "kdes", 0) > 0 else tf + 0.5
+    gap = max(float(op.sp_gap), 0.0)
+    e = float(op.sp_e) if op.sp_e > 0 else max(1.5, math.ceil(1.5 * db * 8.0 - 1e-9) / 8.0)
+    s = max(float(op.bolt_s), 2.667 * db)
+    fl_b = op.sp_flange != "Soldada"
+    we_b = op.sp_web != "Soldada"
+    to = max(float(op.plate_t), 0.25)
+    ti = (float(op.sp_ti) if op.sp_ti > 0 else max(math.ceil(to / 2.0 * 8.0 - 1e-9) / 8.0, 0.375)) if op.sp_inner else 0.0
+    rad = max(kd - tf, 0.0)                                         # radio del filete alma-ala: las placas interiores lo libran
+    li0 = tw / 2.0 + rad + 0.125
+    li1 = bf / 2.0 - (0.0 if fl_b else max(float(op.weld_size), 0.25) + 0.25)
+    bi = max(li1 - li0, 0.5)
+    bo = float(op.sp_bf) if op.sp_bf > 0 else (bf if fl_b else max(bf - 1.0, 2.0))
+    nf = max(int(op.sp_nf), 1)
+    if op.sp_gf > 0:
+        gf = float(op.sp_gf)
+    else:
+        gf = min(5.5, bf - 2.0 * max(edge_min(db), 1.25))
+        if op.sp_inner:
+            gf = max(gf, 2.0 * (li0 + max(edge_min(db), 1.0)))       # los pernos atraviesan también las placas interiores
+    xs_f = [gap / 2.0 + e + i * s for i in range(nf)] if fl_b else []
+    if fl_b:
+        xf = gap / 2.0 + e + (nf - 1) * s + e
+        lf = 0.0
+    else:
+        lf = float(op.sp_lf) if op.sp_lf > 0 else max(6.0, math.ceil(1.5 * bo))
+        xf = gap / 2.0 + lf
+    # alma: placas a los dos lados, centradas en el peralte
+    T = d - 2.0 * kd - 0.25                                          # alto libre entre los filetes alma-ala
+    g = max(float(op.bolt_g), 2.667 * db)
+    cw = max(int(op.sp_cw), 1)
+    if we_b:
+        fit = max(2, int((T - 2.0 * e) / s) + 1)
+        nw = min(int(op.sp_nw), fit) if op.sp_nw > 0 else fit
+        nw = max(nw, 1)
+        Hw = min((nw - 1) * s + 2.0 * e, T)
+        ys = [(i - (nw - 1) / 2.0) * s for i in range(nw)]
+        xs_w = [gap / 2.0 + e + j * g for j in range(cw)]
+        xw = gap / 2.0 + e + (cw - 1) * g + e
+        lw = 0.0
+    else:
+        nw, ys, xs_w = 0, [], []
+        Hw = max(T, 3.0)
+        lw = float(op.sp_lw) if op.sp_lw > 0 else max(4.0, math.ceil(Hw / 2.0))
+        xw = gap / 2.0 + lw
+    return dict(db=db, dh=dh, gap=gap, e=e, s=s, g=g, to=to, ti=ti, bo=bo, bi=bi, li0=li0, li1=li1, gf=gf, nf=nf, xs_f=xs_f, xf=xf, lf=lf,
+                tw=max(float(op.sp_tw), 0.25), Hw=Hw, nw=nw, cw=cw, ys=ys, xs_w=xs_w, xw=xw, lw=lw, T=T, fl_b=fl_b, we_b=we_b, inner=bool(op.sp_inner))
+
+
+def _splice_geometry(ctx, tag):
+    """Empalme de viga con cubreplacas: el miembro sigue al principal en línea, con una separación sp_gap entre los extremos.  Cubreplaca exterior en cada
+    ala (y dos interiores opcionales), dos placas en el alma; cada grupo atornillado (pernos a cada lado de la junta) o soldado (filetes sobre cada viga).
+    Devuelve la distancia de Q al inicio del miembro (la separación de la junta)."""
+    shp, op = ctx.shape, ctx.op
+    if shp.kind != W_SHAPE:
+        ctx.notes.append(f"{ctx.m.name}: el empalme con cubreplacas exige un perfil I (W); no se arma.")
+        return float(op.sp_gap)
+    Aax = ctx.mfr[0] if ctx.mfr is not None else None
+    if not ctx.main_name or Aax is None or abs(float(np.dot(ctx.dir, Aax))) < 0.999:
+        ctx.notes.append(f"{ctx.m.name}: el empalme exige que el miembro siga al principal en línea (mismo eje) y que el principal termine en el nudo; no se arma.")
+        return float(op.sp_gap)
+    if abs(float(ctx.mshape.d) - float(shp.d)) > 0.13:
+        ctx.notes.append(f"{ctx.m.name}: peraltes distintos ({ctx.mshape.label} y {shp.label}): el empalme necesita rellenos (no se modelan).")
+    L = splice_layout(op, shp)
+    d, tf, tw = shp.d, shp.tf, shp.tw
+    xc = L["gap"] / 2.0                                              # centro de la junta, medido desde Q
+    Fy, Fu = _steel(op.plate_steel, True)
+    beam_of = lambda x: ctx.main_name if x < 0 else ctx.partname    # noqa: E731  viga bajo un punto de la placa (− = principal, + = miembro)
+    wsy = 1.0 if float(np.dot(np.cross(ctx.dir, ctx.sx), ctx.sy)) >= 0 else -1.0       # W = dir × sx apunta a ±sy
+    wsx = 1.0 if float(np.dot(np.cross(ctx.dir, ctx.sy), ctx.sx)) >= 0 else -1.0       # W = dir × sy apunta a ±sx
+
+    def flat(name, label, x0, x1, l0, l1, v0, v1, t):              # placa paralela a las alas: (x a lo largo, l a lo ancho, v en el peralte)
+        w0, w1 = sorted((wsy * v0, wsy * v1))
+        pr = _plate_prism([(xc + x0, l0), (xc + x1, l0), (xc + x1, l1), (xc + x0, l1)], ctx.Q, ctx.dir, ctx.sx, w0, w1)
+        ctx.parts.append(Part(name, "plate", label, Fy, Fu, [pr], t=t))
+
+    def side(name, label, x0, x1, v0, v1, l0, l1, t):               # placa paralela al alma
+        w0, w1 = sorted((wsx * l0, wsx * l1))
+        pr = _plate_prism([(xc + x0, v0), (xc + x1, v0), (xc + x1, v1), (xc + x0, v1)], ctx.Q, ctx.dir, ctx.sy, w0, w1)
+        ctx.parts.append(Part(name, "plate", label, Fy, Fu, [pr], t=t))
+
+    P = lambda x, l, v: ctx.at(xc + x, l, v)                         # noqa: E731
+    to, ti, bo = L["to"], L["ti"], L["bo"]
+    xf, xw = L["xf"], L["xw"]
+    wv = float(op.weld_size)
+    nm_o, nm_i, nm_w = {}, {}, {}
+    for k, sg in ((0, 1.0), (1, -1.0)):                              # 0 = ala superior, 1 = ala inferior
+        side_ = "S" if k == 0 else "I"
+        vo = sg * d / 2.0
+        nm_o[k] = f"Cubreplaca {tag}-{side_}"
+        flat(nm_o[k], f"Cubreplaca exterior PL {to:g} × {bo:g} × {2 * xf:g}", -xf, xf, -bo / 2.0, bo / 2.0, vo, vo + sg * to, to)
+        if L["inner"]:
+            vi = sg * (d / 2.0 - tf)
+            for j, sl in ((0, 1.0), (1, -1.0)):
+                nm = f"Cubreplaca {tag}-{side_}{'a' if j == 0 else 'b'}"
+                nm_i[(k, j)] = nm
+                l0, l1 = sorted((sl * L["li0"], sl * L["li1"]))
+                flat(nm, f"Cubreplaca interior PL {ti:g} × {L['bi']:.3g} × {2 * xf:g}", -xf, xf, l0, l1, vi, vi - sg * ti, ti)
+        if L["fl_b"]:                                                # pernos de las alas: cabeza sobre la cubreplaca exterior, eje hacia el alma
+            nb = 0
+            for x in [-x_ for x_ in L["xs_f"]] + L["xs_f"]:
+                for lat in (-L["gf"] / 2.0, L["gf"] / 2.0):
+                    nb += 1
+                    grip = [(nm_o[k], 0.0, to), (beam_of(x), to, to + tf)]
+                    if L["inner"]:
+                        grip.append((nm_i[(k, 0 if lat > 0 else 1)], to + tf, to + tf + ti))
+                    b = _bolt(f"{tag}-F{side_}{nb}", P(x, lat, vo + sg * to), -sg * ctx.sy, L["db"], 0.0, grip[-1][2], grip, op.bolt_grade)
+                    b.planes = 2 if L["inner"] else 1
+                    ctx.bolts.append(b)
+        else:                                                        # filetes: bordes largos de la exterior (y de las interiores) y su extremo, sobre cada viga
+            for sx_, x0, x1 in ((-1.0, -xf, -xc), (1.0, xc, xf)):
+                bm = beam_of(sx_)
+                for sl in (1.0, -1.0):
+                    ctx.welds.append(Weld(f"{nm_o[k]}-L{'+' if sx_ > 0 else '-'}{'a' if sl > 0 else 'b'}", nm_o[k], bm, tuple(map(float, P(x0, sl * bo / 2.0, vo))),
+                                          tuple(map(float, P(x1, sl * bo / 2.0, vo))), tuple(map(float, ctx.sx * sl)), tuple(map(float, ctx.sy * sg)), wv, 70.0, tag))
+                xe = x0 if sx_ < 0 else x1
+                ctx.welds.append(Weld(f"{nm_o[k]}-T{'+' if sx_ > 0 else '-'}", nm_o[k], bm, tuple(map(float, P(xe, -bo / 2.0, vo))), tuple(map(float, P(xe, bo / 2.0, vo))),
+                                      tuple(map(float, ctx.dir * sx_)), tuple(map(float, ctx.sy * sg)), wv, 70.0, tag))
+                if L["inner"]:
+                    vi = sg * (d / 2.0 - tf)
+                    for j, sl in ((0, 1.0), (1, -1.0)):
+                        nm = nm_i[(k, j)]
+                        for edge, nrm in ((L["li1"], 1.0), (L["li0"], -1.0)):
+                            ctx.welds.append(Weld(f"{nm}-L{'+' if sx_ > 0 else '-'}{'e' if nrm > 0 else 'i'}", nm, bm, tuple(map(float, P(x0, sl * edge, vi))),
+                                                  tuple(map(float, P(x1, sl * edge, vi))), tuple(map(float, ctx.sx * sl * nrm)), tuple(map(float, -ctx.sy * sg)), wv, 70.0, tag))
+    # ---- placas del alma
+    Hw, tp = L["Hw"], L["tw"]
+    for j, sl in ((0, 1.0), (1, -1.0)):
+        nm = f"Placa alma {tag}-{'a' if j == 0 else 'b'}"
+        nm_w[j] = nm
+        l0, l1 = sorted((sl * tw / 2.0, sl * (tw / 2.0 + tp)))
+        side(nm, f"Placa de alma PL {tp:g} × {Hw:.3g} × {2 * xw:g}", -xw, xw, -Hw / 2.0, Hw / 2.0, l0, l1, tp)
+    if L["we_b"]:
+        nb = 0
+        for x in [-x_ for x_ in L["xs_w"]] + L["xs_w"]:
+            for y in L["ys"]:
+                nb += 1
+                grip = [(nm_w[0], 0.0, tp), (beam_of(x), tp, tp + tw), (nm_w[1], tp + tw, 2 * tp + tw)]
+                b = _bolt(f"{tag}-W{nb}", P(x, tw / 2.0 + tp, y), -ctx.sx, L["db"], 0.0, 2 * tp + tw, grip, op.bolt_grade)
+                b.planes = 2
+                ctx.bolts.append(b)
+    else:
+        for sx_, x0, x1 in ((-1.0, -xw, -xc), (1.0, xc, xw)):
+            bm = beam_of(sx_)
+            xe = x0 if sx_ < 0 else x1
+            for j, sl in ((0, 1.0), (1, -1.0)):
+                nm = nm_w[j]
+                lw_ = sl * tw / 2.0
+                for v, nv in ((Hw / 2.0, 1.0), (-Hw / 2.0, -1.0)):
+                    ctx.welds.append(Weld(f"{nm}-L{'+' if sx_ > 0 else '-'}{'s' if nv > 0 else 'i'}", nm, bm, tuple(map(float, P(x0, lw_, v))), tuple(map(float, P(x1, lw_, v))),
+                                          tuple(map(float, ctx.sy * nv)), tuple(map(float, ctx.sx * sl)), wv, 70.0, tag))
+                ctx.welds.append(Weld(f"{nm}-T{'+' if sx_ > 0 else '-'}", nm, bm, tuple(map(float, P(xe, lw_, -Hw / 2.0))), tuple(map(float, P(xe, lw_, Hw / 2.0))),
+                                      tuple(map(float, ctx.dir * sx_)), tuple(map(float, ctx.sx * sl)), wv, 70.0, tag))
+    return L["gap"]
 
 
 def _continuity(ctx, nd, tag, main_frame_, mshape, t, wsize=0.25, welds=None):
@@ -2101,6 +2266,8 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 ms_k = _endplate_geometry(c, tag, True)
             elif kind == OP_WELD:
                 ms_k = _weld_geometry(c, tag)
+            elif kind == OP_SPLICE:
+                ms_k = _splice_geometry(c, tag)
             elif kind in GUSSET_OPS:
                 _, gl, ov, hm = _gusset_outline(c)
                 ms_k = gl - float(m.gap)                          # la separación gap ya está en gl (la cartela se alarga con ella); más abajo se vuelve a sumar
@@ -2108,7 +2275,7 @@ def build_nodo(nd, name="Nudo", hardware=None, prj=None, fem=None) -> Model3D:
                 mss.append(ms_k)
             ctxs_m.append(c)
         c = ctxs_m[0]
-        rigid = any(c_.op.kind in (OP_EP_FLUSH, OP_EP_EXT, OP_WELD) for c_ in ctxs_m if c_.op is not None)
+        rigid = any(c_.op.kind in (OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_SPLICE) for c_ in ctxs_m if c_.op is not None)
         if rigid and abs(float(m.gap)) > 1e-9:
             mdl.notes.append(f"{m.name}: el desplazamiento sobre el eje no se aplica a la placa extrema ni a las alas soldadas (el miembro va soldado a la placa o al soporte).")
         ms = (max(mss) + (0.0 if rigid else float(m.gap))) if mss else gap_eff(m) + max(c_.ret for c_ in ctxs_m)

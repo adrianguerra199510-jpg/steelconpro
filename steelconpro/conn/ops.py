@@ -18,7 +18,7 @@ import math
 
 import numpy as np
 
-from .specs import (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK, FACES_BLOCK, OP_ALIGN, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
+from .specs import (OP_SPLICE, OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK, FACES_BLOCK, OP_ALIGN, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
                     FACES_PLATE, FACES_ANGLE, FACES_END, HOLE_SHAPES, WELD_MODES, WELD_TYPES, Operation)
 
 # ================================================================================================== valores por omision
@@ -28,6 +28,7 @@ _DEFAULTS = {
     OP_BOLTS: dict(rows=2, cols=2, bolt_s=3.0, bolt_g=3.0, bolt_size="3/4", bolt_grade="A325-N", pl_s=12.0, pl_u=0.0),
     OP_FILLET: dict(weld_size=0.1875, weld_all=True),
     OP_CUT: dict(cope_top=2.0, cope_bot=0.0, cope_len=4.5, cut_at="Inicio"),
+    OP_SPLICE: dict(plate_t=0.5, bolt_size="7/8", bolt_grade="A325-N", plate_steel="ASTM A572 Gr.50", weld_size=0.25, bolt_s=3.0, bolt_g=3.0),
 }
 _ROLE_DEFAULTS = {
     "Refuerzo": dict(orient=PLATE_ORIENTS[0], shape=PLATE_SHAPES[0], pl_L=12.0, pl_W=6.0),
@@ -1043,6 +1044,20 @@ def add_checks(prj, nd, R, rec, mdl):
 
 
 # ================================================================================================== edicion de la lista de operaciones
+def splice_align(nd, name):
+    """Empalme de viga: el miembro sigue al principal en línea (mismo eje, sin desplazamientos) y el principal termina en el nudo (su cuerpo del lado −)."""
+    from .specs import END_LABELS
+    from . import assembly as AS
+    m = nd.member_named(name)
+    if m is None or nd.parent_name(m):
+        return
+    A, _sx, _sy = AS.main_frame(nd)
+    m.el = math.degrees(math.asin(max(-1.0, min(1.0, float(A[2])))))
+    m.az = math.degrees(math.atan2(float(A[1]), float(A[0]))) if math.hypot(float(A[0]), float(A[1])) > 1e-9 else 0.0
+    m.pos = m.off = m.off2 = 0.0
+    nd.main_end = END_LABELS[1]
+
+
 def add_operation(nd, kind: str, **kw) -> Operation:
     """Agrega una operacion con sus valores tipicos.  Las placas reciben nombre; una placa base reemplaza a la anterior; una conexion de miembro reemplaza a
     la anterior del mismo miembro."""
@@ -1050,6 +1065,8 @@ def add_operation(nd, kind: str, **kw) -> Operation:
     d = defaults(kind, kw.get("role", ""))
     d.update(kw)
     o = Operation(kind=kind, **d)
+    if kind == OP_SPLICE:
+        splice_align(nd, o.member)
     if kind in (OP_PLATE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK) and "member" not in kw:
         o.member = ""                                    # estas operaciones se refieren a elementos por `parent` y `targets`, no a un miembro
     if kind == OP_BASE and "member" not in kw:

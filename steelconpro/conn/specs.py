@@ -46,6 +46,7 @@ OP_SEAT = "Asiento (ángulo)"
 OP_EP_FLUSH = "Placa extrema a ras (momento)"
 OP_EP_EXT = "Placa extrema extendida (momento)"
 OP_WELD = "Alas soldadas y alma atornillada (momento)"
+OP_SPLICE = "Empalme de viga con cubreplacas (momento)"
 OP_GUSSET = "Cartela atornillada (diagonal)"
 OP_GUSSET_W = "Cartela con miembro soldado (diagonal)"
 OP_COPE = "Corte del extremo (cope)"
@@ -62,11 +63,11 @@ OP_TRIM = "Recorte contra otro elemento"
 OP_WORKPLANE = "Plano de trabajo"
 OP_ALIGN = "Alinear cara"
 OP_BLOCK = "Bloque de concreto (muro, dado o pedestal)"
-OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_CUT, OP_TRIM, OP_WORKPLANE, OP_BLOCK, OP_ALIGN]
+OPERATIONS = [OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_SPLICE, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, OP_BASE, OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET, OP_HOLE, OP_CUT, OP_TRIM, OP_WORKPLANE, OP_BLOCK, OP_ALIGN]
 GENERIC_OPS = (OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK, OP_ALIGN)
 # grupos del menu "Agregar operacion" (como la cinta de IDEA)
 OP_GROUPS = [("Conexión de corte", [OP_TAB, OP_DANG, OP_SEAT]),
-             ("Conexión de momento", [OP_EP_FLUSH, OP_EP_EXT, OP_WELD]),
+             ("Conexión de momento", [OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_SPLICE]),
              ("Conexión de diagonal", [OP_GUSSET, OP_GUSSET_W]),
              ("Placas, pernos y soldaduras", [OP_PLATE, OP_ANGLE, OP_BOLTS, OP_FILLET]),
              ("Modificar elementos", [OP_COPE, OP_CUT, OP_TRIM, OP_HOLE]),
@@ -97,8 +98,8 @@ FACES_ANGLE = ["Pierna sobre la cara", "Pierna saliente +", "Pierna saliente −
 FACE_LABELS = {"I": FACES_I, "box": FACES_BOX, "plate": FACES_PLATE}
 DG4_TYPES = ["", "4E", "4ES", "8ES"]                 # placa extrema precalificada (AISC Design Guide 4)
 LOAD_AT = ["Automático", "En el extremo del elemento", "En los pernos"]   # automático: en los pernos para corte y cartelas, en el extremo para momento
-CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
-MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD)
+CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_SPLICE, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
+MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_SPLICE)
 SHEAR_OPS = (OP_TAB, OP_DANG, OP_SEAT)
 GUSSET_OPS = (OP_GUSSET, OP_GUSSET_W)
 RELEASE_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_GUSSET, OP_GUSSET_W)      # conexiones que articulan el extremo del miembro (sin momento) cuando la liberación es automática
@@ -222,6 +223,22 @@ class Operation:
     ep_st_t: float = 0.0         # DG4 (4ES, 8ES): espesor del rigidizador de la placa (0 = el requerido), in
     ep_seis: bool = True         # DG4: diseño sísmico (Mpe = 1.1·Ry·Fy·Zx); si no, el momento de cada caso
     ep_rows: list = field(default_factory=list)      # placa extrema: posición vertical de cada fila de pernos respecto del centro, in (vacío = automático)
+    # ---- empalme de viga con cubreplacas (el miembro sigue al principal en línea; el principal termina en el nudo).  plate_t = espesor de la cubreplaca exterior
+    sp_flange: str = BEAM_CONNS[0]  # unión de las cubreplacas de las alas: «Atornillada» o «Soldada» (filetes)
+    sp_web: str = BEAM_CONNS[0]     # unión de las placas del alma: «Atornillada» o «Soldada»
+    sp_inner: bool = False       # además de la exterior, dos cubreplacas interiores en cada ala (a cada lado del alma): pernos en doble cortante
+    sp_gap: float = 0.25         # separación entre los extremos de las dos vigas, in
+    sp_ti: float = 0.0           # espesor de las cubreplacas interiores, in (0 = la mitad de la exterior, mín. 3/8, redondeado a 1/8)
+    sp_bf: float = 0.0           # ancho de la cubreplaca exterior, in (0 = bf atornillada; bf − 1 in soldada)
+    sp_nf: int = 3               # pernos por línea, a cada lado de la junta, en cada ala (hay dos líneas, una a cada lado del alma)
+    sp_gf: float = 0.0           # gramil de las dos líneas de pernos de las alas, in (0 = automático)
+    sp_e: float = 0.0            # distancia del extremo de la viga al primer perno y del último perno al borde de la placa, in (0 = máx(1.5, 1.5·db))
+    sp_lf: float = 0.0           # soldada: largo de los filetes de la cubreplaca exterior sobre cada viga, in (0 = automático)
+    sp_tw: float = 0.375         # espesor de cada placa del alma (una a cada lado), in
+    sp_nw: int = 0               # pernos por columna en el alma (0 = los que caben con la separación bolt_s)
+    sp_cw: int = 1               # columnas de pernos del alma a cada lado de la junta (separación bolt_g)
+    sp_lw: float = 0.0           # soldada: largo de los filetes de las placas del alma sobre cada viga, in (0 = automático)
+    sp_cap: float = 0.0          # además de los casos, diseñar para esta fracción de la resistencia de la viga (φMn y φVn); 0 = solo los casos
     dang_lo: float = 3.5         # doble ángulo: pierna que va al soporte, in
     dang_la: float = 0.0         # doble ángulo: pierna sobre el alma, in (0 = automático)
     dang_H: float = 0.0          # doble ángulo: largo del ángulo, in (0 = automático)

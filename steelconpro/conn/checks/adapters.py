@@ -17,9 +17,9 @@ from ...design import Check
 from ...explain import Recorder
 from ...shapes import CATALOG, W_SHAPE
 from ..assembly import attach_info, gap_eff, tab_extra, member_ret
-from ..specs import (WELD_TYPES, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Operation, Member)
+from ..specs import (WELD_TYPES, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_SPLICE, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Operation, Member)
 from .specs import ShearTab, DoubleAngle, Seated, EndPlate, SUP_KINDS, EP_FLANGE_WELD
-from . import shear_tab, double_angle, seated, endplate, endplate_dg4, generic
+from . import shear_tab, double_angle, seated, endplate, endplate_dg4, generic, splice
 
 TOL_OTHER = 0.02          # fraccion de la fuerza principal bajo la cual una componente no considerada no se avisa
 
@@ -141,6 +141,9 @@ def build_items(nd: Nodo):
         if m is None:
             warns.append(f"{op.kind}: el miembro «{op.member}» no existe.")
             continue
+        if op.kind == OP_SPLICE:                                       # empalme: el miembro sigue al principal en línea (no llega a una cara)
+            items.append(Item(op, m, "splice", splice.Splice(beam=m.shape, beam_steel=m.steel, main=nd.main_shape, op=op), None, engine=splice))
+            continue
         info = attach_info(nd, m)
         if not info["touches"]:
             warns.append(f"** {m.name}: su eje no toca al miembro principal; la operación «{op.kind}» no se puede verificar. **")
@@ -220,6 +223,8 @@ def _vals(item: Item, x):
             if abs(v) > max(lim, 0.5):
                 notes.append(f"{nm} = {_fr(v if nm not in ('T', 'My') else v * 12)} no se considera en la verificación de corte de {item.m.name}.")
         return (V,), notes
+    if item.kind == "splice":
+        return (N, Vz, My), ([f"Vy = {_fr(Vy)}, T = {_fr(T)} y Mz = {_fr(Mz)} no se consideran en el empalme de {item.m.name}."] if max(abs(Vy), abs(T) / 12.0, abs(Mz) / 12.0) > 0.5 else [])
     if item.kind in ("ep", "dg4"):
         return (abs(My), abs(Vz)), ([f"N = {_fr(N)} y Vy = {_fr(Vy)} no se consideran en la placa extrema de {item.m.name}."] if abs(N) > 0.5 or abs(Vy) > 0.5 else [])
     return (N, Vy, Vz, T, My, Mz), []
@@ -334,6 +339,8 @@ def _solve(prj, nd, it: Item, vals, rec):
         p.epl = it.spec
     elif it.kind == "dg4":
         p.dg4 = it.spec
+    elif it.kind == "splice":
+        p.splice = it.spec
     if it.engine is generic:
         return generic.solve_one(prj, nd, it.op, it.m, vals, rec)
     return it.engine.solve_one(p, "", vals, rec)
@@ -346,6 +353,8 @@ def _solve_warnings(it: Item):
         out = [w for w in it.engine.check_input(it.spec)]
         if it.engine is endplate_dg4:
             out += endplate_dg4.warnings(it.spec)
+        if it.engine is splice:
+            out += splice.warnings(it.spec)
         return out
     except Exception:
         return []

@@ -309,7 +309,7 @@ def weld_lines_vertical(V: float, e: float, L: float, w: float, FEXX: float, nli
 
 
 def weld_segments_elastic(segs, Fx: float, Fy: float, xa: float, ya: float, w: float, FEXX: float,
-                          directional: bool = True, ds: float = 0.25):
+                          directional: bool = True, ds: float = 0.25, M0: float = 0.0):
     """Grupo de soldadura plano formado por segmentos rectos [(x1, y1, x2, y2)], cargado en su plano con la fuerza
     (Fx, Fy) aplicada en (xa, ya).  Metodo elastico: f = (F/L) + torsion respecto al centroide (M/Ip)·r.
     En cada punto la capacidad por unidad de longitud usa el angulo θ entre el esfuerzo y el eje del segmento
@@ -328,7 +328,7 @@ def weld_segments_elastic(segs, Fx: float, Fy: float, xa: float, ya: float, w: f
     xc = sum(q[0] * q[2] for q in pts) / L
     yc = sum(q[1] * q[2] for q in pts) / L
     Ip = sum(q[2] * ((q[0] - xc) ** 2 + (q[1] - yc) ** 2) for q in pts)
-    M = (xa - xc) * Fy - (ya - yc) * Fx
+    M = (xa - xc) * Fy - (ya - yc) * Fx + M0                 # M0: momento adicional aplicado en el plano del grupo (kip·in)
     best = dict(ratio=0.0, f=0.0, cap=0.0, theta=0.0, L=L)
     ends = []                                  # los extremos de cada segmento tambien se evaluan (alli esta el pico)
     for x1, y1, x2, y2 in segs:
