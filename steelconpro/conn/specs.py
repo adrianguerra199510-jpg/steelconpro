@@ -37,7 +37,7 @@ LEGACY_END_LABELS = {
 }
 
 BOLT_GRADES = ["A325-N", "A325-X", "A490-N", "A490-X", "A307"]
-SHEAR_BOLT_SIZES = ["5/8", "3/4", "7/8", "1", "1-1/8"]
+SHEAR_BOLT_SIZES = ["5/8", "3/4", "7/8", "1", "1-1/8", "1-1/4"]
 
 # ---- operaciones (como en IDEA StatiCa Connection): la conexion se arma aplicando operaciones, en orden, a los miembros
 OP_TAB = "Placa simple (corte)"
@@ -95,6 +95,7 @@ FACES_PLATE = ["Cara +", "Cara −"]
 FACES_BLOCK = ["Cara superior", "Cara frontal", "Cara posterior", "Cara izquierda", "Cara derecha", "Cara inferior"]   # bloque de concreto: ejes locales x (largo), y (ancho), z (alto); frontal = −y
 FACES_ANGLE = ["Pierna sobre la cara", "Pierna saliente +", "Pierna saliente −"]
 FACE_LABELS = {"I": FACES_I, "box": FACES_BOX, "plate": FACES_PLATE}
+DG4_TYPES = ["", "4E", "4ES", "8ES"]                 # placa extrema precalificada (AISC Design Guide 4)
 LOAD_AT = ["Automático", "En el extremo del elemento", "En los pernos"]   # automático: en los pernos para corte y cartelas, en el extremo para momento
 CONNECTION_OPS = (OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W)   # a lo sumo una por miembro
 MOMENT_OPS = (OP_EP_FLUSH, OP_EP_EXT, OP_WELD)
@@ -213,6 +214,13 @@ class Operation:
     ep_w: float = 0.0            # placa extrema: ancho, in (0 = automático)
     ep_h: float = 0.0            # placa extrema: alto total, in (0 = automático según la extensión)
     ep_g: float = 0.0            # placa extrema: gramil (separación transversal de los pernos), in (0 = automático)
+    ep_dg4: str = ""             # placa extrema extendida precalificada según AISC Design Guide 4: "" (no), "4E", "4ES" u "8ES"
+    ep_pfo: float = 0.0          # DG4: de la cara exterior del ala a la primera fila exterior (0 = por omisión del tipo), in
+    ep_pfi: float = 0.0          # DG4: de la cara interior del ala a la primera fila interior, in
+    ep_pb: float = 0.0           # DG4 (8ES): separación entre filas, in
+    ep_de: float = 0.0           # DG4: de la última fila exterior al borde de la placa, in
+    ep_st_t: float = 0.0         # DG4 (4ES, 8ES): espesor del rigidizador de la placa (0 = el requerido), in
+    ep_seis: bool = True         # DG4: diseño sísmico (Mpe = 1.1·Ry·Fy·Zx); si no, el momento de cada caso
     ep_rows: list = field(default_factory=list)      # placa extrema: posición vertical de cada fila de pernos respecto del centro, in (vacío = automático)
     dang_lo: float = 3.5         # doble ángulo: pierna que va al soporte, in
     dang_la: float = 0.0         # doble ángulo: pierna sobre el alma, in (0 = automático)

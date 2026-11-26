@@ -29,7 +29,7 @@ class ChatError(Exception):
 
 
 # ================================================================================================== descripción de las operaciones
-_BOLT = {"bolt_size": ("Diámetro del perno (in)", "opcion", ["5/8", "3/4", "7/8", "1", "1-1/8"]),
+_BOLT = {"bolt_size": ("Diámetro del perno (in)", "opcion", list(SP.SHEAR_BOLT_SIZES)),
          "bolt_grade": ("Calidad del perno (N = rosca incluida en el plano de corte, X = excluida)", "opcion", ["A325-N", "A325-X", "A490-N", "A490-X", "A307"])}
 _PLATE = {"plate_t": ("Espesor de la placa o del ángulo (in)", "in", None),
           "plate_steel": ("Acero de la placa", "opcion", None)}
@@ -112,7 +112,16 @@ OPERACIONES = {
                   {"name": ("Nombre", "texto", None), "wp_x": ("Centro de la cara superior, x (in)", "in", None), "wp_y": ("y (in)", "in", None),
                    "wp_z": ("z (in)", "in", None), "blk_L": ("Largo (in)", "in", None), "blk_W": ("Ancho (in)", "in", None), "blk_H": ("Alto (in)", "in", None)}),
 }
-OPERACIONES[SP.OP_EP_EXT] = (OPERACIONES[SP.OP_EP_EXT][0], {**OPERACIONES[SP.OP_EP_FLUSH][1], "ep_ext": ("Extensión de la placa sobre el ala (in)", "in", None)})
+OPERACIONES[SP.OP_EP_EXT] = ("Conexión a momento con placa extrema extendida; con ep_dg4 = 4E, 4ES u 8ES, precalificada según AISC Design Guide 4 (filas, "
+                              "rigidizadores y verificación de los 20 pasos de la guía; diseño sísmico con Mpe = 1.1·Ry·Fy·Zx y Lh / cortante de gravedad de la ficha de la viga).",
+                              {**OPERACIONES[SP.OP_EP_FLUSH][1], "ep_ext": ("Extensión de la placa sobre el ala (in; sin DG4)", "in", None),
+                               "ep_dg4": ("Precalificada AISC DG4: «» (no), «4E», «4ES» u «8ES»", "opcion", SP.DG4_TYPES),
+                               "ep_pfo": ("DG4: cara exterior del ala a la primera fila exterior (in; 0 = el típico del tipo)", "in", None),
+                               "ep_pfi": ("DG4: cara interior del ala a la primera fila interior (in; 0 = típico)", "in", None),
+                               "ep_pb": ("DG4 8ES: separación entre filas (in; 0 = 3)", "in", None),
+                               "ep_de": ("DG4: última fila exterior al borde de la placa (in; 0 = típico)", "in", None),
+                               "ep_st_t": ("DG4 4ES/8ES: espesor del rigidizador (in; 0 = el requerido)", "in", None),
+                               "ep_seis": ("DG4: diseño sísmico (Mpe = 1.1·Ry·Fy·Zx); falso = el momento de cada caso", "bool", None)})
 OPERACIONES[SP.OP_GUSSET_W] = (OPERACIONES[SP.OP_GUSSET_W][0], {k: v for k, v in OPERACIONES[SP.OP_GUSSET][1].items() if not k.startswith("bolt") and k != "n_bolts"})
 _OP_FIELDS = {f.name: f for f in fields(Operation)}
 

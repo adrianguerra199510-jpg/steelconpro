@@ -800,6 +800,18 @@ def endplate_layout(op, shp, extended):
     hh = op.ep_h / 2.0 if op.ep_h > 0 else d / 2.0 + ext
     gb = op.ep_g if op.ep_g > 0 else min(max(bf - 2.5, 2.5), 5.5)
     wide = op.ep_w if op.ep_w > 0 else max(bf + 1.5, gb + 3.0)
+    dg4 = getattr(op, "ep_dg4", "") if (extended and not hollow and shp.kind == W_SHAPE) else ""
+    if dg4:                                                         # precalificada AISC DG4: filas, alto y ancho según la guía
+        from .checks.endplate_dg4 import GEOM_DEFAULT, rows_of
+        g0 = GEOM_DEFAULT[dg4]
+        pfo, pfi = op.ep_pfo or g0[0], op.ep_pfi or g0[1]
+        pb, de = ((op.ep_pb or g0[2]) if dg4 == "8ES" else 0.0), op.ep_de or g0[3]
+        tf = shp.tf if shp.tf > 0 else 0.5
+        rows = rows_of(dg4, d, tf, pfo, pfi, pb)
+        hh = d / 2.0 + pfo + pb + de
+        gb = op.ep_g if op.ep_g > 0 else 5.5
+        wide = op.ep_w if op.ep_w > 0 else bf + 1.0
+        return {"t": t, "hh": hh, "gb": gb, "wide": wide, "rows": rows, "hollow": hollow, "bf": bf, "dg4": dg4, "pfo": pfo, "pfi": pfi, "pb": pb, "de": de}
     if op.ep_rows:
         rows = [float(v) for v in op.ep_rows]
     elif hollow:
@@ -911,7 +923,40 @@ def _endplate_geometry(ctx, tag, extended):
     if off_sup:
         ctx.notes.append(f"{m.name}: {off_sup} perno(s) de la placa extrema caen fuera de la cara del principal (la placa es más grande que la cara): no se dibujan.")
     ctx.welds += beam_end_welds(ctx, tag, f"Placa extrema {tag}", t, plane=(Q0 + ctx.dir * t, ctx.dir))           # soldadura de la viga a la placa, con el tipo elegido por cara
+    if L.get("dg4") in ("4ES", "8ES"):
+        _dg4_stiffeners(ctx, tag, L, Q0 + ctx.dir * t)
     return t
+
+
+def _dg4_stiffeners(ctx, tag, L, face0):
+    """Rigidizadores de la placa extrema 4ES / 8ES (AISC DG4): placas triangulares en el plano del alma, sobre cada ala, de alto hst (la
+    extensión de la placa) y largo Lst = hst / tan 30°, soldadas al ala y a la placa por las dos caras."""
+    from .checks.endplate_dg4 import stiffener_dims
+    shp, op = ctx.shape, ctx.op
+    d = float(shp.d)
+    hst, Lst = stiffener_dims(L["dg4"], L["pfo"], L["pb"], L["de"])
+    ts = float(op.ep_st_t)
+    if ts <= 0:                                                     # el requerido por DG4 (3.15) y (3.16), redondeado a 1/16 in
+        Fyb = _steel(ctx.m.steel, False)[0]
+        Fys = _steel(op.plate_steel, True)[0]
+        ts = math.ceil(max(float(shp.tw) * Fyb / Fys, 1.79 * hst * math.sqrt(Fys / 29000.0)) * 16.0 - 1e-9) / 16.0
+    Fy, Fu = _steel(op.plate_steel, True)
+    w_ = max(float(op.weld_size), 0.25)
+    for k, sg in enumerate((1.0, -1.0)):
+        y0 = sg * d / 2.0
+        poly = [(0.0, y0), (Lst, y0), (0.0, y0 + sg * hst)]
+        pr = _plate_prism(poly, face0, ctx.dir, ctx.sy, -ts / 2.0, ts / 2.0)
+        nm = f"Rigidizador {tag}-{k + 1}"
+        ctx.parts.append(Part(nm, "stiff", f"Rigidizador de la placa extrema PL {ts:g}", Fy, Fu, [pr], t=ts))
+        nW = np.cross(np.asarray(ctx.dir, float), np.asarray(ctx.sy, float))
+        for j, sw in enumerate((1.0, -1.0)):
+            off = nW * sw * ts / 2.0
+            p_a, p_b = face0 + ctx.sy * y0 + off, face0 + ctx.dir * Lst + ctx.sy * y0 + off            # contra el ala
+            ctx.welds.append(Weld(f"{nm}-F{j + 1}", nm, ctx.m.name, tuple(map(float, p_a)), tuple(map(float, p_b)), tuple(map(float, nW * sw)),
+                                  tuple(map(float, ctx.sy * sg)), w_, 70.0, tag))
+            p_c, p_d = face0 + ctx.sy * y0 + off, face0 + ctx.sy * (y0 + sg * hst) + off               # contra la placa
+            ctx.welds.append(Weld(f"{nm}-P{j + 1}", nm, f"Placa extrema {tag}", tuple(map(float, p_c)), tuple(map(float, p_d)), tuple(map(float, nW * sw)),
+                                  tuple(map(float, ctx.dir)), w_, 70.0, tag))
 
 
 def _weld_geometry(ctx, tag):

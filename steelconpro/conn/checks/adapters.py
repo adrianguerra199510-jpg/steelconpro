@@ -19,7 +19,7 @@ from ...shapes import CATALOG, W_SHAPE
 from ..assembly import attach_info, gap_eff, tab_extra, member_ret
 from ..specs import (WELD_TYPES, OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_GUSSET, OP_GUSSET_W, OP_COPE, OP_CONT, Nodo, Operation, Member)
 from .specs import ShearTab, DoubleAngle, Seated, EndPlate, SUP_KINDS, EP_FLANGE_WELD
-from . import shear_tab, double_angle, seated, endplate, generic
+from . import shear_tab, double_angle, seated, endplate, endplate_dg4, generic
 
 TOL_OTHER = 0.02          # fraccion de la fuerza principal bajo la cual una componente no considerada no se avisa
 
@@ -88,6 +88,22 @@ def _ep_drawn(op, beam, ext) -> dict:
             "e_ext": (float(lay["hh"]) - max(abs(y) for y in ys)) if out_ else 1.5}
 
 
+def _dg4_spec(nd, op, m, beam):
+    """Datos de la placa extrema precalificada (AISC DG4) desde la operación, la viga (Lh y cortante de gravedad de su ficha) y la columna."""
+    from ... import seismic as SE
+    from ..specs import DG4_TYPES
+    g0 = endplate_dg4.GEOM_DEFAULT[op.ep_dg4]
+    return endplate_dg4.DG4(
+        typ=op.ep_dg4, beam=m.shape, beam_steel=m.steel, col=nd.main_shape, col_steel=nd.main_steel, plate_steel=op.plate_steel,
+        bolt_size=op.bolt_size, bolt_grade=op.bolt_grade, bp=op.ep_w if op.ep_w > 0 else beam.bf + 1.0, g=op.ep_g if op.ep_g > 0 else 5.5,
+        tp=op.plate_t, pfo=op.ep_pfo or g0[0], pfi=op.ep_pfi or g0[1], pb=(op.ep_pb or g0[2]) if op.ep_dg4 == "8ES" else 0.0, de=op.ep_de or g0[3],
+        ts=op.ep_st_t, stiff_steel=op.plate_steel, flange_weld="CJP" if (op.wf_top.startswith("CJP") and op.wf_bot.startswith("CJP")) else "Filete",
+        flange_w=op.weld_size, web_w=op.weld_size,
+        cont_plates=any(o.kind == OP_CONT and o.member == m.name for o in nd.operations),
+        cont_t=next((o.cont_t for o in nd.operations if o.kind == OP_CONT and o.member == m.name), 0.5),
+        col_top=bool(nd.main_end), seismic=bool(op.ep_seis), Ry=SE.ry_of(m.steel), Lh=float(getattr(m, "sism_Lh", 0.0)), Vg=float(getattr(m, "sism_Vg", 0.0)))
+
+
 def build_items(nd: Nodo):
     """Traduce las operaciones de conexion del nudo a elementos verificables.  -> (items, avisos)"""
     items, warns = [], []
@@ -138,6 +154,11 @@ def build_items(nd: Nodo):
                           angle=_seat_angle_label(op.plate_t), angle_steel=op.plate_steel, bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
                           setback=max(gap_eff(m), 0.5) + member_ret(nd, m, op), L_seat=(op.seat_W if op.seat_W > 0 else min(max(beam.bf if beam is not None else 8.0, 4.0), 12.0)))
             items.append(Item(op, m, "seat", spec, None, engine=seated))
+        elif op.kind == OP_EP_EXT and getattr(op, "ep_dg4", ""):
+            if mshape is None or mshape.kind != W_SHAPE or info["face"] != "ala" or beam is None or beam.kind != W_SHAPE:
+                items.append(Item(op, m, "na", None, None, ["La placa extrema precalificada (DG4) exige una viga I y una columna I a la que la viga llega por la cara del ala."]))
+                continue
+            items.append(Item(op, m, "dg4", _dg4_spec(nd, op, m, beam), None, engine=endplate_dg4))
         elif op.kind in (OP_EP_FLUSH, OP_EP_EXT):
             if mshape is None or mshape.kind != W_SHAPE or info["face"] != "ala":
                 items.append(Item(op, m, "na", None, None, ["La verificación de placa extrema exige una columna I a la que la viga llega por la cara del ala."]))
@@ -173,7 +194,7 @@ def _vals(item: Item, x):
             if abs(v) > max(lim, 0.5):
                 notes.append(f"{nm} = {_fr(v if nm not in ('T', 'My') else v * 12)} no se considera en la verificación de corte de {item.m.name}.")
         return (V,), notes
-    if item.kind == "ep":
+    if item.kind in ("ep", "dg4"):
         return (abs(My), abs(Vz)), ([f"N = {_fr(N)} y Vy = {_fr(Vy)} no se consideran en la placa extrema de {item.m.name}."] if abs(N) > 0.5 or abs(Vy) > 0.5 else [])
     return (N, Vy, Vz, T, My, Mz), []
 
@@ -280,6 +301,8 @@ def _solve(prj, nd, it: Item, vals, rec):
         p.seat = it.spec
     elif it.kind == "ep":
         p.epl = it.spec
+    elif it.kind == "dg4":
+        p.dg4 = it.spec
     if it.engine is generic:
         return generic.solve_one(prj, nd, it.op, it.m, vals, rec)
     return it.engine.solve_one(p, "", vals, rec)
@@ -289,6 +312,9 @@ def _solve_warnings(it: Item):
     if it.engine is None or it.spec is None:
         return []
     try:
-        return [w for w in it.engine.check_input(it.spec)]
+        out = [w for w in it.engine.check_input(it.spec)]
+        if it.engine is endplate_dg4:
+            out += endplate_dg4.warnings(it.spec)
+        return out
     except Exception:
         return []

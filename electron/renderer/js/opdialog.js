@@ -101,6 +101,13 @@ export async function openOperation(E, index, { isNew = false } = {}) {
     if (vis.ep_ext) items.push(numField('Extensión de la placa extrema', 'ep_ext', 'L', 0.5, 24));
     if (kind === K.EP_FLUSH || kind === K.EP_EXT) items.push(numField('Ancho de la placa (0 = automático)', 'ep_w', 'L', 0, 60), numField('Alto total de la placa (0 = automático)', 'ep_h', 'L', 0, 120),
       numField('Gramil de los pernos (0 = automático)', 'ep_g', 'L', 0, 40), { type: 'custom', render: () => epRows(op, ctx, us) });
+    if (kind === K.EP_EXT) items.push(
+      { path: 'ep_dg4', label: 'Precalificada (AISC Design Guide 4)', type: 'combo', wide: true, items: [{ value: '', label: 'No: placa extrema general' }, { value: '4E', label: '4E — 4 pernos por ala, sin rigidizar' }, { value: '4ES', label: '4ES — 4 pernos por ala, rigidizada' }, { value: '8ES', label: '8ES — 8 pernos por ala, rigidizada' }],
+        help: 'Con un tipo de la guía, las filas, el alto, el ancho y los rigidizadores se arman solos (los de abajo cambian la geometría típica) y la conexión se verifica con los 20 pasos de la Design Guide 4. Diseño sísmico: Mpe = 1.1·Ry·Fy·Zx y el cortante en la rótula con Lh y el cortante de gravedad de la ficha de la viga.' },
+      numField('DG4: pfo, ala a la fila exterior (0 = típico)', 'ep_pfo', 'L', 0, 12), numField('DG4: pfi, ala a la fila interior (0 = típico)', 'ep_pfi', 'L', 0, 12),
+      numField('DG4 8ES: pb, separación entre filas (0 = 3 in)', 'ep_pb', 'L', 0, 12), numField('DG4: de, última fila al borde (0 = típico)', 'ep_de', 'L', 0, 12),
+      numField('DG4 4ES/8ES: espesor del rigidizador (0 = el requerido)', 'ep_st_t', 'L', 0, 3, 0.0625),
+      { path: 'ep_seis', label: 'DG4: diseño sísmico (Mpe = 1.1·Ry·Fy·Zx); si no, el momento de cada caso', type: 'check', wide: true });
     if (kind === K.EP_FLUSH || kind === K.EP_EXT || kind === K.WELD) items.push({ path: 'wf_top', label: 'Soldadura del ala superior', type: 'combo', items: C.weld_types }, { path: 'wf_bot', label: 'Soldadura del ala inferior', type: 'combo', items: C.weld_types },
       ...(kind === K.WELD ? [] : [{ path: 'wf_web', label: 'Soldadura del alma', type: 'combo', items: C.weld_types }]));
     if (kind === K.EP_FLUSH || kind === K.EP_EXT || kind === K.WELD) items.push({ path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides, help: 'Solo para filete. Lado 1 = cara + de la pieza (en las alas de la viga: exterior); lado 2 = cara − (interior). «Ambos lados» pone el cordón por las dos caras.' });

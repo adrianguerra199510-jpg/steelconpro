@@ -262,8 +262,18 @@ def v38():
                 [("S1", OP_TAB, {})], [("S1", dict(Vz=V))], steel_main="ASTM A500 Gr.C (HSS red.)", nombre="Cordon")
 
 
+def v39():
+    """Ejemplo 4.4 de AISC Design Guide 4 (8ES): W21X55 a W14X109, pernos A325 de 1 in, placa de 7/8 in A572 Gr. 50, diseño sísmico con Vu = 40 kip."""
+    p = nudo("TP-V39", "placa extrema 8ES precalificada (AISC Design Guide 4, ejemplo 4.4) con diseño sísmico", "W14X109", 90, [("V1", "W21X55", 0, 0, "y", {})],
+             [("V1", OP_EP_EXT, dict(ep_dg4="8ES", bolt_size="1", bolt_grade="A325-N", plate_t=0.875, plate_steel="ASTM A572 Gr.50", ep_w=9.0, ep_g=5.5,
+                                     ep_st_t=0.5, wf_top="CJP (penetración completa)", wf_bot="CJP (penetración completa)", weld_size=0.3125)),
+              ("V1", OP_CONT, dict(cont_t=0.5))], [("V1", dict(Vz=-40.0, My=4000.0))])
+    p.node.member_named("V1").sism_Vg = 40.0
+    return p
+
+
 EJEMPLOS = [(f"TP-V{k:02d}", fn) for k, fn in enumerate([v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21,
-                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38], 1)]
+                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39], 1)]
 
 
 def nombre_archivo(p) -> str:

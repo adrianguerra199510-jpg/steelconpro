@@ -58,7 +58,7 @@ def checks(R, case, mdl, members, units) -> list:
         cat = "Miembros" if part in members else "Placas"
         Fy = d["Fy"]
         key = "".join(ch if ch.isalnum() else "_" for ch in part)
-        if d["peeq"] > 1e-6:
+        if R.plastic or d["peeq"] > 1e-6:                    # análisis elasto-plástico: el criterio es la deformación plástica (el esfuerzo queda acotado en φ·Fy)
             out.append(_ck(f"sh_pe_{key}", f"Deformación plástica equivalente — {part}", 100.0 * d["peeq"], 100.0 * PLASTIC_LIMIT, "%",
                            "Análisis elasto-plástico (φ·Fy); deformación plástica admisible 5 %",
                            f"von Mises en las caras {u.q('S', d['vm'], 1)}; espesor {u.q('L', d['t'], 3)}" + ("; zona de la conexión" if cat == "Miembros" else ""), cat, part))

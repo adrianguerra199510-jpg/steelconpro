@@ -421,7 +421,7 @@ def _fem_map(prj: Project) -> dict:
 CATEGORIES = ["Miembros", "Placas", "Pernos", "Soldaduras", "Anclajes y concreto", "Otras"]
 _CAT_START = [("anclaje", 4), ("llave", 4), ("aplastamiento del concreto", 4), ("perno", 2), ("separacion", 2), ("distancia", 2), ("detallado", 2),
               ("soldadura", 3), ("cateto", 3), ("tamano", 3), ("metal base", 3), ("placa", 1), ("angulo", 1), ("cartela", 1), ("espesor", 1),
-              ("rigidizador", 1), ("asiento", 1), ("alma", 0), ("seccion", 0), ("miembro", 0), ("perfil", 0), ("pandeo", 0), ("viga", 0), ("columna", 0),
+              ("rigidizador", 1), ("asiento", 1), ("alma", 0), ("zona del panel", 0), ("seccion", 0), ("miembro", 0), ("perfil", 0), ("pandeo", 0), ("viga", 0), ("columna", 0),
               ("ala", 0)]
 _CAT_HAS = [("perno", 2), ("soldad", 3), ("filete", 3), ("anclaj", 4), ("concreto", 4), ("placa", 1), ("angulo", 1), ("cartela", 1), ("viga", 0),
             ("columna", 0), ("alma", 0), ("miembro", 0)]
