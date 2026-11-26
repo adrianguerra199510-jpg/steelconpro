@@ -135,6 +135,8 @@ class Member:
     rel_T: bool = False          # (si rel_auto es falso) giro alrededor del eje del miembro liberado: el miembro no transmite torsión al nudo
     rel_My: bool = False         # giro alrededor de su eje local y liberado (flexión por cortante vertical Vz)
     rel_Mz: bool = False         # giro alrededor de su eje local z liberado (flexión por Vy)
+    sism_Lh: float = 0.0         # diseño sísmico (AISC 358): distancia entre rótulas plásticas de la viga, in (0 = no se da)
+    sism_Vg: float = 0.0         # diseño sísmico: cortante de gravedad en la rótula (1.2D + 0.5L + 0.2S), kip
     load_at: str = "Automático"  # punto de aplicación de las acciones del miembro en el ANÁLISIS de placas (no en el dibujo ni en las fórmulas): ver LOAD_AT
 
 

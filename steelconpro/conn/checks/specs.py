@@ -274,6 +274,8 @@ class EndPlate:
     ww_size: float = 0.3125          # filete del alma, a ambos lados
     electrode: str = "E70XX"
     weld_dir: bool = True
+    rows_y: list = field(default_factory=list)  # filas dibujadas (posición desde el centro de la viga, + arriba); vacío = una fila dentro y, si se pide, una fuera de cada ala
+    hh: float = 0.0                  # semialto de la placa (con rows_y)
     combos: list = field(default_factory=lambda: [["Comb 1", 1800.0, 40.0]])    # [nombre, Mu (+ traccion arriba), Vu]
 
     def loads(self) -> list:

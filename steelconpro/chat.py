@@ -123,6 +123,8 @@ MIEMBRO = {"name": ("Nombre único del miembro", "texto"), "shape": ("Perfil AIS
            "off": ("Desplazamiento del eje en la dirección del peralte (in)", "in"), "off2": ("Desplazamiento lateral (in)", "in"),
            "roll": ("Giro del perfil sobre su eje (°)", "grados"), "gap": ("Separación del extremo a la cara del principal (in)", "in"),
            "attach_to": ("Miembro al que llega (vacío = al principal)", "texto"),
+           "sism_Lh": ("Diseño sísmico: distancia entre rótulas plásticas de la viga (in; 0 = no se da)", "in"),
+           "sism_Vg": ("Diseño sísmico: cortante de gravedad en la rótula, 1.2D+0.5L+0.2S (kip)", "kip"),
            "load_at": ("Punto de aplicación de sus acciones en el análisis de placas: «Automático» (pernos en corte y cartelas, extremo en momento), "
                        "«En el extremo del elemento» o «En los pernos»; no cambia las fórmulas", "opcion")}
 

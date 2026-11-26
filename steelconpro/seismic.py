@@ -66,6 +66,31 @@ def capacity_limits(prj: Project) -> dict:
             "Ry": Ry, "Fy": Fy, "Zx": zx, "Zy": zy}
 
 
+def member_caps(prj: Project) -> dict:
+    """{miembro: {My, Mz}} = 1.1·Ry·Fy·Z de cada miembro del nudo (y del principal) en sus ejes locales (y = eje fuerte con el perfil sin girar):
+    las combinaciones con sobrerresistencia (Ωo) no pueden exigir más momento del que el miembro puede desarrollar (AISC 341-22, «la fuerza
+    máxima que el sistema puede entregar»; mismo criterio que D2.6 para la base)."""
+    from . import materials as M
+    from .shapes import CATALOG
+    nd = prj.node
+    out = {}
+    for name, shape, steel, roll in [(nd.main_name, nd.main_shape, nd.main_steel, nd.main_roll)] + [(m.name, m.shape, m.steel, m.roll) for m in nd.members]:
+        s = CATALOG.get(shape)
+        if s is None or not getattr(s, "Zx", 0):
+            continue
+        try:
+            Fy = M.find(M.SHAPE_STEELS, steel).Fy
+        except Exception:                                    # noqa: BLE001
+            continue
+        Ry = ry_of(steel)
+        zx, zy = (s.Zy, s.Zx) if abs(abs(float(roll)) % 180.0 - 90.0) < 1e-6 else (s.Zx, s.Zy)
+        out[name] = {"My": 1.1 * Ry * Fy * zx, "Mz": 1.1 * Ry * Fy * zy}
+        m = nd.member_named(name) if name != nd.main_name else None
+        if m is not None and float(getattr(m, "sism_Lh", 0.0)) > 0:      # cortante asociado: 2·M/Lh + cortante de gravedad (datos de la ficha de la viga)
+            out[name]["Vz"] = 2.0 * out[name]["My"] / float(m.sism_Lh) + abs(float(getattr(m, "sism_Vg", 0.0)))
+    return out
+
+
 # ------------------------------------------------------------------ generador
 def _fmt(a: float) -> str:
     t = f"{a:.2f}".rstrip("0").rstrip(".")
@@ -154,6 +179,7 @@ def generate_node_cases(prj: Project) -> int:
         nd.case_kind = kinds
         return 0
     keys = sorted({mk for d in svc.values() for mk in d}, key=lambda t: (t[0], t[1]))
+    caps = member_caps(prj) if (prj.seis.cap_limit and prj.seis.aisc341) else {}
     made, seen = [], set()
     cnt = {"G": 0, "E": 0, "Ωo": 0}
     pre = {"G": "G", "E": "E", "Ωo": "Ω"}
@@ -163,15 +189,22 @@ def generate_node_cases(prj: Project) -> int:
             for k, a in d.items():
                 coef[k] = coef.get(k, 0.0) + a
         rows = []
+        capped = False
         for mk in keys:
             v = [sum(a * svc.get(k, {}).get(mk, [0.0] * 6)[i] for k, a in coef.items()) for i in range(6)]
+            cp = caps.get(mk[0]) if sp["kind"] == "Ωo" else None
+            if cp:                                            # AISC 341-22: la acción con Ωo no pasa de la que el miembro puede entregar
+                for i, lim in ((4, cp["My"]), (5, cp["Mz"])) + (((2, cp["Vz"]),) if "Vz" in cp else ()):
+                    if abs(v[i]) > lim:
+                        v[i] = lim if v[i] > 0 else -lim
+                        capped = True
             rows.append((mk, v))
         sig = (sp["kind"],) + tuple((mk, tuple(round(x, 9) for x in v)) for mk, v in rows)
         if sig in seen:
             continue
         seen.add(sig)
         cnt[sp["kind"]] += 1
-        name = f"{pre[sp['kind']]}{cnt[sp['kind']]}: {sp['label']}"
+        name = f"{pre[sp['kind']]}{cnt[sp['kind']]}: {sp['label']}" + (" (lím. capacidad)" if capped else "")
         for (m, side), v in rows:
             nd.loads.append(Load(name, m, *v, side=side))
         kinds[name] = sp["kind"]

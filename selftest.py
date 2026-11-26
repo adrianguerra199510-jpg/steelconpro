@@ -677,8 +677,10 @@ try:
     _lim = SE.capacity_limits(_bb)
     _om = [c for c in _bb.combo_list() if c.kind == "Ωo"]
     _mm = max(max(abs(c.Mux), abs(c.Muy)) for c in _om)
-    if not _om or _mm > max(_lim["Mx"], _lim["My"]) + 1e-6 or _mm < min(_lim["Mx"], _lim["My"]) - 1e-6:
-        FAIL.append(f"sismo/placa base: Ωo debe quedar limitado a 1.1·Ry·Fy·Z ({_mm:.0f} vs {_lim['Mx']:.0f}/{_lim['My']:.0f})")
+    # la viga ya llega limitada a su propia capacidad (SE.member_caps): la base recibe a lo sumo el límite de la columna
+    _mb = max(v["My"] for k, v in SE.member_caps(_qb).items() if k != _qb.node.main_name)
+    if not _om or _mm > max(_lim["Mx"], _lim["My"]) + 1e-6 or _mm > _mb * 1.5 + 1e-6:
+        FAIL.append(f"sismo/placa base: Ωo debe quedar limitado a 1.1·Ry·Fy·Z ({_mm:.0f} vs {_lim['Mx']:.0f}/{_lim['My']:.0f}; viga {_mb:.0f})")
     _es = [c for c in _bb.combo_list() if c.kind == "E"]
     if max(max(abs(c.Mux), abs(c.Muy)) for c in _es) < 1.0e5:
         FAIL.append("sismo/placa base: las combinaciones E (ρ·QE) no se limitan por capacidad")

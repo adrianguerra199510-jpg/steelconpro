@@ -45,6 +45,27 @@ def _rows(st, g, ext):
     return out
 
 
+def _rows_drawn(st, g, top):
+    """Filas del lado traccionado tal como se dibujan (`st.rows_y`): [(nombre, y, b, a)] con y medido desde el centro hacia ese lado.  Fuera del ala:
+    b = distancia a la cara exterior del ala (menos el filete), a = el menor entre 1.25·b, la distancia al borde de la placa y la mitad de la
+    separación a la fila vecina; dentro: b = distancia a la cara interior del ala, a = 1.25·b."""
+    beam, wf = g["beam"], (st.fw_size if g["fillet"] else 0.0)
+    d, tf = beam.d, beam.tf
+    ys = sorted([abs(float(y)) for y in st.rows_y if (float(y) > 0) == top], reverse=True)
+    out, ko, ki = [], 0, 0
+    for k, y in enumerate(ys):
+        if y > d / 2:
+            ko += 1
+            b = y - d / 2 - wf
+            lim = [1.25 * b, max(st.hh - y, 0.0)] + ([0.5 * (ys[k - 1] - y)] if k > 0 else []) + ([0.5 * (y - ys[k + 1])] if k + 1 < len(ys) and ys[k + 1] > d / 2 else [])
+            out.append((f"exterior {ko}", y, b, max(min(lim), 1e-6)))
+        else:
+            ki += 1
+            b = (d / 2 - tf) - y - wf
+            out.append((f"interior {ki}", y, b, 1.25 * b))
+    return out
+
+
 def check_input(st) -> list:
     g = geometry(st)
     beam, col = g["beam"], g["col"]
@@ -68,7 +89,8 @@ def check_input(st) -> list:
         w.append(f"La placa ({st.bp:g} in) es mas angosta que el ala de la viga ({beam.bf:g} in).")
     if st.g < beam.tw + 2 * db:
         w.append("El gramil es muy chico para pasar los pernos junto al alma de la viga.")
-    w.append("Aproximacion: T equivalente con efecto palanca por fila (Manual Parte 9), no las lineas de fluencia de DG4; sin rigidizadores de placa.")
+    w.append("Aproximacion: T equivalente con efecto palanca por fila (Manual Parte 9), no las lineas de fluencia de DG4; sin rigidizadores de placa."
+             + (f" Filas dibujadas: {len(st.rows_y)} filas de 2 pernos." if st.rows_y else ""))
     w.append("NO EVALUADO: flexion del ala de la columna por lineas de fluencia (DG4) ni su rigidizacion; verifiquelo aparte.")
     return w
 
@@ -94,7 +116,7 @@ def solve_one(prj, name, vals, rec):
     Bc = PHI_BOLT * bolt_tension_rn(db, st.bolt_grade)
     ext_T, ext_C = (st.ext_t, st.ext_c) if top else (st.ext_c, st.ext_t)
     yc_cf = -(d / 2 - tf / 2)                                       # centroide del ala comprimida (la traccionada va hacia +y)
-    rows = _rows(st, g, ext_T)
+    rows = _rows_drawn(st, g, top) if st.rows_y else _rows(st, g, ext_T)
     p = st.bp / 2.0                                                 # ancho tributario por perno
     Ff = Mu / hf
     if rec:
@@ -124,7 +146,7 @@ def solve_one(prj, name, vals, rec):
     add_check(ck, rec, "ep_Mb", "Pernos a traccion sin palanca (referencia)", Mu, Mnp, "kip·in", "AISC J3.6",
               "capacidad si la placa fuera infinitamente gruesa")
     # ----------------------------------------------------- cortante en los pernos comprimidos
-    nbc = 2 * (1 + (1 if ext_C else 0))
+    nbc = 2 * (sum(1 for y in st.rows_y if (float(y) > 0) != top) if st.rows_y else (1 + (1 if ext_C else 0)))
     rnv = bolt_shear_rn(db, st.bolt_grade)
     add_check(ck, rec, "ep_V", "Pernos del lado comprimido — cortante", Vu / nbc, PHI_BOLT * rnv, "kip", "AISC J3.6", f"{nbc} pernos Ø{st.bolt_size} (Vu/n por perno)")
     Lc = min([st.e_ext - dh / 2] if ext_C else [st.pfi + tf - dh / 2])

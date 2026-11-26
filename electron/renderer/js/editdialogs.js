@@ -100,6 +100,12 @@ export async function openMember(E, name) {
     };
     buildRel();
     body.append(h('div', { class: 'card-sec' }, relBox));
+    // datos del diseño sísmico de la conexión de la viga (AISC 358 / AISC 341): distancia entre rótulas y cortante de gravedad
+    const sctx = formCtx(E, m, () => { E.changed({ geometry: false }); });
+    body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Diseño sísmico de la conexión (pórtico a momento)' }),
+      renderItems([{ path: 'sism_Lh', label: 'Distancia entre rótulas plásticas Lh (0 = no se da)', type: 'num', uk: 'L', lo: 0, hi: 2000 },
+        { path: 'sism_Vg', label: 'Cortante de gravedad en la rótula (1.2D + 0.5L + 0.2S)', type: 'num', uk: 'F', lo: 0, hi: 10000 }], sctx, { cols: 2 }),
+      h('p', { class: 'hint-text', style: { marginTop: '6px' }, text: 'Con el diseño sísmico activo, las combinaciones con sobrerresistencia (Ωo) no exigen a la viga más de 1.1·Ry·Fy·Z en flexión ni, si se da Lh, más de 2·(1.1·Ry·Fy·Z)/Lh + el cortante de gravedad. Estos datos también son los de la conexión precalificada de AISC 358 (Mpr, Vu = 2·Mpr/Lh + Vgravedad).' })));
     // punto de aplicación de las acciones del miembro en el análisis de placas (las flechas del visor y las fórmulas no cambian)
     const lctx = formCtx(E, m, () => { E.changed({ geometry: false }); });
     body.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Punto de aplicación de la carga (análisis)' }),

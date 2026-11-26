@@ -564,3 +564,9 @@ cierra con V.
 - **Solo cambia el análisis**: las flechas del visor (normal y alámbrico) y las verificaciones por fórmulas siguen igual. Ejemplo: viga W18X35 con placa simple de 4 pernos y 30 kip: en los pernos, cada perno toma 7.5 kip (cortante puro); en el extremo, el más cargado toma 31.2 kip.
 - El contacto entre placas atornilladas actúa solo en la dirección normal a las placas (cada resorte va del nodo a su proyección sobre la otra placa): las conexiones atornilladas giran con su flexibilidad real (doble ángulo, placa extrema sobre el alma de una viga) y el cortante lo toman los pernos.
 - En el servidor MCP, el campo `load_at` de `modificar_miembro`.
+
+## Diseño sísmico de conexiones a momento (en curso: AISC 358)
+- **Ficha de la viga → «Diseño sísmico de la conexión»:** distancia entre rótulas plásticas Lh y cortante de gravedad en la rótula (1.2D + 0.5L + 0.2S). Son los datos de la conexión precalificada (Mpr, Vu = 2·Mpr/Lh + Vgravedad).
+- **Combinaciones con sobrerresistencia:** con el diseño sísmico activo (AISC 341), el generador limita en los casos Ωo el momento de cada miembro a 1.1·Ry·Fy·Z (eje fuerte y débil) y, si la ficha da Lh, el cortante a 2·(1.1·Ry·Fy·Z)/Lh + el cortante de gravedad; el caso lleva «(lím. capacidad)». Antes, con Ωo·QE, se pedía a la viga más momento del que puede desarrollar.
+- **Placa extrema con filas a medida** (`ep_rows`, p. ej. 8 pernos por ala en disposición 8ES): la verificación usa las filas, pfo, pfi y la distancia al borde tal como se dibujan (antes suponía siempre una fila por fuera y una por dentro de cada ala). Sigue siendo la aproximación de T equivalente por fila; las líneas de fluencia y el procedimiento de AISC 358 cap. 6 (4E, 4ES, 8ES) se agregan validados contra un ejemplo resuelto.
+- Prueba: `selftest_sismo_conexion.py` (conexión 8ES armada por chat).

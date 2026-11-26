@@ -73,6 +73,21 @@ class Item:
         return f"{self.op.kind} — {self.m.name}"
 
 
+def _ep_drawn(op, beam, ext) -> dict:
+    """Geometría de la placa extrema para su verificación: con filas definidas (`ep_rows`), las filas, el semialto, pfo, pfi y la distancia al
+    borde tal como se dibujan; si no, los valores de siempre (pfo = pfi = 1.75 in, e = 1.5 in)."""
+    if not op.ep_rows or beam is None or beam.kind != "W":
+        return {"pfo": 1.75, "pfi": 1.75, "e_ext": 1.5}
+    from ..assembly import endplate_layout
+    lay = endplate_layout(op, beam, ext)
+    ys = [float(y) for y in lay["rows"]]
+    d, tf = beam.d, beam.tf
+    out_ = [abs(y) - d / 2 for y in ys if abs(y) > d / 2]
+    in_ = [d / 2 - tf - abs(y) for y in ys if abs(y) <= d / 2]
+    return {"rows_y": ys, "hh": float(lay["hh"]), "pfo": min(out_) if out_ else 1.75, "pfi": min(in_) if in_ else 1.75,
+            "e_ext": (float(lay["hh"]) - max(abs(y) for y in ys)) if out_ else 1.5}
+
+
 def build_items(nd: Nodo):
     """Traduce las operaciones de conexion del nudo a elementos verificables.  -> (items, avisos)"""
     items, warns = [], []
@@ -131,7 +146,7 @@ def build_items(nd: Nodo):
             spec = EndPlate(beam=m.shape, beam_steel=m.steel, col=nd.main_shape, col_steel=nd.main_steel, cont_plates=any(o.kind == OP_CONT and o.member == m.name for o in nd.operations),
                             plate_steel=op.plate_steel, bp=(op.ep_w if op.ep_w > 0 else (beam.bf if beam is not None else 7.0) + 1.5), tp=op.plate_t,
                             **({'g': op.ep_g} if op.ep_g > 0 else {}), bolt_size=op.bolt_size, bolt_grade=op.bolt_grade,
-                            pfo=1.75, pfi=1.75, e_ext=1.5, ext_t=ext, ext_c=ext, fw_size=op.weld_size, ww_size=op.weld_size,
+                            **_ep_drawn(op, beam, ext), ext_t=ext, ext_c=ext, fw_size=op.weld_size, ww_size=op.weld_size,
                             fw_type=(EP_FLANGE_WELD[1] if (op.wf_top == WELD_TYPES[0] or op.wf_bot == WELD_TYPES[0]) else EP_FLANGE_WELD[0]))
             items.append(Item(op, m, "ep", spec, None, engine=endplate))
         elif op.kind in (OP_GUSSET, OP_GUSSET_W):
