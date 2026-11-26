@@ -334,6 +334,7 @@ def run():
         api.ws_favorite({"root": root, "path": mv["path"]})
         api.ws_touch({"root": root, "path": mv["path"]})
         lst = api.ws_list({"root": root, "thumbs": False})
+        lst["projects"] = [x for x in lst["projects"] if x["folder"] != "Plantillas"]      # plantillas fijas del inicio (api.FIXED_FAVORITES)
         pj = lst["projects"][0]
         if len(lst["projects"]) != 1 or pj["folder"] != "Naves" or not pj["favorite"] or lst["recent"] != [mv["path"]] or not any(x["name"] == "Naves" for x in lst["folders"]):
             fail(f"workspace: listado inesperado {lst['projects']}")
