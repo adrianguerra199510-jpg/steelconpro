@@ -49,6 +49,7 @@ Estado del revisor de geometría: **0 errores y 0 avisos en los 38 ejemplos**; `
 | TP-V42 | Empalme de viga con alas soldadas y alma atornillada | `Empalme de viga con cubreplacas` (`sp_flange = Soldada`) | filetes longitudinales y transversal de las cubreplacas (J2-10) |
 | TP-V43 | Empalme de viga todo soldado, con cubreplacas exteriores e interiores | `Empalme de viga con cubreplacas` (`sp_flange = sp_web = Soldada`, `sp_inner`) | filetes en C de las placas del alma (método elástico) |
 | TP-V44 | Empalme soldado de viga doble 2×HN600×200×11×17 que desarrolla su capacidad (placas de 20 mm Gr. 50) | operaciones generales: 4 vigas (`V1b`, `V2b` paralelas al principal), `Placa` ×4 (cubreplacas 340×720, placas de alma 500×1410 por la cara exterior), `Soldadura de filete entre elementos` ×4 (14 y 12 mm) | casos A (φMn con 30 % de φVn) y B (φVn); fuerzas a mano en las soldaduras; aviso «su eje no toca» esperado (vigas paralelas) |
+| TP-V45 | El empalme de TP-V44 con la viga doble como UNA sección personalizada (`2XHN600X200X11X17`, Section Designer): solo 2 miembros | `Placa` ×4 y `Soldadura de filete entre elementos` ×4 sobre las caras de los componentes («Comp. 6 (Rect.) — Cara +X» = cara exterior del alma derecha) | mismas soldaduras y D/C que TP-V44 (0.88 y 0.39) |
 
 ## Limitaciones conocidas (no soportado o avisado)
 - Placa extrema, asiento y alas soldadas con la viga esviada o inclinada contra el ALMA de una columna I (dentro de las alas): la viga choca con las alas; se avisa

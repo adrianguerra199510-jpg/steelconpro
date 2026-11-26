@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from ..shapes import GEN
 
 from .specs import (OP_SPLICE, OP_PLATE, OP_BOLTS, OP_FILLET, OP_CUT, OP_BASE, OP_HOLE, OP_ANGLE, OP_TRIM, OP_WORKPLANE, OP_BLOCK, FACES_BLOCK, OP_ALIGN, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES, FACES_I, FACES_BOX,
                     FACES_PLATE, FACES_ANGLE, FACES_END, HOLE_SHAPES, WELD_MODES, WELD_TYPES, Operation)
@@ -82,14 +83,23 @@ def member_faces(shape, start, end, A, sx, sy) -> dict:
         t = float(shape.tw if shape.tw > 0 else 0.5)
         uh_x = (d / 2.0) if not shape.is_round else 0.35 * d
         uh_y = (bf / 2.0) if not shape.is_round else 0.35 * d
-        out["Cara +X"] = FaceFrame(start + sx * bf / 2.0, A, sx, L, uh_x, t)
-        out["Cara −X"] = FaceFrame(start - sx * bf / 2.0, A, -sx, L, uh_x, t)
-        out["Cara +Y"] = FaceFrame(start + sy * d / 2.0, A, sy, L, uh_y, t)
-        out["Cara −Y"] = FaceFrame(start - sy * d / 2.0, A, -sy, L, uh_y, t)
+        x0, y0, x1, y1 = shape.extent() if shape.kind == GEN else (-bf / 2.0, -d / 2.0, bf / 2.0, d / 2.0)
+        if shape.kind == GEN:                                                   # seccion libre: cada componente aporta sus caras (las de la envolvente quedan al final)
+            for fc in shape.comp_faces():
+                nrm = sx * fc["n"][0] + sy * fc["n"][1]
+                out[fc["name"]] = FaceFrame(start + sx * fc["c"][0] + sy * fc["c"][1], A, nrm, L, fc["half"], fc["wall"])
+            uh_x, uh_y = (y1 - y0) / 2.0, (x1 - x0) / 2.0
+            t = float(shape.tw if shape.tw > 0 else 0.5)
+        cxm, cym = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        out["Cara +X"] = FaceFrame(start + sx * x1 + sy * cym, A, sx, L, uh_x, t)
+        out["Cara −X"] = FaceFrame(start + sx * x0 + sy * cym, A, -sx, L, uh_x, t)
+        out["Cara +Y"] = FaceFrame(start + sy * y1 + sx * cxm, A, sy, L, uh_y, t)
+        out["Cara −Y"] = FaceFrame(start + sy * y0 + sx * cxm, A, -sy, L, uh_y, t)
     wall = float(shape.tf if face_kind(shape) == "I" else (shape.tw if shape.tw > 0 else 0.5))
     end = np.asarray(end, float)
-    out[FACES_END[0]] = FaceFrame(start - sx * bf / 2.0, sx, -A, bf, d / 2.0, wall)       # cara del extremo (plano de la seccion), normal hacia afuera del miembro
-    out[FACES_END[1]] = FaceFrame(end - sx * bf / 2.0, sx, A, bf, d / 2.0, wall)
+    ex0, ex1 = ((shape.extent()[0], shape.extent()[2]) if shape.kind == GEN else (-bf / 2.0, bf / 2.0))
+    out[FACES_END[0]] = FaceFrame(start + sx * ex0, sx, -A, ex1 - ex0, d / 2.0, wall)       # cara del extremo (plano de la seccion), normal hacia afuera del miembro
+    out[FACES_END[1]] = FaceFrame(end + sx * ex0, sx, A, ex1 - ex0, d / 2.0, wall)
     return out
 
 
@@ -102,6 +112,9 @@ def plate_faces(center, e1, e2, e3, L1, L2, t) -> dict:
 
 
 def face_names_of(shape) -> list:
+    """Nombres de las caras de un perfil.  Una seccion libre lista primero las caras de cada componente y despues las de su envolvente."""
+    if shape.kind == GEN and shape.comps:
+        return [f["name"] for f in shape.comp_faces()] + list(FACES_BOX)
     return FACES_I if face_kind(shape) == "I" else FACES_BOX
 
 

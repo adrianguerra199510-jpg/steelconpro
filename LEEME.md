@@ -571,6 +571,17 @@ cierra con V.
 - **Placa extrema con filas a medida** (`ep_rows`, p. ej. 8 pernos por ala en disposición 8ES): la verificación usa las filas, pfo, pfi y la distancia al borde tal como se dibujan (antes suponía siempre una fila por fuera y una por dentro de cada ala). Sigue siendo la aproximación de T equivalente por fila (sin rigidizadores); para el procedimiento completo use la placa precalificada DG4 (abajo).
 - Prueba: `selftest_sismo_conexion.py` (conexión 8ES armada por chat).
 
+## Caras de los componentes de una sección personalizada (Section Designer)
+- Una sección libre (Section Designer) se arma con componentes (rectángulos, círculos, tubos, polígonos). En las operaciones generales (placa, ángulo, pernos, huecos, recorte, soldadura entre elementos y posición referenciada), el desplegable de caras de un miembro con esa sección lista **todas las caras de cada componente**, con el número que el componente tiene en la lista del Section Designer, y al final las de la envolvente (por compatibilidad con proyectos anteriores):
+  - rectángulo sin girar: `Comp. 5 (Rect.) — Cara +X / −X / +Y / −Y`; rectángulo girado y polígono: `Lado 1, 2, …` (contorno antihorario; la normal sale hacia afuera);
+  - círculo y tubo: `Tangente +X / −X / +Y / −Y` (la cara plana tangente en cada punto cardinal).
+- La placa se apoya en la cara del componente elegido (por ejemplo, el alma de una de las vigas de una sección doble) y no en la caja envolvente de la sección; la envolvente, además, se calcula ahora respecto del centroide real de la sección (antes suponía la sección centrada en su caja).
+- El nombre de la cara incluye el número y el tipo del componente, no sus medidas: cambiar las medidas de un componente no rompe las operaciones que lo usan; borrar o reordenar componentes sí cambia la numeración.
+- Ejemplo `TP-V45` (viga doble como una sola sección, 2 miembros); prueba `selftest_caras_secciones.py`.
+
+## Textos de los formularios de operaciones
+- Los controles segmentados («Función», «Unión al elemento», tipo de recorte) ocupan el ancho del campo y pasan a otra fila si sus opciones no caben (antes se cortaban o se salían del panel); los desplegables «Se une al elemento» y «En la cara» van a ancho completo. `electron/tests/formularios.js` abre los 20 tipos de operación y detecta textos cortados o fuera del panel.
+
 ## Empalme de viga con cubreplacas
 - Operación **«Empalme de viga con cubreplacas (momento)»** (grupo «Conexión de momento»): une dos vigas (o columnas) I en línea. Al agregarla, el miembro se alinea con el eje del principal y el principal pasa a terminar en el nudo; la junta tiene una separación (`sp_gap`, 1/4 in por omisión). Si el miembro no sigue al principal, el empalme no se arma y una nota lo dice.
 - **Placas**: una cubreplaca exterior en cada ala y, con la casilla «Cubreplacas interiores», dos más bajo cada ala, a cada lado del alma (libran el filete alma-ala); dos placas en el alma, una a cada lado.

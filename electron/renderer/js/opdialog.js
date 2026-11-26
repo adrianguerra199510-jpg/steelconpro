@@ -230,8 +230,8 @@ function plateBody(body, E, op, ctx, info, names, el, nd, us, addForm, index) {
   const C = S.C;
   const bad = descendants(nd, op.name);
   const root = h('div', { class: 'col gap-12' });
-  const parentSel = h('div');
-  const faceSel = h('div');
+  const parentSel = h('div', { class: 'span2' });
+  const faceSel = h('div', { class: 'span2' });
   const buildParent = () => {
     clear(parentSel); clear(faceSel);
     const opts = info.filter((e) => !bad.has(e.name)).map((e) => ({ value: e.name, label: `${e.name} — ${e.type}${e.main ? ' (principal)' : ''}` }));
@@ -247,7 +247,7 @@ function plateBody(body, E, op, ctx, info, names, el, nd, us, addForm, index) {
     rebuild(); ctx.onChange();
   });
   const nameInp = h('input', { class: 'input', type: 'text', value: op.name, onchange: (e) => { const v = e.target.value.trim(); if (v && v !== op.name && !info.some((x) => x.name === v)) { E.renameElement(op.name, v); op.name = v; } else e.target.value = op.name; ctx.onChange(); } });
-  root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Placa' }), h('div', { class: 'form-grid' }, field('Nombre del elemento', nameInp), field('Función', roleSeg)),
+  root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Placa' }), h('div', { class: 'form-grid' }, field('Nombre del elemento', nameInp), field('Función', roleSeg, { cls: 'span2' })),
     h('div', { style: { height: '10px' } }), h('div', { class: 'form-grid' }, parentSel, faceSel)));
   const geom = h('div'); const union = h('div');
   root.append(geom, union);
@@ -276,7 +276,7 @@ function plateBody(body, E, op, ctx, info, names, el, nd, us, addForm, index) {
     geom.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Abertura' }), og));
     const un = [];
     const att = segmented(C.attaches.map((a) => ({ value: a, label: a })), op.attach, (v) => { op.attach = v; rebuild(); ctx.onChange(); });
-    un.push(h('div', { class: 'form-grid' }, field('Unión al elemento', att)));
+    un.push(h('div', { class: 'form-grid' }, field('Unión al elemento', att, { cls: 'span2' })));
     const f = [];
     if (op.attach === C.attaches[0] || perp) f.push(numField('Cateto / garganta', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo de soldadura', type: 'combo', items: C.weld_types }, { path: 'weld_all', label: 'Soldar todo el contorno', type: 'check', wide: true });
     else f.push({ path: 'bolt_size', label: 'Diámetro de los pernos', type: 'combo', items: C.bolt_sizes }, { path: 'bolt_grade', label: 'Calidad', type: 'combo', items: C.bolt_grades },
@@ -297,7 +297,7 @@ function plateBody(body, E, op, ctx, info, names, el, nd, us, addForm, index) {
 function boltsBody(body, E, op, ctx, info, el, nd, us, addForm) {
   const C = S.C;
   const root = h('div', { class: 'col gap-12' });
-  const parentSel = h('div'); const faceSel = h('div');
+  const parentSel = h('div', { class: 'span2' }); const faceSel = h('div', { class: 'span2' });
   const build = () => {
     clear(parentSel); clear(faceSel);
     parentSel.append(field('Elemento de partida (cara donde apoyan las cabezas)', selectInput({ value: op.parent, options: info.map((e) => ({ value: e.name, label: `${e.name} — ${e.type}` })),
@@ -411,7 +411,7 @@ function polyEditor(op, ctx) {
 function angleBody(body, E, op, ctx, info, el, nd, addForm) {
   const C = S.C;
   const root = h('div', { class: 'col gap-12' });
-  const parentSel = h('div'); const faceSel = h('div'); const nameInp = h('input', { class: 'input', type: 'text', value: op.name, onchange: (e) => { const v = e.target.value.trim(); if (v && v !== op.name && !info.some((x) => x.name === v)) { E.renameElement(op.name, v); op.name = v; } else e.target.value = op.name; ctx.onChange(); } });
+  const parentSel = h('div', { class: 'span2' }); const faceSel = h('div', { class: 'span2' }); const nameInp = h('input', { class: 'input', type: 'text', value: op.name, onchange: (e) => { const v = e.target.value.trim(); if (v && v !== op.name && !info.some((x) => x.name === v)) { E.renameElement(op.name, v); op.name = v; } else e.target.value = op.name; ctx.onChange(); } });
   const bad = descendants(nd, op.name);
   const build = () => {
     clear(parentSel); clear(faceSel);
@@ -428,7 +428,7 @@ function angleBody(body, E, op, ctx, info, el, nd, addForm) {
     if (op.attach === C.attaches[0]) f.push(numField('Cateto del filete', 'weld_size', 'L', 0.0625, 1, 0.0625), { path: 'weld_type', label: 'Tipo de soldadura', type: 'combo', items: C.weld_types }, { path: 'weld_side', label: 'Lado del filete', type: 'combo', items: C.weld_sides });
     else f.push({ path: 'bolt_size', label: 'Diámetro de los pernos', type: 'combo', items: C.bolt_sizes }, { path: 'bolt_grade', label: 'Calidad', type: 'combo', items: C.bolt_grades },
       { path: 'rows', label: 'Filas (a lo largo)', type: 'int', lo: 1, hi: 20 }, { path: 'cols', label: 'Columnas (a lo ancho)', type: 'int', lo: 1, hi: 10 }, numField('Separación a lo largo', 'bolt_s', 'L', 1, 40), numField('Separación a lo ancho', 'bolt_g', 'L', 1, 40));
-    un.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Unión a la cara' }), h('div', { class: 'form-grid' }, field('Unión', segmented(C.attaches.map((a) => ({ value: a, label: a })), op.attach, (v) => { op.attach = v; rebuild(); ctx.onChange(); }))), h('div', { style: { height: '10px' } }), addForm(f)));
+    un.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Unión a la cara' }), h('div', { class: 'form-grid' }, field('Unión', segmented(C.attaches.map((a) => ({ value: a, label: a })), op.attach, (v) => { op.attach = v; rebuild(); ctx.onChange(); }), { cls: 'span2' })), h('div', { style: { height: '10px' } }), addForm(f)));
   };
   rebuild();
   root.append(h('div', { class: 'card-sec' }, h('h4', { text: 'Geometría' }), addForm([
@@ -443,7 +443,7 @@ function angleBody(body, E, op, ctx, info, el, nd, addForm) {
 function holeBody(body, E, op, ctx, info, el, nd, addForm) {
   const C = S.C;
   const root = h('div', { class: 'col gap-12' });
-  const parentSel = h('div'); const faceSel = h('div');
+  const parentSel = h('div', { class: 'span2' }); const faceSel = h('div', { class: 'span2' });
   const build = () => {
     clear(parentSel); clear(faceSel);
     parentSel.append(field('Elemento a perforar', selectInput({ value: op.parent, options: info.map((e) => ({ value: e.name, label: `${e.name} — ${e.type}` })), onChange: (v) => { op.parent = v; const e = el(v); if (e && !e.faces.includes(op.face)) op.face = e.faces[0]; build(); ctx.onChange(); } })));

@@ -103,6 +103,20 @@ class Shape:
         from . import sections
         return sections.pieces(self.comps, self.ox, self.oy)
 
+    def comp_faces(self):
+        """Caras de cada componente de una seccion libre (ver sections.comp_faces), centradas en el centroide."""
+        from . import sections
+        return sections.comp_faces(self.comps, self.ox, self.oy)
+
+    def extent(self):
+        """(x0, y0, x1, y1) de la caja envolvente respecto del centroide (la seccion libre puede no estar centrada en su caja)."""
+        if self.kind == GEN and self.comps:
+            from . import sections
+            bs = [sections.comp_bounds(c) for c in self.comps if not sections.valid_comp(c)]
+            if bs:
+                return (min(b[0] for b in bs) - self.ox, min(b[1] for b in bs) - self.oy, max(b[2] for b in bs) - self.ox, max(b[3] for b in bs) - self.oy)
+        return (-self.bf / 2.0, -self.d / 2.0, self.bf / 2.0, self.d / 2.0)
+
     @property
     def generic(self) -> bool:
         return self.kind in GENERIC_KINDS

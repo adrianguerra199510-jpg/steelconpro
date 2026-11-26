@@ -322,6 +322,55 @@ def pieces(comps, cx: float, cy: float):
     return out
 
 
+def comp_label(c) -> str:
+    """Tipo del componente para el nombre de sus caras (estable: no incluye las medidas)."""
+    return {"rect": "Rect.", "circ": "Círculo", "ring": "Tubo", "poly": "Polígono"}.get(c.get("t"), "Comp.")
+
+
+def comp_faces(comps, cx: float, cy: float):
+    """Caras planas de cada componente, en el sistema de la seccion centrada en (cx, cy): [{name, c: (u, v) centro de la cara, n: (nu, nv) normal exterior,
+    half: semiancho de la cara, wall: espesor del componente en ella}].  El nombre «Comp. k (tipo) — cara» usa el numero k de la lista del Section Designer:
+    rectangulo sin girar: Cara +X / −X / +Y / −Y; rectangulo girado y poligono: Lado 1, 2, …; circulo y tubo: Tangente +X / −X / +Y / −Y."""
+    out = []
+    for k, c in enumerate(comps, 1):
+        if valid_comp(c):
+            continue
+        t = c["t"]
+        tag = f"Comp. {k} ({comp_label(c)}) — "
+        if t in ("circ", "ring"):
+            ro = float(c["d"]) / 2.0
+            wall = float(c["ti"]) if t == "ring" else ro
+            x0, y0 = float(c["x"]) - cx, float(c["y"]) - cy
+            for nm, n in (("+X", (1.0, 0.0)), ("−X", (-1.0, 0.0)), ("+Y", (0.0, 1.0)), ("−Y", (0.0, -1.0))):
+                out.append({"name": tag + "Tangente " + nm, "c": (x0 + n[0] * ro, y0 + n[1] * ro), "n": n, "half": 0.35 * ro, "wall": min(wall, ro)})
+            continue
+        P = _ccw(comp_outline(c))
+        A = abs(_area(P))
+        per = sum(math.hypot(P[(i + 1) % len(P)][0] - P[i][0], P[(i + 1) % len(P)][1] - P[i][1]) for i in range(len(P)))
+        wall = float(min(float(c["w"]), float(c["h"]))) if t == "rect" else (2.0 * A / per if per > 0 else 0.5)
+        axis = t == "rect" and abs(float(c.get("rot", 0.0))) % 90.0 < 1e-9
+        order = list(range(len(P)))
+        if axis:                                                              # orden fijo: +X, −X, +Y, −Y
+            def _key(i):
+                a, b = P[i], P[(i + 1) % len(P)]
+                ln = math.hypot(b[0] - a[0], b[1] - a[1]) or 1.0
+                n = ((b[1] - a[1]) / ln, -(b[0] - a[0]) / ln)
+                return (0, 0) if n[0] > 0.5 else (0, 1) if n[0] < -0.5 else (1, 0) if n[1] > 0 else (1, 1)
+            order.sort(key=_key)
+        for i in order:
+            a, b = P[i], P[(i + 1) % len(P)]
+            ln = math.hypot(b[0] - a[0], b[1] - a[1])
+            if ln < 1e-9:
+                continue
+            n = ((b[1] - a[1]) / ln, -(b[0] - a[0]) / ln)               # contorno antihorario: la normal exterior queda a la derecha
+            if axis:
+                nm = ("Cara +X" if n[0] > 0.5 else "Cara −X") if abs(n[0]) > 0.5 else ("Cara +Y" if n[1] > 0 else "Cara −Y")
+            else:
+                nm = f"Lado {i + 1}"
+            out.append({"name": tag + nm, "c": ((a[0] + b[0]) / 2.0 - cx, (a[1] + b[1]) / 2.0 - cy), "n": n, "half": ln / 2.0, "wall": wall})
+    return out
+
+
 # ================================================================================================== plantillas
 def _R(x, y, w, h, rot=0.0):
     return {"t": "rect", "x": x, "y": y, "w": w, "h": h, "rot": rot}

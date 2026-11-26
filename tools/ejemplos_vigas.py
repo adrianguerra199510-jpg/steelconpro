@@ -361,8 +361,47 @@ def v44():
     return p
 
 
+def v45():
+    """El empalme de TP-V44 con la viga doble armada como UNA sección personalizada del Section Designer (2XHN600X200X11X17: 4 rectángulos de ala y 2 de alma),
+    de modo que solo hay 2 miembros.  Las placas y los filetes se refieren a las caras de cada componente («Comp. 6 (Rect.) — Cara +X» = cara exterior del alma
+    derecha), no a la envolvente de la sección."""
+    from steelconpro.shapes import CATALOG, make_general
+    MM = 1 / 25.4
+    KN, KNM = 1 / 4.448222, 8.850746
+    lab = "2XHN600X200X11X17"
+    comps = [{"t": "rect", "x": x * MM, "y": y * MM, "w": 200 * MM, "h": 17 * MM, "rot": 0.0} for x in (-100, 100) for y in (292, -292)]
+    comps += [{"t": "rect", "x": x * MM, "y": 0.0, "w": 11 * MM, "h": 566 * MM, "rot": 0.0} for x in (-100, 100)]
+    if CATALOG.get(lab) is None:
+        CATALOG.shapes[lab] = make_general(lab, comps)
+        CATALOG._reindex()
+    st = "ASTM A572 Gr.50"
+    p = Project()
+    p.ctype = CT_NODE
+    p.element = "TP-V45"
+    p.name = "Ejemplo: empalme soldado de viga doble como una sola sección personalizada (caras de cada componente)"
+    p.u_len, p.u_force, p.u_stress, p.u_moment = "mm", "kN", "MPa", "kN·m"
+    nd = Nodo(main_name="V1", main_shape=lab, main_steel=st, main_el=0.0, main_az=0.0, main_end=END_LABELS[1])
+    nd.members = [Member(name="V2", shape=lab, steel=st, az=0.0, el=0.0, gap=10 * MM - 0.5)]
+    P = lambda **k: Operation(kind=OP_PLATE, member="", role=PLATE_ROLES[0], orient=PLATE_ORIENTS[0], shape=PLATE_SHAPES[0], attach=ATTACHES[2], plate_steel=st,   # noqa: E731
+                              plate_t=20 * MM, **k)
+    f1, f2, f3, f4 = (f"Comp. {k} (Rect.) — Cara " for k in (1, 2, 3, 4))
+    w5, w6 = "Comp. 5 (Rect.) — Cara −X", "Comp. 6 (Rect.) — Cara +X"
+    nd.operations = [P(name="CP-S", parent="V2", face=f1 + "+Y", pl_L=720 * MM, pl_W=340 * MM, pl_s=-5 * MM, pl_u=100 * MM),     # sobre las alas superiores de las dos vigas
+                     P(name="CP-I", parent="V2", face=f2 + "−Y", pl_L=720 * MM, pl_W=340 * MM, pl_s=-5 * MM, pl_u=-100 * MM),
+                     P(name="PA-a", parent="V2", face=w5, pl_L=1410 * MM, pl_W=500 * MM, pl_s=-5 * MM, pl_u=0.0),                 # cara exterior de cada alma
+                     P(name="PA-b", parent="V2", face=w6, pl_L=1410 * MM, pl_W=500 * MM, pl_s=-5 * MM, pl_u=0.0)]
+    for nm, fa, fb in (("CP-S", f1 + "+Y", f3 + "+Y"), ("CP-I", f2 + "−Y", f4 + "−Y")):
+        nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main=nm, weld_size=14 * MM, weld_all=True, force_T=993.0 * KN,
+                                       weld_to=[["V1", fa], ["V1", fb], ["V2", fa], ["V2", fb]]))
+    nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main="PA-a", weld_size=12 * MM, weld_all=True, force_V=1366.0 * KN, weld_to=[["V1", w5], ["V2", w5]]))
+    nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main="PA-b", weld_size=12 * MM, weld_all=True, force_V=1366.0 * KN, weld_to=[["V1", w6], ["V2", w6]]))
+    nd.loads = [Load("A: momento completo", "V2", Vz=-0.6 * 1366.0 * KN, My=1778.0 * KNM), Load("B: cortante completo", "V2", Vz=-2732.0 * KN)]
+    p.node = nd
+    return p
+
+
 EJEMPLOS = [(f"TP-V{k:02d}", fn) for k, fn in enumerate([v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21,
-                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44], 1)]
+                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44, v45], 1)]
 
 
 def nombre_archivo(p) -> str:
