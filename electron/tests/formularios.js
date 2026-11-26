@@ -68,9 +68,9 @@ const EJ = ['CN-01', 'CN-02', 'CN-03', 'CN-04', 'CN-05', 'CN-06', 'CN-08', 'TP-A
   await wait(1500);
   const opts = await page.evaluate(() => [...document.querySelectorAll('.panel.right select')].map((s) => [...s.options].map((o) => o.value)));
   const faces = opts.find((o) => o.includes('Comp. 6 (Rect.) — Cara +X'));
-  check(!!faces && faces.length === 30 && faces.includes('Comp. 5 (Rect.) — Cara −X') && faces.includes('Cara +X'), `el desplegable «En la cara» ofrece las caras de los 6 componentes y la envolvente (${faces ? faces.length : 0} caras)`);
+  check(!!faces && faces.length === 42 && faces.includes('Comp. 5 (Rect.) — Cara −X') && faces.includes('Cara +X'), `el desplegable «En la cara» ofrece las caras y los extremos de los 6 componentes y la envolvente (${faces ? faces.length : 0} caras)`);
   const sel = await page.evaluate(() => { const s = [...document.querySelectorAll('.panel.right select')].find((x) => [...x.options].some((o) => o.value.startsWith('Comp. 5'))); return s ? s.value : null; });
-  check(sel === 'Comp. 5 (Rect.) — Cara −X', `la placa PA-a está en la cara exterior del alma izquierda (${sel})`);
+  check(sel === 'Comp. 5 (Rect.) — Cara −X', `la placa PA-1 está en la cara exterior del alma izquierda (${sel})`);
   const sc2 = await scan(); const bad2 = (sc2.out || []);
   check(!bad2.length, 'la lista larga de caras no rompe el formulario' + (bad2.length ? ': ' + bad2[0] : ''));
   await page.screenshot({ path: path.join(shots, 'seccion_personalizada_formulario.png') });

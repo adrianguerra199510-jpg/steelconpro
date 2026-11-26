@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 from steelconpro.model import Project, save_book                                  # noqa: E402
 from steelconpro.conn import assembly as AS                                       # noqa: E402
 from steelconpro.conn.specs import (CT_NODE, Nodo, Member, Operation, Load, TAB_MODES, BEAM_CONNS,   # noqa: E402
-                                    OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_CONT, OP_COPE, END_LABELS, OP_PLATE, OP_FILLET, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES)
+                                    OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_CONT, OP_COPE, END_LABELS, OP_PLATE, OP_FILLET, WELD_TYPES, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES)
 
 OUT = ROOT / "ejemplos"
 HSS = "ASTM A500 Gr.C (HSS rect.)"
@@ -362,9 +362,13 @@ def v44():
 
 
 def v45():
-    """El empalme de TP-V44 con la viga doble armada como UNA sección personalizada del Section Designer (2XHN600X200X11X17: 4 rectángulos de ala y 2 de alma),
-    de modo que solo hay 2 miembros.  Las placas y los filetes se refieren a las caras de cada componente («Comp. 6 (Rect.) — Cara +X» = cara exterior del alma
-    derecha), no a la envolvente de la sección."""
+    """Empalme soldado de la viga doble 2 × HN600×200×11×17 armado como UNA sección personalizada del Section Designer (2XHN600X200X11X17: 4 rectángulos de ala
+    y 2 de alma): solo 2 miembros.  Diseñado a capacidad de la viga (φMn y φVn de AISC 360-22) con placas de 20 mm A572 Gr. 50 y E70:
+    2 placas de ala PL 20 × 360 × 500 (una arriba y otra abajo, cada una sobre las dos alas, filete de 16 mm) y 2 placas de alma PL 20 × 400 × 500 (una por alma, solo
+    por la cara exterior, filete de 12 mm en C), más la **soldadura a tope de penetración completa (CJP) de cada alma contra la de la otra viga** (separación de 2 mm entre
+    las vigas): con solo la placa, el alma no alcanza la capacidad (D/C 1.5 en los filetes, los gobierna el metal base del alma); con la CJP, el alma desarrolla su resistencia
+    y la placa es adicional.  Las placas y los filetes se refieren a las caras de cada componente («Comp. 6 (Rect.) — Cara +X» = cara exterior del alma derecha), no a la
+    envolvente de la sección.  Casos: A = momento completo (889 kN·m por viga) con 30 % de φVn; B = cortante completo (1366 kN por viga)."""
     from steelconpro.shapes import CATALOG, make_general
     MM = 1 / 25.4
     KN, KNM = 1 / 4.448222, 8.850746
@@ -378,23 +382,26 @@ def v45():
     p = Project()
     p.ctype = CT_NODE
     p.element = "TP-V45"
-    p.name = "Ejemplo: empalme soldado de viga doble como una sola sección personalizada (caras de cada componente)"
+    p.name = "Ejemplo: empalme soldado de viga doble 2xHN600x200x11x17 a capacidad, como una sola sección personalizada (caras de cada componente)"
     p.u_len, p.u_force, p.u_stress, p.u_moment = "mm", "kN", "MPa", "kN·m"
     nd = Nodo(main_name="V1", main_shape=lab, main_steel=st, main_el=0.0, main_az=0.0, main_end=END_LABELS[1])
-    nd.members = [Member(name="V2", shape=lab, steel=st, az=0.0, el=0.0, gap=10 * MM - 0.5)]
+    nd.members = [Member(name="V2", shape=lab, steel=st, az=0.0, el=0.0, gap=2 * MM - 0.5)]
     P = lambda **k: Operation(kind=OP_PLATE, member="", role=PLATE_ROLES[0], orient=PLATE_ORIENTS[0], shape=PLATE_SHAPES[0], attach=ATTACHES[2], plate_steel=st,   # noqa: E731
-                              plate_t=20 * MM, **k)
-    f1, f2, f3, f4 = (f"Comp. {k} (Rect.) — Cara " for k in (1, 2, 3, 4))
-    w5, w6 = "Comp. 5 (Rect.) — Cara −X", "Comp. 6 (Rect.) — Cara +X"
-    nd.operations = [P(name="CP-S", parent="V2", face=f1 + "+Y", pl_L=720 * MM, pl_W=340 * MM, pl_s=-5 * MM, pl_u=100 * MM),     # sobre las alas superiores de las dos vigas
-                     P(name="CP-I", parent="V2", face=f2 + "−Y", pl_L=720 * MM, pl_W=340 * MM, pl_s=-5 * MM, pl_u=-100 * MM),
-                     P(name="PA-a", parent="V2", face=w5, pl_L=1410 * MM, pl_W=500 * MM, pl_s=-5 * MM, pl_u=0.0),                 # cara exterior de cada alma
-                     P(name="PA-b", parent="V2", face=w6, pl_L=1410 * MM, pl_W=500 * MM, pl_s=-5 * MM, pl_u=0.0)]
-    for nm, fa, fb in (("CP-S", f1 + "+Y", f3 + "+Y"), ("CP-I", f2 + "−Y", f4 + "−Y")):
-        nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main=nm, weld_size=14 * MM, weld_all=True, force_T=993.0 * KN,
-                                       weld_to=[["V1", fa], ["V1", fb], ["V2", fa], ["V2", fb]]))
-    nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main="PA-a", weld_size=12 * MM, weld_all=True, force_V=1366.0 * KN, weld_to=[["V1", w5], ["V2", w5]]))
-    nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main="PA-b", weld_size=12 * MM, weld_all=True, force_V=1366.0 * KN, weld_to=[["V1", w6], ["V2", w6]]))
+                              plate_t=20 * MM, parent="V2", pl_s=-1 * MM, **{"pl_u": 0.0, **k})
+    cara = lambda k, c: f"Comp. {k} (Rect.) — Cara {c}"                                                                        # noqa: E731
+    # placas de ala: UNA por nivel (superior e inferior), por fuera, que cubre las dos alas (comp. 1 y 3 = alas superiores, 2 y 4 = inferiores); centrada en la junta de las alas
+    # (pl_u = ±100 mm desde el centro de la cara del comp. 1 o 2).  Ancho 360 mm: con 200 mm la placa solo alcanza el 62 % de la fuerza de las alas.
+    nd.operations = [P(name="CA-S", face=cara(1, "+Y"), pl_L=500 * MM, pl_W=360 * MM, pl_u=100 * MM), P(name="CA-I", face=cara(2, "−Y"), pl_L=500 * MM, pl_W=360 * MM, pl_u=-100 * MM)]
+    # placas de alma: solo exteriores, una por alma (comp. 5 = alma izquierda, 6 = alma derecha)
+    almas = [("PA-1", cara(5, "−X")), ("PA-2", cara(6, "+X"))]
+    nd.operations += [P(name=n, face=f, pl_L=500 * MM, pl_W=400 * MM) for n, f in almas]
+    for n, f1, f2 in (("CA-S", cara(1, "+Y"), cara(3, "+Y")), ("CA-I", cara(2, "−Y"), cara(4, "−Y"))):   # fuerza del ala por viga: Mf/(d + tp) = 993 kN a cada lado de la junta
+        nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main=n, weld_to=[["V1", f1], ["V1", f2], ["V2", f1], ["V2", f2]], weld_size=16 * MM, weld_all=True, force_T=993.0 * KN))
+    # soldadura a tope CJP de cada alma contra la otra (extremo del componente: 11 × 566 mm); la CJP desarrolla el alma y la placa lleva el resto del cortante (78 kN)
+    nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main="V2", weld_to=[["V1", "Comp. 5 (Rect.) — Extremo fin"], ["V1", "Comp. 6 (Rect.) — Extremo fin"]],
+                                   weld_type=WELD_TYPES[1], weld_size=11 * MM, weld_all=True))
+    for n, f in almas:                                                                                      # la placa es adicional: lleva el cortante que excede a la CJP (1366 − 1288 = 78 kN)
+        nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main=n, weld_to=[["V1", f], ["V2", f]], weld_size=12 * MM, weld_all=True, force_V=78.0 * KN))
     nd.loads = [Load("A: momento completo", "V2", Vz=-0.6 * 1366.0 * KN, My=1778.0 * KNM), Load("B: cortante completo", "V2", Vz=-2732.0 * KN)]
     p.node = nd
     return p

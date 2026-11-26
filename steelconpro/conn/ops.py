@@ -84,12 +84,21 @@ def member_faces(shape, start, end, A, sx, sy) -> dict:
         uh_x = (d / 2.0) if not shape.is_round else 0.35 * d
         uh_y = (bf / 2.0) if not shape.is_round else 0.35 * d
         x0, y0, x1, y1 = shape.extent() if shape.kind == GEN else (-bf / 2.0, -d / 2.0, bf / 2.0, d / 2.0)
-        if shape.kind == GEN:                                                   # seccion libre: cada componente aporta sus caras (las de la envolvente quedan al final)
+        if shape.kind == GEN:                                                   # seccion libre: cada componente aporta sus caras y sus extremos (las de la envolvente quedan al final)
             for fc in shape.comp_faces():
                 nrm = sx * fc["n"][0] + sy * fc["n"][1]
                 out[fc["name"]] = FaceFrame(start + sx * fc["c"][0] + sy * fc["c"][1], A, nrm, L, fc["half"], fc["wall"])
             uh_x, uh_y = (y1 - y0) / 2.0, (x1 - x0) / 2.0
             t = float(shape.tw if shape.tw > 0 else 0.5)
+            end_ = np.asarray(end, float)
+            for fe in shape.comp_end_faces():                                   # extremos de cada componente: la sección del componente (p. ej. soldadura a tope de dos almas)
+                bx0, by0, bx1, by1 = fe["box"]
+                if fe["end"] == 0:
+                    ffe = FaceFrame(start + sx * bx0 + sy * (by0 + by1) / 2.0, sx, -A, bx1 - bx0, (by1 - by0) / 2.0, min(bx1 - bx0, by1 - by0))
+                else:
+                    ffe = FaceFrame(end_ + sx * bx0 + sy * (by0 + by1) / 2.0, sx, A, bx1 - bx0, (by1 - by0) / 2.0, min(bx1 - bx0, by1 - by0))
+                ffe.comp_end = True                                             # cara de extremo de un componente: una soldadura de un miembro contra ella rodea la sección del componente
+                out[fe["name"]] = ffe
         cxm, cym = (x0 + x1) / 2.0, (y0 + y1) / 2.0
         out["Cara +X"] = FaceFrame(start + sx * x1 + sy * cym, A, sx, L, uh_x, t)
         out["Cara −X"] = FaceFrame(start + sx * x0 + sy * cym, A, -sx, L, uh_x, t)
@@ -114,7 +123,7 @@ def plate_faces(center, e1, e2, e3, L1, L2, t) -> dict:
 def face_names_of(shape) -> list:
     """Nombres de las caras de un perfil.  Una seccion libre lista primero las caras de cada componente y despues las de su envolvente."""
     if shape.kind == GEN and shape.comps:
-        return [f["name"] for f in shape.comp_faces()] + list(FACES_BOX)
+        return [f["name"] for f in shape.comp_faces()] + [f["name"] for f in shape.comp_end_faces()] + list(FACES_BOX)
     return FACES_I if face_kind(shape) == "I" else FACES_BOX
 
 
@@ -329,6 +338,32 @@ def member_contour_lines(frame, ff, edges=None):
             nA3 = sx * (b[1] - a[1]) - sy * (b[0] - a[0])                   # normal hacia afuera de un contorno CCW (en el plano de la seccion)
             nA3 = nA3 / max(float(np.linalg.norm(nA3)), 1e-12)
             out.append((P0, P1, nA3, nB, gi))
+    return out
+
+
+def face_rect_lines(frame, ff, edges=None):
+    """Cordón alrededor de una cara rectangular `ff` (extremo de un componente): [(p0, p1, nA, nB, segmento)]; nB mira hacia el miembro que se suelda."""
+    start, end = np.asarray(frame[0], float), np.asarray(frame[1], float)
+    other = start if float(np.linalg.norm(start - np.asarray(ff.O, float))) > float(np.linalg.norm(end - np.asarray(ff.O, float))) else end
+    n2 = np.asarray(ff.N, float)
+    nB = n2 if float(np.dot(other - np.asarray(ff.O, float), n2)) >= 0 else -n2
+    uh = ff.uh
+    pts = [ff.point(0.0, -uh), ff.point(ff.L, -uh), ff.point(ff.L, uh), ff.point(0.0, uh)]
+    out = []
+    for k in range(4):
+        if edges is not None and k not in edges:
+            continue
+        P0, P1 = pts[k], pts[(k + 1) % 4]
+        t = P1 - P0
+        ln = float(np.linalg.norm(t))
+        if ln < 1e-9:
+            continue
+        mid = (P0 + P1) / 2.0
+        cen = (pts[0] + pts[2]) / 2.0
+        nA = mid - cen
+        nA = nA - n2 * float(np.dot(nA, n2))
+        nA = nA / max(float(np.linalg.norm(nA)), 1e-12)
+        out.append((P0, P1, nA, nB, k))
     return out
 
 
@@ -594,6 +629,8 @@ def _weld_pair(main, tgt, face_name, o, PL):
     if main.get("geo") is not None:
         return PL.weld_lines(main["geo"], ff, edges, o.weld_a, o.weld_len, region=PL.face_region(tgt, ff), info=info), ff, info
     if main.get("frame_full") is not None:
+        if getattr(ff, "comp_end", False):                              # contra el extremo de un componente (p. ej. soldadura a tope de dos almas): contorno de esa cara
+            return face_rect_lines(main["frame_full"], ff, edges), ff, info
         return member_contour_lines(main["frame_full"], ff, edges), ff, info
     if main.get("type") == "angulo" and tgt.get("part") != main.get("parent_part"):       # ángulo contra un elemento que no es su padre: aristas del ángulo sobre esa cara
         part = next((p_ for p_ in (main.get("_mdl_parts") or []) if p_.name == main.get("part")), None)

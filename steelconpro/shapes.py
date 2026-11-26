@@ -108,6 +108,11 @@ class Shape:
         from . import sections
         return sections.comp_faces(self.comps, self.ox, self.oy)
 
+    def comp_end_faces(self):
+        """Caras de extremo de cada componente de una seccion libre (ver sections.comp_end_faces)."""
+        from . import sections
+        return sections.comp_end_faces(self.comps, self.ox, self.oy)
+
     def extent(self):
         """(x0, y0, x1, y1) de la caja envolvente respecto del centroide (la seccion libre puede no estar centrada en su caja)."""
         if self.kind == GEN and self.comps:

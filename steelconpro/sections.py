@@ -371,6 +371,19 @@ def comp_faces(comps, cx: float, cy: float):
     return out
 
 
+def comp_end_faces(comps, cx: float, cy: float):
+    """Caras de extremo (la sección del componente en el plano del extremo del miembro) de cada componente: [{name, box: (x0, y0, x1, y1)}] en el sistema de la sección
+    centrada en (cx, cy).  `Comp. k (tipo) — Extremo inicio` y `— Extremo fin`; la cara es la caja del componente (exacta en un rectángulo sin girar)."""
+    out = []
+    for k, c in enumerate(comps, 1):
+        if valid_comp(c):
+            continue
+        x0, y0, x1, y1 = comp_bounds(c)
+        for nm in ("Extremo inicio", "Extremo fin"):
+            out.append({"name": f"Comp. {k} ({comp_label(c)}) — {nm}", "box": (x0 - cx, y0 - cy, x1 - cx, y1 - cy), "end": 0 if nm.endswith("inicio") else 1})
+    return out
+
+
 # ================================================================================================== plantillas
 def _R(x, y, w, h, rot=0.0):
     return {"t": "rect", "x": x, "y": y, "w": w, "h": h, "rot": rot}

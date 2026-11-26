@@ -46,6 +46,8 @@ def caras():
     f1 = fc["Comp. 1 (Rect.) — Cara +Y"]
     check(abs(f1["c"][0] + 100 * MM) < 1e-9 and abs(f1["c"][1] - 300.5 * MM) < 1e-9, "ala superior izquierda: su cara +Y está a 300.5 mm sobre el centroide")
     names = OPS.face_names_of(s)
+    fe = {f["name"]: f for f in s.comp_end_faces()}
+    check(len(fe) == 12 and fe["Comp. 5 (Rect.) — Extremo fin"]["box"] == (-100 * MM - 5.5 * MM, -283 * MM, -100 * MM + 5.5 * MM, 283 * MM), "extremos: inicio y fin de cada componente (el alma de 11 × 566 mm)")
     check(names[0].startswith("Comp. 1") and names[-6:] == ["Cara +X", "Cara −X", "Cara +Y", "Cara −Y", "Extremo inicio", "Extremo fin"],
           "la lista del desplegable: primero los componentes y al final la envolvente y los extremos (compatibilidad con los proyectos anteriores)")
     ff = AS.member_faces if False else OPS.member_faces(s, (0, 0, 0), (60, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1))
@@ -92,7 +94,8 @@ def modelo():
     check(pairs == {("PA", "V"), ("PB", "V"), ("CP", "V")} and len(m.welds) == 13, f"soldaduras entre las placas y las caras de la sección ({len(m.welds)} cordones)")
     check(not [e for e in GC.check(m) if e["sev"] == "error"] and not [n for n in m.notes if "» no toca a «" in n], "sin errores de geometría ni avisos de que la placa no toca")
     el = OPS.elements(p)["elements"][0]
-    check("Comp. 6 (Rect.) — Cara +X" in el["faces"] and len(el["faces"]) == 30, f"element_info ofrece las caras de los componentes ({len(el['faces'])} caras)")
+    check("Comp. 6 (Rect.) — Cara +X" in el["faces"] and "Comp. 5 (Rect.) — Extremo fin" in el["faces"] and len(el["faces"]) == 42,
+          f"element_info ofrece las caras de los componentes y sus extremos: 24 + 12 + 6 de la envolvente ({len(el['faces'])} caras)")
     e2 = api.element_info({"connection": asdict(p)})["elements"][0]
     check("Comp. 1 (Rect.) — Cara +Y" in e2["faces"], "la API entrega las caras a la interfaz")
     # compatibilidad: una placa sobre la envolvente de la seccion (nombre antiguo) sigue armandose
@@ -112,9 +115,20 @@ def ejemplo():
     check(len(p.node.members) == 1 and CATALOG.get("2XHN600X200X11X17") is not None and CATALOG.get("2XHN600X200X11X17").kind == "GEN",
           "solo 2 miembros (principal y V2) con la sección personalizada guardada en el archivo")
     m = AS.build_model(p)
-    check(not [e for e in GC.check(m) if e["sev"] == "error"] and len(m.welds) == 28, f"sin errores de geometría; 28 cordones ({len(m.welds)})")
+    check(not [e for e in GC.check(m) if e["sev"] == "error"] and len(m.welds) == 36, f"sin errores de geometría; 36 cordones: 28 de placas y 8 de la soldadura a tope de las almas ({len(m.welds)})")
+    names = sorted(x.name for x in m.parts if x.name[:3] in ("CA-", "PA-"))
+    box = {x.name: x.bbox() for x in m.parts if x.name[:3] in ("CA-", "PA-")}
+    check(names == ["CA-I", "CA-S", "PA-1", "PA-2"]
+          and all(abs((b[1][0] - b[0][0]) / MM - 500) < 0.1 for b in box.values())
+          and abs((box["CA-S"][1][1] - box["CA-S"][0][1]) / MM - 360) < 0.1 and abs((box["PA-1"][1][2] - box["PA-1"][0][2]) / MM - 400) < 0.1,
+          "2 placas de ala PL 20 × 360 × 500 (una arriba y otra abajo, sobre las dos alas) y 2 de alma PL 20 × 400 × 500 (una por alma, exteriores)")
+    bw = [w for w in m.welds if w.name.startswith("V2-S7")]
+    check(len(bw) == 8 and all(abs(float(w.p0[0])) < 1e-9 and (abs(abs(float(w.p0[1])) - 105.5 * MM) < 1e-6 or abs(abs(float(w.p0[1])) - 94.5 * MM) < 1e-6) for w in bw),
+          "soldadura a tope CJP de las dos almas: el perímetro de la sección de cada alma (11 × 566 mm) contra el extremo de la otra viga, no el contorno de toda la sección")
     v = api.verify({"connection": asdict(p)})
-    res = [c for c in v["checks"] if "resistencia" in c["title"]]
+    cjp = [c for c in v["checks"] if "CJP" in c["title"]]
+    check(len(cjp) == 2 and all(c["skip"] for c in cjp), "la CJP se anota como «se verifica por el metal base» (no se evalúa con cateto)")
+    res = [c for c in v["checks"] if "resistencia" in c["title"] and "CJP" not in c["title"]]
     check(len(res) == 12 and max(c["demand"] / c["capacity"] for c in res) < 1.0, f"soldaduras con las fuerzas de diseño (D/C máx {max(c['demand'] / c['capacity'] for c in res):.2f})")
 
 
