@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 from steelconpro.model import Project, save_book                                  # noqa: E402
 from steelconpro.conn import assembly as AS                                       # noqa: E402
 from steelconpro.conn.specs import (CT_NODE, Nodo, Member, Operation, Load, TAB_MODES, BEAM_CONNS,   # noqa: E402
-                                    OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_CONT, OP_COPE, END_LABELS)
+                                    OP_TAB, OP_DANG, OP_SEAT, OP_EP_FLUSH, OP_EP_EXT, OP_WELD, OP_CONT, OP_COPE, END_LABELS, OP_PLATE, OP_FILLET, PLATE_ROLES, PLATE_ORIENTS, PLATE_SHAPES, ATTACHES)
 
 OUT = ROOT / "ejemplos"
 HSS = "ASTM A500 Gr.C (HSS rect.)"
@@ -313,8 +313,56 @@ def v43():
     return _empalme("TP-V43", "empalme de viga soldado con cubreplacas exteriores e interiores", sp_flange="Soldada", sp_web="Soldada", sp_inner=True)
 
 
+def v44():
+    """Empalme soldado de una viga doble 2 × HN600×200×11×17 (dos vigas lado a lado, puntas de las alas unidas) armado con operaciones generales,
+    diseñado para desarrollar la capacidad de la viga (AISC 360-22): cubreplacas PL 20 × 340 × 720 con filete de 14 mm arriba y abajo, y una placa de alma
+    PL 20 × 500 × 1410 por viga en la cara exterior con filete de 12 mm en C.  Acero A572 Gr. 50 (supuesto), E70, separación de 10 mm.
+    Dos casos: A = momento completo φMn (889 kN·m por viga) con 30 % de φVn concurrente; B = cortante completo φVn (1366 kN por viga)."""
+    from steelconpro.shapes import CATALOG, make_custom, W_SHAPE
+    MM = 1 / 25.4
+    KN, KNM = 1 / 4.448222, 8.850746
+    lab = "HN600X200X11X17"
+    if CATALOG.get(lab) is None:
+        sh = make_custom(lab, W_SHAPE, 600 * MM, 200 * MM, 11 * MM, 17 * MM)
+        sh.kdes = 30 * MM
+        CATALOG.shapes[lab] = sh
+        CATALOG._reindex()
+    st = "ASTM A572 Gr.50"
+    p = Project()
+    p.ctype = CT_NODE
+    p.element = "TP-V44"
+    p.name = "Ejemplo: empalme soldado de viga doble 2xHN600x200x11x17 que desarrolla su capacidad (operaciones generales)"
+    p.u_len, p.u_force, p.u_stress, p.u_moment = "mm", "kN", "MPa", "kN·m"
+    gap, off = 10 * MM, 200 * MM
+    nd = Nodo(main_name="V1a", main_shape=lab, main_steel=st, main_el=0.0, main_az=0.0, main_end=END_LABELS[1])
+    nd.members = [Member(name="V1b", shape=lab, steel=st, az=180.0, el=0.0, off2=off, gap=-0.5),         # viga del lado izquierdo, junto a V1a
+                  Member(name="V2a", shape=lab, steel=st, az=0.0, el=0.0, gap=gap - 0.5),                # vigas del lado derecho, a 10 mm
+                  Member(name="V2b", shape=lab, steel=st, az=0.0, el=0.0, off2=off, gap=gap - 0.5)]
+    P = lambda **k: Operation(kind=OP_PLATE, member="", role=PLATE_ROLES[0], orient=PLATE_ORIENTS[0], shape=PLATE_SHAPES[0], attach=ATTACHES[2], plate_steel=st,   # noqa: E731
+                              plate_t=20 * MM, **k)
+    nd.operations = [P(name="CP-S", parent="V2a", face="Ala superior", pl_L=720 * MM, pl_W=340 * MM, pl_s=-5 * MM, pl_u=100 * MM),
+                     P(name="CP-I", parent="V2a", face="Ala inferior", pl_L=720 * MM, pl_W=340 * MM, pl_s=-5 * MM, pl_u=-100 * MM),
+                     P(name="PA-a", parent="V2a", face="Alma −", pl_L=1410 * MM, pl_W=500 * MM, pl_s=-5 * MM, pl_u=0.0),
+                     P(name="PA-b", parent="V2b", face="Alma +", pl_L=1410 * MM, pl_W=500 * MM, pl_s=-5 * MM, pl_u=0.0)]
+    for nm, fc in (("CP-S", "Ala superior"), ("CP-I", "Ala inferior")):           # fuerza a mano: la mitad de Ff = 1985 kN en el ala de cada viga
+        nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main=nm, weld_to=[["V1a", fc], ["V1b", fc], ["V2a", fc], ["V2b", fc]], weld_size=14 * MM,
+                                       weld_all=True, force_T=993.0 * KN))
+    nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main="PA-a", weld_to=[["V1a", "Alma −"], ["V2a", "Alma −"]], weld_size=12 * MM, weld_all=True,
+                                   force_V=1366.0 * KN))
+    nd.operations.append(Operation(kind=OP_FILLET, member="", weld_main="PA-b", weld_to=[["V1b", "Alma −"], ["V2b", "Alma +"]], weld_size=12 * MM, weld_all=True,
+                                   force_V=1366.0 * KN))
+    VA, MA, VB = 0.3 * 1366.0, 889.0, 1366.0
+    nd.loads = []
+    for nm in ("V2a", "V2b"):
+        nd.loads.append(Load("A: momento completo", nm, Vz=-VA * KN, My=MA * KNM))
+        nd.loads.append(Load("B: cortante completo", nm, Vz=-VB * KN))
+    nd.loads += [Load("A: momento completo", "V1b", Vz=VA * KN, My=MA * KNM), Load("B: cortante completo", "V1b", Vz=VB * KN)]   # V1b equilibra a V2b
+    p.node = nd
+    return p
+
+
 EJEMPLOS = [(f"TP-V{k:02d}", fn) for k, fn in enumerate([v01, v02, v03, v04, v05, v06, v07, v08, v09, v10, v11, v12, v13, v14, v15, v16, v17, v18, v19, v20, v21,
-                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43], 1)]
+                                                         v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33, v34, v35, v36, v37, v38, v39, v40, v41, v42, v43, v44], 1)]
 
 
 def nombre_archivo(p) -> str:

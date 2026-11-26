@@ -117,7 +117,35 @@ def columna_y_mcp():
         check(s.nd.operations[0].sp_flange == "Soldada" and C.revisar_geometria(s)["errores"] == 0, "por chat (MCP): empalme soldado con interiores, sin errores de geometría")
 
 
+def viga_doble():
+    """TP-V44: empalme soldado de viga doble 2 × HN600×200×11×17 armado con operaciones generales (placas y soldaduras entre elementos)."""
+    print("\n== Viga doble con operaciones generales (TP-V44) ==")
+    import glob
+    from steelconpro.model import load_book
+    f = glob.glob(os.path.join(ROOT, "ejemplos", "TP-V44_*.scp"))
+    check(len(f) == 1, "existe el ejemplo TP-V44")
+    if not f:
+        return
+    p = load_book(f[0])[0]
+    mdl = AS.build_model(p)
+    err = [e for e in GC.check(mdl) if e["sev"] == "error"]
+    pl = sorted(x.name for x in mdl.parts if x.name[:3] in ("CP-", "PA-"))
+    pairs = {(w.A, w.B) for w in mdl.welds}
+    check(not err and pl == ["CP-I", "CP-S", "PA-a", "PA-b"] and not [n for n in mdl.notes if "» no toca a «" in n],
+          f"cuatro vigas, 2 cubreplacas y 2 placas de alma (cara exterior), sin errores de geometría ({pl}, {len(err)} errores)")
+    check({("CP-S", b) for b in ("V1a", "V1b", "V2a", "V2b")} <= pairs and {("PA-a", "V1a"), ("PA-a", "V2a"), ("PA-b", "V1b"), ("PA-b", "V2b")} <= pairs,
+          "cada cubreplaca soldada a las cuatro vigas y cada placa de alma a las dos vigas de su lado")
+    v = api.verify({"connection": asdict(p)})
+    res = [c for c in v["checks"] if "resistencia" in c["title"]]
+    check(len(res) == 12 and max(c["demand"] / c["capacity"] for c in res) < 1.0, f"soldaduras con las fuerzas de diseño (D/C máx {max(c['demand'] / c['capacity'] for c in res):.2f})")
+    from steelconpro.conn import nodal as NOD
+    for cn, loads in NOD.cases_of(p.node):
+        b = NOD.balance(p.node, loads)
+        check(abs(b["main_local"]["Vz"]) > 1.0, f"«{cn}»: V1b equilibra a V2b y el principal toma la acción de V2a (Vz = {b['main_local']['Vz']:.0f} kip)")
+
+
 if __name__ == "__main__":
+    viga_doble()
     geometria()
     verificaciones()
     columna_y_mcp()
