@@ -758,7 +758,7 @@ def imagen(s: Session, tipo: str = "modelo", caso: int = 1, azimut: float = 50.0
         hud = sc.hud[0][1] if sc.hud else ""
         title = f"{R.case} - " + hud.replace("—", "-")
     import unicodedata                                                       # la fuente del render no tiene acentos ni «×»
-    title = "".join(ch for ch in unicodedata.normalize("NFKD", title.replace("×", "x")) if not unicodedata.combining(ch) and ord(ch) < 128)
+    title = "".join(ch for ch in unicodedata.normalize("NFKD", title.replace("×", "x").replace("Ω", "Omega ").replace("φ", "phi").replace("−", "-")) if not unicodedata.combining(ch) and ord(ch) < 128)
     im = FS.render_scene_image(sc, float(elevacion), float(azimut), (int(ancho), int(alto)), title=title, ss=2, margin=0.05)
     buf = io.BytesIO()
     im.save(buf, "PNG")
