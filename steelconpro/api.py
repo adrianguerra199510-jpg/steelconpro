@@ -948,6 +948,9 @@ def report(args) -> dict:
     fc, fw = _fem_node_checks(p)                       # resultados del analisis del modelo de placas (si esta vigente)
     res.checks += fc
     res.warnings += fw
+    from .conn import nodal as NOD
+    names = [c for c, _l in NOD.cases_of(p.node)]
+    res.shells = [((names[i] if i < len(names) else f"Caso {i + 1}"), R, case) for i, (R, case) in sorted(_node_fem(p).items())]     # malla, esfuerzos y deformadas del reporte
     figs = save_figures(p, res, tempfile.mkdtemp(prefix="scp_"))
     fmt = args.get("format", "pdf")
     path = args["path"]

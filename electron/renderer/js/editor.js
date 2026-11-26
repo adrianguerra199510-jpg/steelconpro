@@ -1066,7 +1066,10 @@ async function exportReport(format) {
   const f = await native.saveFile(`${c.name || 'conexion'}_${c.element || ''}.${format}`, [{ name: format === 'pdf' ? 'PDF' : 'Word', extensions: [format] }]);
   if (!f) return;
   const t = toast('Generando informe…', 'info', 60000);
-  try { await call('report', { connection: c, path: f, format }); t.remove(); toast('Informe generado', 'ok'); native.showItem(f); } catch (e) { t.remove(); errorBox(e); }
+  try {
+    await call('report', { connection: c, path: f, format }); t.remove(); toast('Informe generado', 'ok'); native.showItem(f);
+    if (!E.femDone) toast('El informe no incluye la malla, los esfuerzos ni las deformaciones: presione «Calcular» (análisis por elementos finitos) y genere el informe de nuevo.', 'info', 10000);
+  } catch (e) { t.remove(); errorBox(e); }
 }
 async function exportStep() {
   const f = await native.saveFile(`${E.conn().element || 'conexion'}.step`, [{ name: 'STEP', extensions: ['step', 'stp'] }]);
